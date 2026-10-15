@@ -70,6 +70,8 @@ class ImportSupplierPricesJob implements ShouldQueue
                 $groups = app(\App\Services\Catalog\SupplyGroupService::class);
                 $groups->refreshRegions();
                 $groups->rebuild();
+                // Подписки пула QuoteParts: новые подходящие позиции — в пул, изменившиеся группы — в QuoteParts.
+                \App\Jobs\QuoteParts\SyncQuotePartsPoolJob::dispatch();
             } catch (Throwable $e) {
                 Log::warning('Supply groups rebuild failed', ['import_id' => $this->importId, 'error' => $e->getMessage()]);
             }

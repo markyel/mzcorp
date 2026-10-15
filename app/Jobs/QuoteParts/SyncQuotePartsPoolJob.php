@@ -6,7 +6,7 @@ use App\Services\QuoteParts\QuotePartsClient;
 use App\Services\QuoteParts\QuotePartsPoolService;
 use App\Services\QuoteParts\QuotePartsSupplierService;
 use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -17,8 +17,10 @@ use Illuminate\Support\Facades\Log;
 /**
  * Передать в QuoteParts новые позиции пула и досылать изменившиеся.
  * Один прогон за раз: lock дольше retry_after очереди (90 с).
+ * Сначала подписки пула (правила «группа + фильтры») добавляют подходящие позиции; передача
+ * идёт порциями не дольше SYNC_BUDGET_SECONDS — если осталось, следующий прогон ставится сам.
  */
-class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUnique
+class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUniqueUntilProcessing
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -27,6 +29,9 @@ class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUnique
     public int $timeout = 600;
 
     public int $uniqueFor = 900;
+
+    /** Сколько секунд передавать за прогон (таймаут задачи — 600). */
+    public const SYNC_BUDGET_SECONDS = 420;
 
     /** @return list<int> */
     public function backoff(): array
@@ -47,8 +52,22 @@ class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUnique
             return;
         }
 
+        $more = false;
         try {
-            $stats = $pool->sync();
+            try {
+                $added = app(\App\Services\QuoteParts\QuotePartsPoolRuleService::class)->apply();
+                if ($added > 0) {
+                    Log::info('QuoteParts pool rules added items', ['count' => $added]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('QuoteParts pool rules failed', ['error' => $e->getMessage()]);
+            }
+
+            $stats = $pool->sync(self::SYNC_BUDGET_SECONDS);
+            $more = $stats['more'];
+            if ($more) {
+                return; // остальное — следующим прогоном (ниже, после снятия блокировки)
+            }
             if ($stats['sent'] > 0 || $stats['failed'] > 0) {
                 Log::info('QuoteParts pool synced', $stats);
             }
@@ -67,6 +86,9 @@ class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUnique
             }
         } finally {
             $lock->release();
+            if ($more) {
+                self::dispatch()->delay(now()->addSeconds(15));
+            }
         }
     }
 }

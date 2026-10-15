@@ -207,6 +207,7 @@
     @endif
 
     @if($tab === 'pool')
+        <livewire:quote-parts.pool-rules />
         @php $pickedPool = count(array_filter($selectedPool)); @endphp
         <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
             <button type="button" wire:click="refreshStatuses" class="btn btn-sm">Обновить статусы</button>
@@ -261,6 +262,12 @@
                     </tbody>
                 </table>
             </div>
+            @if($this->poolItems->count() >= $poolShown && array_sum($this->poolCounts) > $poolShown)
+                <div class="px-3 py-2 text-[12.5px] flex items-center gap-2">
+                    <span class="text-fg-3">Показано {{ $poolShown }} из {{ number_format(array_sum($this->poolCounts), 0, ',', ' ') }} — найдите позицию поиском или</span>
+                    <button type="button" wire:click="showMorePool" class="btn btn-xs">показать ещё 200</button>
+                </div>
+            @endif
         </div>
     @endif
 </div>

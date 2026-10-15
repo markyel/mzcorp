@@ -29,6 +29,9 @@ class Index extends Component
 
     public int $perPage = self::PER_PAGE;
 
+    /** Сколько позиций пула показано (пул бывает в тысячи позиций — частями). */
+    public int $poolShown = 200;
+
     /** @var array<int|string, bool> catalog_item_id => отмечено (вкладка кандидатов) */
     public array $selected = [];
 
@@ -75,7 +78,16 @@ class Index extends Component
     #[Computed]
     public function poolByCatalogId(): array
     {
-        return QuotePartsPoolItem::query()->inPool()->get()->keyBy('catalog_item_id')->all();
+        // Только для показанных кандидатов: весь пул (тысячи позиций) не грузим.
+        $cids = array_column(array_slice($this->candidates, 0, $this->perPage), 'cid');
+
+        return QuotePartsPoolItem::query()->inPool()->whereIn('catalog_item_id', $cids)->get()->keyBy('catalog_item_id')->all();
+    }
+
+    public function showMorePool(): void
+    {
+        $this->poolShown += 200;
+        unset($this->poolItems);
     }
 
     #[Computed]
@@ -89,6 +101,7 @@ class Index extends Component
                 ->where('sku', 'ilike', '%'.$search.'%')->orWhere('name', 'ilike', '%'.$search.'%')))
             ->orderByRaw("case status when 'paused' then 0 when 'error' then 1 when 'pending' then 2 else 3 end")
             ->orderBy('sku')
+            ->limit($this->poolShown)
             ->get();
     }
 

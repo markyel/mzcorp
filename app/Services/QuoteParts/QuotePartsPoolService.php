@@ -110,20 +110,35 @@ class QuotePartsPoolService
     }
 
     /**
-     * Передать новые позиции пула и досылать изменившиеся.
+     * Передать новые позиции пула и досылать изменившиеся. Сначала ждущие передачи и с
+     * ошибкой, потом остальные (сверка по hash). С бюджетом времени прогон останавливается
+     * между порциями и говорит «more» — большой пул (группа в тысячи позиций) уходит за
+     * несколько прогонов, не упираясь в таймаут очереди.
      *
-     * @return array{sent:int, unchanged:int, failed:int, paused:int}
+     * @return array{sent:int, unchanged:int, failed:int, paused:int, more:bool}
      */
-    public function sync(): array
+    public function sync(int $budgetSeconds = 0): array
     {
-        $stats = ['sent' => 0, 'unchanged' => 0, 'failed' => 0, 'paused' => 0];
+        $stats = ['sent' => 0, 'unchanged' => 0, 'failed' => 0, 'paused' => 0, 'more' => false];
+        $started = microtime(true);
+        $batch = max(1, (int) config('services.quoteparts.batch', 200));
+        $step = function (Collection $rows) use (&$stats, $started, $budgetSeconds) {
+            if ($budgetSeconds > 0 && microtime(true) - $started > $budgetSeconds) {
+                $stats['more'] = true;
 
-        QuotePartsPoolItem::query()->inPool()->with('catalogItem')
-            ->chunkById(max(1, (int) config('services.quoteparts.batch', 200)), function (Collection $rows) use (&$stats) {
-                $this->syncChunk($rows, $stats);
-            });
+                return false;
+            }
+            $this->syncChunk($rows, $stats);
+        };
 
-        $this->refreshPausedStatuses();
+        $waiting = [QuotePartsPoolItem::STATUS_PENDING, QuotePartsPoolItem::STATUS_ERROR];
+        QuotePartsPoolItem::query()->inPool()->whereIn('status', $waiting)->with('catalogItem')->chunkById($batch, $step);
+        if (! $stats['more']) {
+            QuotePartsPoolItem::query()->inPool()->whereNotIn('status', $waiting)->with('catalogItem')->chunkById($batch, $step);
+        }
+        if (! $stats['more']) {
+            $this->refreshPausedStatuses();
+        }
 
         return $stats;
     }

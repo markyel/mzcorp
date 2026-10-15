@@ -42,6 +42,8 @@ class QuotePartsPoolItem extends Model
         'pause_reasons',
         'added_by_user_id',
         'removed_at',
+        // manual — выбрана руками, rule — пришла по подписке (QuotePartsPoolRule).
+        'source',
     ];
 
     protected $casts = [
