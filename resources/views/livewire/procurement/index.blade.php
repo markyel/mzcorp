@@ -370,7 +370,7 @@
                         @if($this->isCardOpen($p['cid'], 't') && ($card = $this->productCards[$p['cid']] ?? null))
                             <tr class="border-b border-border-subtle bg-surface-2">
                                 <td colspan="11" class="px-4 py-2.5">
-                                    @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false])
+                                    @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'withSupplyHistory' => false])
                                     @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
                                 </td>
                             </tr>
@@ -577,7 +577,7 @@
                             @if($this->isCardOpen($p['cid'], 't') && ($card = $this->productCards[$p['cid']] ?? null))
                                 <tr wire:key="ref-card-{{ $p['cid'] }}" class="border-b border-border-subtle bg-surface-2">
                                     <td colspan="9" class="px-4 py-2.5">
-                                        @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false])
+                                        @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'withSupplyHistory' => false])
                                         @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
                                     </td>
                                 </tr>
@@ -1023,7 +1023,7 @@
                                         </button>
                                         @if($this->isCardOpen($r['cid'], 'p') && ($card = $this->productCards[$r['cid']] ?? null))
                                             <div class="mt-2 overflow-x-auto">
-                                                @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false])
+                                                @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'withSupplyHistory' => false])
                                                 @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
                                             </div>
                                         @endif

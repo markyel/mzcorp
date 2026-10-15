@@ -4,7 +4,7 @@
     Ожидает: $history — array{asked, onec, asked_suppliers, quoted_suppliers}|null
 --}}
 @php
-    $h = $history ?? ['asked' => [], 'onec' => [], 'asked_suppliers' => 0, 'quoted_suppliers' => 0];
+    $h = ($history ?? []) + ['asked' => [], 'onec' => [], 'quoteparts' => [], 'asked_suppliers' => 0, 'quoted_suppliers' => 0];
     $money = fn ($v) => rtrim(rtrim(number_format((float) $v, 2, ',', ' '), '0'), ',');
     $groupsChips = fn (array $g) => implode('', array_map(fn ($n) => '<span class="chip chip-neutral text-[10px] ml-1">'.e($n).'</span>', $g));
 @endphp
@@ -26,6 +26,37 @@
                     <span class="text-fg-2" title="{{ $p['supplier'] }}">{{ \Illuminate\Support\Str::limit($p['supplier'], 90) }}</span>{!! $groupsChips($p['groups']) !!}
                 </div>
             @endforeach
+        </div>
+    @endif
+
+    {{-- Предложения через QuoteParts: все варианты (оригинал, аналог…) и прежние цены. --}}
+    @if($h['quoteparts'] !== [])
+        <div class="mb-2 overflow-x-auto">
+            <div class="text-[10px] uppercase tracking-wider text-fg-4 mb-0.5">Через QuoteParts</div>
+            <table class="w-full text-[12px]">
+                <tbody>
+                    @foreach($h['quoteparts'] as $q)
+                        <tr @class(['border-t border-border-subtle align-baseline', 'opacity-60' => ! $q['current']])>
+                            <td class="py-1 pr-2 text-fg-1">{{ \Illuminate\Support\Str::limit($q['supplier'], 40) }}</td>
+                            <td class="py-1 px-2 text-fg-3 whitespace-nowrap">{{ $q['at']?->format('d.m.Y') }} · {{ $q['source'] }}</td>
+                            <td class="py-1 px-2 whitespace-nowrap">
+                                <span class="mono tnum font-semibold {{ $q['current'] ? 'text-emerald-700' : 'text-fg-2' }}">{{ $q['price'] !== null ? $money($q['price']).' '.$q['currency'] : '—' }}</span>
+                                @if(count($q['tiers']) > 1)<span class="text-fg-4">· {{ collect($q['tiers'])->skip(1)->map(fn ($t) => 'от '.(float) $t['min_qty'].': '.$money($t['price']))->implode(', ') }}</span>@endif
+                                @if($q['lead_time_days'] !== null)<span class="text-fg-4">· {{ $q['lead_time_days'] }} дн.</span>@endif
+                            </td>
+                            <td class="py-1 px-2">
+                                @if($q['kind'] !== 'original')
+                                    <span class="chip chip-sky text-[10px]">{{ \App\Models\QuotePartsOffer::kindLabel($q['kind']) }}</span>@if($q['product'] !== '') <span class="mono text-fg-3">{{ $q['product'] }}</span>@endif
+                                    <span class="chip {{ $q['review'] === 'accepted' ? 'chip-ok' : ($q['review'] === 'rejected' ? 'chip-neutral' : 'chip-warn') }} text-[10px]">{{ ['accepted' => 'принято к закупке', 'rejected' => 'отклонено'][$q['review']] ?? 'на разборе' }}</span>
+                                @endif
+                                @if($q['note'])<span class="text-fg-3">«{{ \Illuminate\Support\Str::limit($q['note'], 60) }}»</span>@endif
+                                @for($i = 0; $i < $q['photos']; $i++)<a href="{{ route('quoteparts.offer-photo', [$q['remote_id'], $i]) }}" target="_blank" class="text-sky-700 text-[11px]">📷</a>@endfor
+                            </td>
+                            <td class="py-1 pl-2 text-fg-4 whitespace-nowrap">{{ $q['status'] }}{{ $q['valid_until'] ? ' · до '.$q['valid_until']->format('d.m.Y') : '' }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
         </div>
     @endif
 
@@ -70,7 +101,7 @@
                 </tbody>
             </table>
         </div>
-    @elseif($h['onec'] === [])
+    @elseif($h['onec'] === [] && $h['quoteparts'] === [])
         <p class="text-[12px] text-fg-3">По этой позиции поставщиков ещё не спрашивали, закупок в 1С нет.</p>
     @else
         <p class="text-[12px] text-fg-3">Через систему поставщиков по этой позиции ещё не спрашивали.</p>

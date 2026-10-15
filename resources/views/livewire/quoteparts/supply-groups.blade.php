@@ -1,5 +1,5 @@
 <div class="space-y-3">
-    @php $groups = \App\Enums\SupplyGroup::cases(); @endphp
+    @php $groups = \App\Models\SupplyGroup::ordered(); @endphp
     <div class="ds-card">
         <div class="ds-card-header">
             <h3>Группы товаров</h3>
@@ -8,8 +8,8 @@
         <div class="ds-card-body text-[13px] space-y-3">
             <div class="flex flex-wrap items-center gap-6">
                 @foreach($groups as $g)
-                    <button type="button" wire:click="$set('group', '{{ $group === $g->value ? '' : $g->value }}')" @class(['text-left rounded-md px-2 py-1 hover:bg-hover', 'bg-[var(--bg-selected)] ring-1 ring-sky-300' => $group === $g->value]) title="Показать позиции группы">
-                        <span class="text-[20px] font-semibold mono">{{ number_format($groupCounts[$g->value] ?? 0, 0, ',', ' ') }}</span> <span class="text-fg-3">позиций · {{ $g->label() }}</span> <span class="text-sky-700 text-[12px]">{{ $group === $g->value ? 'скрыть' : 'показать' }}</span>
+                    <button type="button" wire:click="$set('group', '{{ $group === $g->code ? '' : $g->code }}')" @class(['text-left rounded-md px-2 py-1 hover:bg-hover', 'bg-[var(--bg-selected)] ring-1 ring-sky-300' => $group === $g->code]) title="Показать позиции группы">
+                        <span class="text-[20px] font-semibold mono">{{ number_format($groupCounts[$g->code] ?? 0, 0, ',', ' ') }}</span> <span class="text-fg-3">позиций · {{ $g->name }}</span> <span class="text-sky-700 text-[12px]">{{ $group === $g->code ? 'скрыть' : 'показать' }}</span>
                     </button>
                 @endforeach
                 <button type="button" wire:click="$set('group', '{{ $group === 'none' ? '' : 'none' }}')" @class(['text-left rounded-md px-2 py-1 hover:bg-hover text-fg-3', 'bg-[var(--bg-selected)] ring-1 ring-sky-300' => $group === 'none'])>без группы <span class="text-sky-700 text-[12px]">{{ $group === 'none' ? 'скрыть' : 'показать' }}</span></button>
@@ -25,9 +25,50 @@
         </div>
     </div>
 
+    {{-- Справочник групп: добавить, переименовать, правило «не если в группе …», удалить пустую. --}}
+    <div class="ds-card">
+        <div class="ds-card-header"><h3>Справочник групп</h3><span class="text-[12px] text-fg-3 ml-2">группа — она же регион поставщиков 1С; позиция может быть в нескольких группах</span></div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-[12.5px]">
+                <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                    <tr><th class="text-left px-3 py-2">Название</th><th class="text-left px-3 py-2">Код</th><th class="text-right px-3 py-2">Позиций</th><th class="text-left px-3 py-2">Не включать автоматически, если позиция в группе</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach($groups as $g)
+                        <tr wire:key="sg-{{ $g->id }}" class="border-b border-border-subtle">
+                            <td class="px-3 py-1.5"><input type="text" value="{{ $g->name }}" maxlength="64" wire:change="renameGroup({{ $g->id }}, $event.target.value)" class="h-[28px] w-48 px-2 border border-border rounded-md bg-surface text-[12.5px]"></td>
+                            <td class="px-3 py-1.5 mono text-fg-3">{{ $g->code }}</td>
+                            <td class="px-3 py-1.5 text-right mono">{{ number_format($groupCounts[$g->code] ?? 0, 0, ',', ' ') }}</td>
+                            <td class="px-3 py-1.5">
+                                <select wire:change="setExclude({{ $g->id }}, $event.target.value)" class="h-[28px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px]">
+                                    <option value="" @selected($g->exclude_if_code === null)>— включать всегда</option>
+                                    @foreach($groups->where('id', '!=', $g->id) as $o)<option value="{{ $o->code }}" @selected($g->exclude_if_code === $o->code)>{{ $o->name }}</option>@endforeach
+                                </select>
+                            </td>
+                            <td class="px-3 py-1.5 text-right">
+                                @if(empty($groupCounts[$g->code]) && empty($regionCounts[$g->code]))
+                                    <button type="button" wire:click="deleteGroup({{ $g->id }})" wire:confirm="Удалить группу «{{ $g->name }}»?" class="text-fg-4 hover:text-red-700 text-[11.5px]">удалить</button>
+                                @endif
+                            </td>
+                        </tr>
+                    @endforeach
+                    <tr>
+                        <td class="px-3 py-2" colspan="5">
+                            <form wire:submit="addGroup" class="flex items-center gap-2">
+                                <input type="text" wire:model="newGroup" maxlength="64" placeholder="Новая группа, например «Турция»" class="h-[28px] w-64 px-2 border border-border rounded-md bg-surface text-[12.5px]">
+                                <button type="submit" class="btn btn-xs">Добавить группу</button>
+                                @error('newGroup')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror
+                            </form>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     {{-- Содержимое группы. --}}
     @if($groupItems !== null)
-        @php $label = $group === 'none' ? 'Без группы' : (\App\Enums\SupplyGroup::tryFrom($group)?->label() ?? $group); @endphp
+        @php $label = $group === 'none' ? 'Без группы' : (\App\Models\SupplyGroup::label($group) ?? $group); @endphp
         <div class="ds-card">
             <div class="ds-card-header flex flex-wrap items-center gap-2">
                 <h3>Позиции группы «{{ $label }}»</h3>
@@ -44,23 +85,31 @@
                     <tbody>
                         @forelse($groupItems as $it)
                             @php $rows = collect($itemGroupsMap[$it->id] ?? []); $sup = $itemSuppliers->get($it->id, collect()); @endphp
-                            <tr wire:key="gi-{{ $it->id }}" class="border-b border-border-subtle align-top">
-                                <td class="px-3 py-1.5 mono">{{ $it->sku }}</td>
-                                <td class="px-3 py-1.5 text-fg-1">{{ \Illuminate\Support\Str::limit($it->name, 80) }}</td>
+                            @php $isOpen = in_array($it->id, $openItems, true); @endphp
+                            <tr wire:key="gi-{{ $it->id }}" @class(['border-b border-border-subtle align-top', 'bg-[var(--bg-selected)]' => $isOpen])>
+                                <td class="px-3 py-1.5 mono"><button type="button" wire:click="toggleItem({{ $it->id }})" class="text-left hover:text-sky-700"><span class="text-fg-4 text-[10px] mr-0.5">{{ $isOpen ? '▾' : '▸' }}</span>{{ $it->sku }}</button></td>
+                                <td class="px-3 py-1.5 text-fg-1"><button type="button" wire:click="toggleItem({{ $it->id }})" class="text-left hover:text-sky-700" title="Карточка товара и история предложений поставщиков">{{ \Illuminate\Support\Str::limit($it->name, 80) }}</button></td>
                                 <td class="px-3 py-1.5 text-fg-3">{{ $it->brand ?: '—' }}@if($it->brand_article) <span class="mono">{{ $it->brand_article }}</span>@endif</td>
                                 <td class="px-3 py-1.5 whitespace-nowrap">
-                                    @foreach($rows as $gr)<span class="chip chip-sky text-[10.5px] mr-1">{{ \App\Enums\SupplyGroup::tryFrom($gr->group_code)?->label() ?? $gr->group_code }}</span>@endforeach
+                                    @foreach($rows as $gr)<span class="chip chip-sky text-[10.5px] mr-1">{{ \App\Models\SupplyGroup::label($gr->group_code) ?? $gr->group_code }}</span>@endforeach
                                     @if($rows->contains('source', 'manual'))<span class="chip chip-neutral text-[10px]">вручную</span>@endif
                                 </td>
                                 <td class="px-3 py-1.5 text-fg-2 text-[12px]">
                                     @forelse($sup as $sp)
-                                        <div>{{ \Illuminate\Support\Str::limit($sp->supplier_name_1c, 60) }} <span class="text-fg-4">· {{ \App\Enums\SupplyGroup::tryFrom((string) $sp->region)?->label() ?? 'без региона' }}</span></div>
+                                        <div>{{ \Illuminate\Support\Str::limit($sp->supplier_name_1c, 60) }} <span class="text-fg-4">· {{ \App\Models\SupplyGroup::label($sp->region) ?? 'без региона' }}</span></div>
                                     @empty
                                         <span class="text-fg-4">нет закупок в 1С</span>
                                     @endforelse
                                 </td>
                                 <td class="px-3 py-1.5 text-right"><button type="button" wire:click="editItem('{{ $it->sku }}')" class="text-fg-4 hover:text-fg-2 text-[11px]">изменить</button></td>
                             </tr>
+                            @if($isOpen && ($cat = $openCards->get($it->id)))
+                                <tr wire:key="gi-card-{{ $it->id }}" class="border-b border-border-subtle bg-surface-2">
+                                    <td colspan="6" class="px-4 py-2.5">
+                                        @include('livewire.catalog._catalog-item-detail', ['cat' => $cat, 'pc' => $openPcs->get($it->id), 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'supplyHistoryOpen' => true])
+                                    </td>
+                                </tr>
+                            @endif
                         @empty
                             <tr><td colspan="6" class="px-3 py-6 text-center text-fg-3">Нет позиций.</td></tr>
                         @endforelse
@@ -77,7 +126,7 @@
             <div class="flex flex-wrap gap-1 ml-2">
                 <button type="button" wire:click="$set('region', '')" class="btn btn-sm {{ $region === '' ? 'btn-primary' : '' }}">Все {{ array_sum($regionCounts) }}</button>
                 @foreach($groups as $g)
-                    <button type="button" wire:click="$set('region', '{{ $g->value }}')" class="btn btn-sm {{ $region === $g->value ? 'btn-primary' : '' }}">{{ $g->label() }} {{ $regionCounts[$g->value] ?? 0 }}</button>
+                    <button type="button" wire:click="$set('region', '{{ $g->code }}')" class="btn btn-sm {{ $region === $g->code ? 'btn-primary' : '' }}">{{ $g->name }} {{ $regionCounts[$g->code] ?? 0 }}</button>
                 @endforeach
                 <button type="button" wire:click="$set('region', 'none')" class="btn btn-sm {{ $region === 'none' ? 'btn-primary' : '' }}">Без региона {{ $regionCounts['none'] ?? 0 }}</button>
             </div>
@@ -124,7 +173,7 @@
                                 <div class="flex items-center gap-2">
                                     <select wire:change="setRegion({{ $s->id }}, $event.target.value)" class="h-[28px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px]">
                                         <option value="" @selected($s->region === null)>—</option>
-                                        @foreach($groups as $g)<option value="{{ $g->value }}" @selected($s->region === $g->value)>{{ $g->label() }}</option>@endforeach
+                                        @foreach($groups as $g)<option value="{{ $g->code }}" @selected($s->region === $g->code)>{{ $g->name }}</option>@endforeach
                                     </select>
                                     @if($s->source === 'manual')<span class="chip chip-neutral text-[10px]" title="Задано руками — пересчёт не меняет">вручную</span>@endif
                                 </div>
@@ -151,7 +200,7 @@
                 <div class="flex flex-wrap items-center gap-3">
                     <span class="mono">{{ $item->sku }}</span> <span class="text-fg-2">{{ $item->name }}</span>
                     @foreach($groups as $g)
-                        <label class="inline-flex items-center gap-1"><input type="checkbox" wire:model="itemGroups" value="{{ $g->value }}"> {{ $g->label() }}</label>
+                        <label class="inline-flex items-center gap-1"><input type="checkbox" wire:model="itemGroups" value="{{ $g->code }}"> {{ $g->name }}</label>
                     @endforeach
                     <button type="button" wire:click="saveItemGroups" class="btn btn-sm btn-primary">Сохранить</button>
                     <span class="text-fg-4 text-[12px]">{{ $itemSource === 'manual' ? 'задано вручную' : 'автоматически' }} · снимите все галочки — группы снова посчитаются автоматически</span>

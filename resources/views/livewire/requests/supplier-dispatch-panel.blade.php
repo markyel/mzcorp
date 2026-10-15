@@ -233,7 +233,7 @@
                         @if($it['catalog_item_id'] && in_array($it['catalog_item_id'], $openCards, true) && ($card = $this->productCards[$it['catalog_item_id']] ?? null))
                             <tr class="border-b border-border-subtle bg-surface-2" wire:key="card-{{ $it['id'] }}">
                                 <td colspan="5" class="px-4 py-2.5">
-                                    @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false])
+                                    @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'withSupplyHistory' => false])
                                     @include('livewire.suppliers._catalog-supplier-history', ['history' => $card['history']])
                                 </td>
                             </tr>

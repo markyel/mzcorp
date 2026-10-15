@@ -34,11 +34,14 @@ class SupplyGroupServiceTest extends TestCase
 
     public function test_groups_of_an_item_by_its_suppliers_regions(): void
     {
-        $this->assertSame(['cn'], SupplyGroupService::groupsOf(['cn']));
-        $this->assertSame(['cn', 'ru'], SupplyGroupService::groupsOf(['ru', 'cn']));
+        $rules = ['cn' => null, 'ru' => null, 'eu' => 'cn'];
+        $this->assertSame(['cn'], SupplyGroupService::groupsOf(['cn'], $rules));
+        $this->assertSame(['cn', 'ru'], SupplyGroupService::groupsOf(['ru', 'cn'], $rules));
         // Europe — only what is imported from Europe and not from China.
-        $this->assertSame(['eu'], SupplyGroupService::groupsOf(['eu']));
-        $this->assertSame(['ru', 'eu'], SupplyGroupService::groupsOf(['eu', 'ru']));
-        $this->assertSame(['cn'], SupplyGroupService::groupsOf(['eu', 'cn']));
+        $this->assertSame(['eu'], SupplyGroupService::groupsOf(['eu'], $rules));
+        $this->assertSame(['ru', 'eu'], SupplyGroupService::groupsOf(['eu', 'ru'], $rules));
+        $this->assertSame(['cn'], SupplyGroupService::groupsOf(['eu', 'cn'], $rules));
+        // A new group without a rule: whenever bought from its region.
+        $this->assertSame(['cn', 'tr'], SupplyGroupService::groupsOf(['tr', 'cn'], $rules + ['tr' => null]));
     }
 }

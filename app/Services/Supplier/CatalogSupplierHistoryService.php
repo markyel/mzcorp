@@ -9,7 +9,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * История поставщиков по позиции каталога: кого и когда мы спрашивали, кто
- * дал цену или отказал, плюс первая и последняя закупка из 1С. Показывается
+ * дал цену или отказал, предложения через QuoteParts (все варианты и прежние
+ * цены), плюс первая и последняя закупка из 1С. Показывается
  * в развёрнутой карточке товара на странице снабжения и в запросе
  * поставщикам по заявке.
  *
@@ -58,7 +59,7 @@ class CatalogSupplierHistoryService
 
         $out = [];
         foreach ($catalogIds as $id) {
-            $out[$id] = ['asked' => [], 'onec' => [], 'asked_suppliers' => 0, 'quoted_suppliers' => 0];
+            $out[$id] = ['asked' => [], 'onec' => [], 'quoteparts' => [], 'asked_suppliers' => 0, 'quoted_suppliers' => 0];
         }
 
         $askedBy = [];
@@ -104,6 +105,35 @@ class CatalogSupplierHistoryService
                 'priced_at' => $p->priced_at,
                 'price' => (float) $p->price,
                 'currency' => $p->currency,
+            ];
+        }
+
+        // QuoteParts: ответы на запросы, цены из кабинета и прайсов — с прежними (вытесненными) ценами.
+        $statuses = ['active' => 'действует', 'expiring' => 'скоро истекает', 'expired' => 'истекла', 'outdated' => 'карточка изменилась'];
+        $sources = ['email' => 'письмо', 'form' => 'форма запроса', 'cabinet' => 'кабинет', 'price_list' => 'прайс', 'api' => 'API'];
+        foreach (\App\Models\QuotePartsOffer::query()->whereIn('catalog_item_id', $catalogIds)->orderByDesc('remote_updated_at')->orderByDesc('id')->get() as $o) {
+            $cid = (int) $o->catalog_item_id;
+            if (count($out[$cid]['quoteparts']) >= 40) {
+                continue;
+            }
+            $out[$cid]['quoteparts'][] = [
+                'supplier' => (string) ($o->supplier_name ?: $o->supplier_key),
+                'key' => $o->supplier_key,
+                'at' => $o->remote_updated_at ?? $o->created_at,
+                'kind' => $o->kind ?? 'original',
+                'product' => trim(($o->brand ?? '').' '.($o->part_number ?? '')),
+                'price' => $o->price !== null ? (float) $o->price : null,
+                'currency' => $o->currency,
+                'tiers' => (array) ($o->tiers ?? []),
+                'lead_time_days' => $o->lead_time_days,
+                'valid_until' => $o->valid_until,
+                'status' => $o->superseded ? 'заменена новой ценой' : ($statuses[$o->status] ?? $o->status),
+                'current' => ! $o->superseded && in_array($o->status, ['active', 'expiring'], true),
+                'review' => $o->review_status,
+                'source' => $sources[$o->source_type] ?? $o->source_type,
+                'note' => $o->note,
+                'photos' => (int) $o->photos,
+                'remote_id' => $o->remote_id,
             ];
         }
 

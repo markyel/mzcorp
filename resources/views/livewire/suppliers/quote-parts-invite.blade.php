@@ -28,8 +28,8 @@
             {{-- Какие группы товаров поставщик видит в кабинете. --}}
             <div class="flex flex-wrap items-center gap-3 text-[12.5px]">
                 <span class="text-fg-3">Видит группы товаров:</span>
-                @foreach(\App\Enums\SupplyGroup::cases() as $g)
-                    <label class="inline-flex items-center gap-1"><input type="checkbox" wire:model="groups" value="{{ $g->value }}" class="w-4 h-4 accent-sky-600"> {{ $g->label() }}</label>
+                @foreach(\App\Models\SupplyGroup::ordered() as $g)
+                    <label class="inline-flex items-center gap-1"><input type="checkbox" wire:model="groups" value="{{ $g->code }}" class="w-4 h-4 accent-sky-600"> {{ $g->name }}</label>
                 @endforeach
                 <button type="button" wire:click="saveGroups" class="btn btn-xs">Сохранить</button>
                 <span class="text-fg-4">ничего не отмечено — все группы</span>
@@ -150,8 +150,8 @@
 
             <div class="flex flex-wrap items-center gap-3 text-[12.5px]">
                 <span class="text-fg-3">Видит группы товаров:</span>
-                @foreach(\App\Enums\SupplyGroup::cases() as $g)
-                    <label class="inline-flex items-center gap-1"><input type="checkbox" wire:model="groups" value="{{ $g->value }}" class="w-4 h-4 accent-sky-600"> {{ $g->label() }}</label>
+                @foreach(\App\Models\SupplyGroup::ordered() as $g)
+                    <label class="inline-flex items-center gap-1"><input type="checkbox" wire:model="groups" value="{{ $g->code }}" class="w-4 h-4 accent-sky-600"> {{ $g->name }}</label>
                 @endforeach
                 <span class="text-fg-4">— по умолчанию регион поставщика по «Закупкам 1С»; ничего не отмечено — все группы</span>
             </div>

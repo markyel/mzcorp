@@ -49,6 +49,44 @@ class SupplierChoiceService
     }
 
     /**
+     * Из кого можно выбрать: текущие цены позиции, годные для закупки — свежий ответ каждого
+     * поставщика на рассылку (за год) и действующие предложения QuoteParts (оригинал или
+     * отклонение, принятое к закупке).
+     *
+     * @return list<array{key:string, supplier:string, price:?float, currency:?string, source:string, ref:int, variant:?string, at:?\Illuminate\Support\Carbon}>
+     */
+    public function currentOffers(int $catalogItemId): array
+    {
+        $out = [];
+        $mail = \Illuminate\Support\Facades\DB::table('supplier_offers as so')
+            ->join('supplier_inquiry_items as sii', 'sii.id', '=', 'so.supplier_inquiry_item_id')
+            ->join('supplier_inquiries as si', 'si.id', '=', 'sii.supplier_inquiry_id')
+            ->leftJoin('request_items as ri', 'ri.id', '=', 'sii.request_item_id')
+            ->where(\Illuminate\Support\Facades\DB::raw('coalesce(sii.catalog_item_id, ri.catalog_item_id)'), $catalogItemId)
+            ->where('so.outcome', 'quoted')->whereNotNull('so.price')->where('so.created_at', '>=', now()->subYear())
+            ->orderBy('so.id')->get(['so.id', 'so.price', 'so.currency', 'so.created_at', 'si.supplier_email', 'si.supplier_name']);
+        $keys = self::keysByEmail($mail->pluck('supplier_email'));
+        foreach ($mail as $m) {
+            $key = $keys[mb_strtolower(trim((string) $m->supplier_email))] ?? null;
+            if ($key !== null) {
+                $out[$key] = ['key' => $key, 'supplier' => (string) ($m->supplier_name ?: $m->supplier_email), 'price' => (float) $m->price,
+                    'currency' => $m->currency, 'source' => 'email', 'ref' => (int) $m->id, 'variant' => null, 'at' => \Illuminate\Support\Carbon::parse($m->created_at)];
+            }
+        }
+        foreach (\App\Models\QuotePartsOffer::query()->where('catalog_item_id', $catalogItemId)->where('superseded', false)
+            ->whereIn('status', ['active', 'expiring'])->whereNotNull('supplier_key')->orderBy('remote_updated_at')->get() as $o) {
+            if (! $o->countsAsItemPrice()) {
+                continue;
+            }
+            $out[$o->supplier_key] = ['key' => $o->supplier_key, 'supplier' => (string) ($o->supplier_name ?: $o->supplier_key), 'price' => $o->price !== null ? (float) $o->price : null,
+                'currency' => $o->currency, 'source' => 'quoteparts', 'ref' => (int) $o->id,
+                'variant' => ($o->kind ?? 'original') !== 'original' ? \App\Models\QuotePartsOffer::kindLabel($o->kind) : null, 'at' => $o->remote_updated_at];
+        }
+
+        return array_values($out);
+    }
+
+    /**
      * Ключи поставщиков по адресам писем (ответы старой рассылки).
      *
      * @param  iterable<string>  $emails

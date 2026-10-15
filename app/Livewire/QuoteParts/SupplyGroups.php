@@ -2,7 +2,7 @@
 
 namespace App\Livewire\QuoteParts;
 
-use App\Enums\SupplyGroup;
+use App\Models\SupplyGroup;
 use App\Jobs\QuoteParts\SyncQuotePartsPoolJob;
 use App\Models\CatalogItem;
 use App\Services\Catalog\SupplyGroupService;
@@ -33,6 +33,12 @@ class SupplyGroups extends Component
 
     #[Url(as: 'gq', except: '')]
     public string $groupSearch = '';
+
+    /** @var list<int> раскрытые позиции списка группы (как в каталоге) */
+    public array $openItems = [];
+
+    /** Название новой группы. */
+    public string $newGroup = '';
 
     /** M-артикул позиции, чьи группы правим руками. */
     public string $sku = '';
@@ -90,13 +96,75 @@ class SupplyGroups extends Component
         $this->dispatch('toast', type: 'success', message: 'Привязано: закупок '.$count.'. Название в выгрузке цен и регион при приглашении берутся теперь из этой карточки.');
     }
 
+    /* ---------- Справочник групп ---------- */
+
+    public function addGroup(): void
+    {
+        $this->validate(['newGroup' => ['required', 'string', 'max:64']], [], ['newGroup' => 'название группы']);
+        $name = trim($this->newGroup);
+        if (SupplyGroup::query()->whereRaw('lower(name) = ?', [mb_strtolower($name)])->exists()) {
+            $this->addError('newGroup', 'Такая группа уже есть.');
+
+            return;
+        }
+        // Код уходит в QuoteParts: латиница, цифры, дефис.
+        $base = substr(\Illuminate\Support\Str::slug($name), 0, 12) ?: 'group';
+        $code = $base;
+        for ($i = 2; SupplyGroup::query()->where('code', $code)->exists(); $i++) {
+            $code = substr($base, 0, 12).'-'.$i;
+        }
+        SupplyGroup::create(['code' => $code, 'name' => $name, 'position' => (int) SupplyGroup::query()->max('position') + 1]);
+        $this->newGroup = '';
+        $this->dispatch('toast', type: 'success', message: 'Группа «'.$name.'» добавлена. Позиции — галочками в каталоге или здесь «вручную»; можно сделать её регионом поставщиков 1С.');
+    }
+
+    public function renameGroup(int $id, string $name): void
+    {
+        $name = trim($name);
+        if ($name === '' || mb_strlen($name) > 64) {
+            return;
+        }
+        SupplyGroup::query()->findOrFail($id)->update(['name' => $name]);
+    }
+
+    /** «Не включать автоматически, если позиция в группе …» (как Европа — не из Китая). */
+    public function setExclude(int $id, string $code): void
+    {
+        $group = SupplyGroup::query()->findOrFail($id);
+        $group->update(['exclude_if_code' => in_array($code, SupplyGroup::codes(), true) && $code !== $group->code ? $code : null]);
+        $this->dispatch('toast', type: 'success', message: 'Правило сохранено. Группы позиций обновятся после «Пересчитать».');
+    }
+
+    /** Удалить можно только пустую группу: без позиций и без поставщиков 1С этого региона. */
+    public function deleteGroup(int $id): void
+    {
+        $group = SupplyGroup::query()->findOrFail($id);
+        $used = DB::table('catalog_item_supply_groups')->where('group_code', $group->code)->exists()
+            || DB::table('purchase_supplier_regions')->where('region', $group->code)->exists();
+        if ($used) {
+            $this->dispatch('toast', type: 'error', message: 'В группе есть позиции или поставщики — сначала уберите их.');
+
+            return;
+        }
+        SupplyGroup::query()->where('exclude_if_code', $group->code)->update(['exclude_if_code' => null]);
+        $group->delete();
+    }
+
     public function rebuild(SupplyGroupService $service): void
     {
         $service->refreshRegions();
         $counts = $service->rebuild();
         // Позиции пула уйдут в QuoteParts с новыми группами (изменилась карточка — повторная отправка).
         SyncQuotePartsPoolJob::dispatch();
-        $this->dispatch('toast', type: 'success', message: 'Пересчитано: '.collect(SupplyGroup::cases())->map(fn ($g) => $g->label().' '.($counts[$g->value] ?? 0))->implode(', ').'.');
+        $this->dispatch('toast', type: 'success', message: 'Пересчитано: '.SupplyGroup::ordered()->map(fn ($g) => $g->name.' '.($counts[$g->code] ?? 0))->implode(', ').'.');
+    }
+
+    /** Клик по позиции списка группы — карточка товара и вся история предложений поставщиков. */
+    public function toggleItem(int $catalogItemId): void
+    {
+        $this->openItems = in_array($catalogItemId, $this->openItems, true)
+            ? array_values(array_diff($this->openItems, [$catalogItemId]))
+            : [...$this->openItems, $catalogItemId];
     }
 
     /** «изменить» в списке группы — та же правка групп позиции руками. */
@@ -131,7 +199,7 @@ class SupplyGroups extends Component
         $term = trim($this->search);
         $suppliers = DB::table('purchase_supplier_regions')
             ->when($this->region === 'none', fn ($q) => $q->whereNull('region'))
-            ->when(in_array($this->region, SupplyGroup::values(), true), fn ($q) => $q->where('region', $this->region))
+            ->when(in_array($this->region, SupplyGroup::codes(), true), fn ($q) => $q->where('region', $this->region))
             ->when($term !== '', fn ($q) => $q->where('supplier_name_1c', 'ilike', '%'.$term.'%'))
             ->orderByDesc('items_count')->orderBy('supplier_name_1c')
             ->paginate(50, ['*'], 'sp');
@@ -170,7 +238,13 @@ class SupplyGroups extends Component
                 ->whereIn('p.catalog_item_id', $ids)->select('p.catalog_item_id', 'p.supplier_name_1c', 'r.region')->distinct()->get()->groupBy('catalog_item_id');
         }
 
+        $openCards = $this->openItems === [] ? collect() : CatalogItem::query()->whereIn('id', $this->openItems)->get()->keyBy('id');
+        $openPcs = $this->openItems === [] ? collect() : \App\Models\CatalogPriceChange::query()->whereIn('catalog_item_id', $this->openItems)
+            ->orderByDesc('changed_at')->orderByDesc('id')->get()->unique('catalog_item_id')->keyBy('catalog_item_id');
+
         return view('livewire.quoteparts.supply-groups', [
+            'openCards' => $openCards,
+            'openPcs' => $openPcs,
             'groupItems' => $groupItems,
             'itemSuppliers' => $itemSuppliers,
             'itemGroupsMap' => $itemGroupsMap,

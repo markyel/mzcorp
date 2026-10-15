@@ -73,7 +73,7 @@ class QuotePartsInvite extends Component
     /** Группы товаров уже приглашённого поставщика. */
     public function saveGroups(QuotePartsSupplierService $service): void
     {
-        $groups = array_values(array_intersect(\App\Enums\SupplyGroup::values(), $this->groups));
+        $groups = array_values(array_intersect(\App\Models\SupplyGroup::codes(), $this->groups));
         try {
             $service->setGroups($this->supplier, $groups === [] ? null : $groups);
         } catch (Throwable $e) {
@@ -81,7 +81,7 @@ class QuotePartsInvite extends Component
 
             return;
         }
-        $this->dispatch('toast', type: 'success', message: $groups === [] ? 'Поставщик видит все группы товаров.' : 'Группы сохранены: поставщик видит '.collect($groups)->map(fn ($g) => \App\Enums\SupplyGroup::from($g)->label())->implode(', ').'.');
+        $this->dispatch('toast', type: 'success', message: $groups === [] ? 'Поставщик видит все группы товаров.' : 'Группы сохранены: поставщик видит '.collect($groups)->map(fn ($g) => \App\Models\SupplyGroup::label($g))->implode(', ').'.');
     }
 
     public function invite(QuotePartsSupplierService $service): void
@@ -106,7 +106,7 @@ class QuotePartsInvite extends Component
         ]);
 
         $data['packaging_included'] = $this->packaging === '' ? null : $this->packaging === '1';
-        $groups = array_values(array_intersect(\App\Enums\SupplyGroup::values(), $this->groups));
+        $groups = array_values(array_intersect(\App\Models\SupplyGroup::codes(), $this->groups));
         $data['groups'] = $groups === [] ? null : $groups;
         $this->error = null;
 

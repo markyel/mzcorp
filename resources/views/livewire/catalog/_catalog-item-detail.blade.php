@@ -9,6 +9,8 @@
        $canIqot          — bool (показывать IQOT-блок), опц.
        $allowIqotAnalyze — bool (кнопка «IQOT — анализ», только где есть метод
                            analyzeWithIqot; в модалке-квиквью — false), опц.
+       $withSupplyHistory — bool (история предложений в блоке «Снабжение»; false там,
+                           где история поставщиков уже выведена рядом), опц.
 --}}
 @php
     $canIqot = $canIqot ?? false;
@@ -186,6 +188,9 @@
                 @endif
             </div>
         @endif
+
+        {{-- Снабжение: группы товаров, у кого закупаем, история предложений поставщиков. --}}
+        <livewire:catalog.item-supply :catalog-item-id="$cat->id" :with-history="$withSupplyHistory ?? true" :history-open="$supplyHistoryOpen ?? false" :key="'item-supply-'.$cat->id" />
     </div>
 
     {{-- ─── Правая колонка: name + name_en + kvgrid + descriptions/comments ─── --}}

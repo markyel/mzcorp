@@ -2,7 +2,7 @@
 
 namespace App\Services\Catalog;
 
-use App\Enums\SupplyGroup;
+use App\Models\SupplyGroup;
 use App\Models\Supplier;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +19,13 @@ use Illuminate\Support\Facades\DB;
  */
 class SupplyGroupService
 {
+    /** Базовые группы-регионы, которые узнаются по названию и валюте поставщика 1С. */
+    public const CHINA = 'cn';
+
+    public const RUSSIA = 'ru';
+
+    public const EUROPE = 'eu';
+
     private const CN_WORDS = ['китай', 'china', 'chinese', 'ningbo', 'shanghai', 'suzhou', 'guangzhou', 'shenzhen', 'zhejiang', 'jiangsu'];
 
     private const EU_WORDS = [
@@ -37,22 +44,22 @@ class SupplyGroupService
         $lower = mb_strtolower($name);
         foreach (self::CN_WORDS as $w) {
             if (str_contains($lower, $w)) {
-                return SupplyGroup::China->value;
+                return self::CHINA;
             }
         }
         if (str_contains($lower, 'россия') || str_contains($lower, 'russia')) {
-            return SupplyGroup::Russia->value;
+            return self::RUSSIA;
         }
         // Имя до пояснений в скобках: кириллицей — российская фирма (даже с закупками в EUR).
         $head = trim((string) preg_split('/[(\[]/u', $name)[0]);
         $cyr = preg_match_all('/\p{Cyrillic}/u', $head);
         $lat = preg_match_all('/[A-Za-z]/', $head);
         if ($cyr > $lat) {
-            return SupplyGroup::Russia->value;
+            return self::RUSSIA;
         }
         foreach (self::EU_WORDS as $w) {
             if (str_contains($lower, $w)) {
-                return SupplyGroup::Europe->value;
+                return self::EUROPE;
             }
         }
         arsort($currencies);
@@ -88,20 +95,26 @@ class SupplyGroupService
                 'updated_at' => now(),
             ];
             if ($old === null) {
-                DB::table('purchase_supplier_regions')->insert($values + ['supplier_name_1c' => $name, 'region' => self::classify($name, $currencies), 'source' => 'auto', 'created_at' => now()]);
+                DB::table('purchase_supplier_regions')->insert($values + ['supplier_name_1c' => $name, 'region' => self::known(self::classify($name, $currencies)), 'source' => 'auto', 'created_at' => now()]);
             } else {
                 DB::table('purchase_supplier_regions')->where('id', $old->id)
-                    ->update($values + ($old->source === 'manual' ? [] : ['region' => self::classify($name, $currencies)]));
+                    ->update($values + ($old->source === 'manual' ? [] : ['region' => self::known(self::classify($name, $currencies))]));
             }
         }
 
         return $rows->count();
     }
 
+    /** Код группы, только если такая группа есть в справочнике. */
+    private static function known(?string $code): ?string
+    {
+        return $code !== null && in_array($code, SupplyGroup::codes(), true) ? $code : null;
+    }
+
     public function setRegion(int $regionId, ?string $region, User $by): void
     {
         DB::table('purchase_supplier_regions')->where('id', $regionId)->update([
-            'region' => in_array($region, SupplyGroup::values(), true) ? $region : null,
+            'region' => in_array($region, SupplyGroup::codes(), true) ? $region : null,
             'source' => 'manual',
             'updated_by_user_id' => $by->id,
             'updated_at' => now(),
@@ -173,23 +186,21 @@ class SupplyGroupService
     }
 
     /**
-     * Регионы поставщиков позиции → её группы.
+     * Регионы поставщиков позиции → её группы: группа есть, если позицию закупали у поставщика
+     * её региона, — кроме групп с условием «не если позиция в группе …» (Европа — не из Китая).
      *
      * @param  list<string>  $regions
+     * @param  array<string, ?string>|null  $rules  код группы => exclude_if_code, по порядку; null — из справочника
      * @return list<string>
      */
-    public static function groupsOf(array $regions): array
+    public static function groupsOf(array $regions, ?array $rules = null): array
     {
+        $rules ??= SupplyGroup::ordered()->pluck('exclude_if_code', 'code')->all();
         $groups = [];
-        if (in_array('cn', $regions, true)) {
-            $groups[] = SupplyGroup::China->value;
-        }
-        if (in_array('ru', $regions, true)) {
-            $groups[] = SupplyGroup::Russia->value;
-        }
-        // Европа — то, что импортируем только из Европы: не из Китая.
-        if (in_array('eu', $regions, true) && ! in_array('cn', $regions, true)) {
-            $groups[] = SupplyGroup::Europe->value;
+        foreach ($rules as $code => $excludeIf) {
+            if (in_array($code, $regions, true) && ($excludeIf === null || ! in_array($excludeIf, $regions, true))) {
+                $groups[] = (string) $code;
+            }
         }
 
         return $groups;
@@ -223,7 +234,7 @@ class SupplyGroupService
      */
     public function setItemGroups(int $catalogItemId, array $codes): void
     {
-        $codes = array_values(array_intersect(SupplyGroup::values(), $codes));
+        $codes = array_values(array_intersect(SupplyGroup::codes(), $codes));
         DB::transaction(function () use ($catalogItemId, $codes) {
             DB::table('catalog_item_supply_groups')->where('catalog_item_id', $catalogItemId)->delete();
             foreach ($codes as $code) {
