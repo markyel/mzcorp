@@ -313,6 +313,17 @@ class QuotePartsClient
         return [$response->body(), $name, (string) ($response->header('Content-Type') ?: 'application/octet-stream')];
     }
 
+    /** Фото предложения поставщика: [содержимое, тип]. @return array{0:string, 1:string} */
+    public function offerPhoto(int $offerId, int $index): array
+    {
+        $response = $this->http()->get('/api/v1/offers/'.$offerId.'/photos/'.$index);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts offer photo: HTTP '.$response->status());
+        }
+
+        return [$response->body(), (string) ($response->header('Content-Type') ?: 'application/octet-stream')];
+    }
+
     /**
      * Офферы поставщиков, изменившиеся с момента $since (null — все).
      *

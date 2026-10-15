@@ -382,6 +382,9 @@
                                                 @if($of['outcome'] === 'quoted')
                                                     <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10.5px] font-medium">💰 {{ $of['price'] !== null ? number_format($of['price'], 2, '.', ' ') : 'цена' }}{{ $of['currency'] ? ' '.$of['currency'] : ' ₽' }}</span>
                                                     @if($of['valid_until'])<span class="text-fg-4 text-[11px]">до {{ $of['valid_until'] }}</span>@endif
+                                                    @if(! empty($of['variant']))<span class="chip chip-sky text-[10.5px]">{{ $of['variant'] }}</span>@endif
+                                                    @if(! empty($of['note']))<span class="text-fg-3 text-[11px]" title="{{ $of['note'] }}">{{ \Illuminate\Support\Str::limit($of['note'], 60) }}</span>@endif
+                                                    @foreach($of['photos'] ?? [] as $ph)<a href="{{ $ph }}" target="_blank" class="text-sky-700 hover:underline text-[11px]">📷{{ count($of['photos']) > 1 ? $loop->iteration : '' }}</a>@endforeach
                                                 @else
                                                     <span class="chip chip-warn text-[10.5px]">✖ отказ</span>
                                                     @if($of['refusal'])<span class="text-fg-3 text-[11px]">{{ \Illuminate\Support\Str::limit($of['refusal'], 70) }}</span>@endif

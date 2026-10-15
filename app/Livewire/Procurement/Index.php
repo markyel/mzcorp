@@ -1601,6 +1601,10 @@ class Index extends Component
             $entry = $out[(int) $cid] ?? ['state' => 'awaiting', 'pending_count' => 0, 'best_price' => null, 'best_currency' => null, 'best_supplier' => null, 'best_valid_until' => null, 'offers' => []];
             foreach ($offers as $o) {
                 $supplier = (string) ($o->supplier_name ?: $o->supplier_key).' · QuoteParts'.($o->source_type === 'price_list' ? ', прайс' : '');
+                // Не оригинал: вид и предложенный товар — рядом с ценой.
+                $variant = ($o->kind && $o->kind !== 'original')
+                    ? trim(\App\Models\QuotePartsOffer::kindLabel($o->kind).' '.trim(($o->brand ?? '').' '.($o->part_number ?? '')))
+                    : null;
                 $validText = $o->valid_until ? 'до '.$o->valid_until->format('d.m.Y') : null;
                 $entry['offers'][] = [
                     'supplier' => $supplier,
@@ -1609,13 +1613,24 @@ class Index extends Component
                     'currency' => $o->currency,
                     'valid_until' => $validText,
                     'refusal' => null,
+                    'variant' => $variant,
+                    'note' => $o->note,
+                    'photos' => collect(range(0, max(0, (int) $o->photos - 1)))->take((int) $o->photos)->map(fn ($i) => route('quoteparts.offer-photo', [$o->remote_id, $i]))->all(),
                 ];
-                if ($o->price !== null && ($entry['best_price'] === null || (float) $o->price < (float) $entry['best_price'])) {
+                // Лучшая цена — по оригиналу; аналог/копия/восстановленное видны в списке ответов.
+                if (($o->kind ?? 'original') === 'original' && $o->price !== null && ($entry['best_price'] === null || (float) $o->price < (float) $entry['best_price'])) {
                     $entry['best_price'] = (float) $o->price;
                     $entry['best_currency'] = $o->currency;
                     $entry['best_supplier'] = $supplier;
                     $entry['best_valid_until'] = $validText;
                 }
+            }
+            // Только неоригинальные варианты — лучшая цена среди них, с пометкой вида.
+            if ($entry['best_price'] === null && ($cheapest = $offers->whereNotNull('price')->sortBy(fn ($o) => (float) $o->price)->first())) {
+                $entry['best_price'] = (float) $cheapest->price;
+                $entry['best_currency'] = $cheapest->currency;
+                $entry['best_supplier'] = (string) ($cheapest->supplier_name ?: $cheapest->supplier_key).' · '.\App\Models\QuotePartsOffer::kindLabel($cheapest->kind);
+                $entry['best_valid_until'] = $cheapest->valid_until ? 'до '.$cheapest->valid_until->format('d.m.Y') : null;
             }
             $entry['state'] = 'quoted';
             $out[(int) $cid] = $entry;

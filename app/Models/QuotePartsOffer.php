@@ -29,6 +29,11 @@ class QuotePartsOffer extends Model
         'status',
         'superseded',
         'remote_updated_at',
+        'brand',
+        'part_number',
+        'product_name',
+        'note',
+        'photos',
     ];
 
     protected $casts = [
@@ -38,6 +43,20 @@ class QuotePartsOffer extends Model
         'superseded' => 'boolean',
         'remote_updated_at' => 'datetime',
     ];
+
+    /** Что предложено (вид оффера QuoteParts). */
+    public const KINDS = [
+        'original' => 'оригинал',
+        'analog' => 'аналог',
+        'copy' => 'копия',
+        'refurbished' => 'восстановленное',
+        'replacement' => 'замена',
+    ];
+
+    public static function kindLabel(?string $kind): string
+    {
+        return self::KINDS[$kind ?? 'original'] ?? (string) $kind;
+    }
 
     public function catalogItem(): BelongsTo
     {

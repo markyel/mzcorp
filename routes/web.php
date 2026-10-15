@@ -408,6 +408,11 @@ Route::middleware('auth')->group(function () {
         ->whereNumber(['conversation', 'message', 'index'])
         ->name('quoteparts.conversation-file');
 
+    // Фото предложения поставщика из QuoteParts (копия, восстановленное, аналог).
+    Route::get('/dashboard/quoteparts/offers/{offer}/photos/{index}', \App\Http\Controllers\QuoteParts\OfferPhotoController::class)
+        ->whereNumber(['offer', 'index'])
+        ->name('quoteparts.offer-photo');
+
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director,admin')->group(function () {
         // «Боты» — диалоги ботов заявок Telegram/MAX: воронка и ленты для разбора.

@@ -79,14 +79,30 @@
                             </td>
                             <td class="px-3 py-1.5">
                                 @if(($line['status'] ?? '') === 'offered' && ! empty($line['offer']))
-                                    @foreach($line['offer']['tiers'] as $t)
-                                        <span class="mono font-semibold">{{ number_format((float) $t['price'], 2, ',', ' ') }} {{ $line['offer']['currency'] }}</span><span class="text-fg-4 text-[11px]"> от {{ $t['min_qty'] }}</span>@if(! $loop->last), @endif
+                                    {{-- Все варианты поставщика по позиции: оригинал, аналог, копия, восстановленное, замена. --}}
+                                    @foreach(($line['offers'] ?? []) ?: [$line['offer']] as $of)
+                                        <div @class(['mt-1 pt-1 border-t border-border-subtle' => ! $loop->first])>
+                                            @if(($of['kind'] ?? 'original') !== 'original')
+                                                <span class="chip chip-sky text-[10.5px]">{{ \App\Models\QuotePartsOffer::kindLabel($of['kind']) }}</span>
+                                                @if(! empty($of['product']))<span class="mono text-[11.5px] text-fg-2">{{ trim(($of['product']['brand'] ?? '').' '.($of['product']['part_number'] ?? '')) }}</span>@endif
+                                            @endif
+                                            @foreach($of['tiers'] as $t)
+                                                <span class="mono font-semibold">{{ number_format((float) $t['price'], 2, ',', ' ') }} {{ $of['currency'] }}</span><span class="text-fg-4 text-[11px]"> от {{ $t['min_qty'] }}</span>@if(! $loop->last), @endif
+                                            @endforeach
+                                            <span class="text-fg-3 text-[11.5px]">
+                                                {{ ! empty($of['lead_time_days']) ? '· '.$of['lead_time_days'].' дн.' : '' }}
+                                                {{ ! empty($of['valid_until']) ? '· до '.\Illuminate\Support\Carbon::parse($of['valid_until'])->format('d.m.Y') : '' }}
+                                            </span>
+                                            @if(! empty($of['note']))<div class="text-fg-3 text-[11.5px]">«{{ $of['note'] }}»</div>@endif
+                                            @if(! empty($of['photos']) && ! empty($of['id']))
+                                                <div class="mt-0.5 flex flex-wrap gap-1">
+                                                    @for($i = 0; $i < (int) $of['photos']; $i++)
+                                                        <a href="{{ route('quoteparts.offer-photo', [$of['id'], $i]) }}" target="_blank" class="block h-10 w-10 overflow-hidden rounded border border-border"><img src="{{ route('quoteparts.offer-photo', [$of['id'], $i]) }}" alt="" class="h-full w-full object-cover" loading="lazy"></a>
+                                                    @endfor
+                                                </div>
+                                            @endif
+                                        </div>
                                     @endforeach
-                                    <span class="text-fg-3 text-[11.5px]">
-                                        {{ $line['offer']['lead_time_days'] ? '· '.$line['offer']['lead_time_days'].' дн.' : '' }}
-                                        {{ ($line['offer']['kind'] ?? '') === 'analog' ? '· аналог' : '' }}
-                                        {{ $line['offer']['valid_until'] ? '· до '.\Illuminate\Support\Carbon::parse($line['offer']['valid_until'])->format('d.m.Y') : '' }}
-                                    </span>
                                 @else
                                     @php $st = $line['status'] ?? 'pending'; @endphp
                                     <span class="text-[11.5px] {{ $st === 'declined' ? 'text-red-700' : ($st === 'question' ? 'text-amber-700' : 'text-fg-4') }}">

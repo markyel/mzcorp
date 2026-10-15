@@ -178,6 +178,12 @@ class QuotePartsPriceService
                 'status' => $o['status'] ?? null,
                 'superseded' => (bool) ($o['superseded'] ?? false),
                 'remote_updated_at' => $o['updated_at'] ?? now(),
+                // Аналог, копия, замена — другой товар: чей и какой артикул; состояние и фото.
+                'brand' => $o['product']['brand'] ?? null,
+                'part_number' => $o['product']['part_number'] ?? null,
+                'product_name' => $o['product']['name'] ?? null,
+                'note' => isset($o['note']) ? mb_substr((string) $o['note'], 0, 1000) : null,
+                'photos' => (int) ($o['photos'] ?? 0),
             ]);
         }
 
