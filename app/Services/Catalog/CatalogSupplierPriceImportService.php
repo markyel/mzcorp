@@ -39,6 +39,7 @@ class CatalogSupplierPriceImportService
 
         $catalog = DB::table('catalog_items')->pluck('id', 'sku')->all();
         $suppliers = $this->supplierIndex();
+        $links = \Illuminate\Support\Facades\Schema::hasColumn('purchase_supplier_regions', 'supplier_id') ? SupplyGroupService::manualLinks() : [];
         $rows = [];
         $unmatched = [];
         $stats = ['positions' => 0, 'points' => 0, 'in_catalog' => 0, 'supplier_matched' => 0];
@@ -55,7 +56,8 @@ class CatalogSupplierPriceImportService
                 if ($supplier === '' || $price <= 0) {
                     continue;
                 }
-                $supplierId = $suppliers[self::normalize($supplier)] ?? $suppliers[self::normalize(self::head($supplier))] ?? null;
+                // Привязка к карточке, сделанная руками («Группы товаров»), главнее совпадения по названию.
+                $supplierId = $links[mb_substr($supplier, 0, 500)] ?? $suppliers[self::normalize($supplier)] ?? $suppliers[self::normalize(self::head($supplier))] ?? null;
                 if ($supplierId === null) {
                     $unmatched[$supplier] = ($unmatched[$supplier] ?? 0) + 1;
                 } else {

@@ -45,9 +45,28 @@
                         <tr wire:key="sr-{{ $s->id }}" class="border-b border-border-subtle">
                             <td class="px-3 py-1.5 text-fg-1">
                                 @if($cardId = $cards[$s->supplier_name_1c] ?? null)
+                                    @php $card = $cardNames->get($cardId); @endphp
                                     <a href="{{ route('suppliers.registry-edit', $cardId) }}" class="hover:text-sky-700 hover:underline" title="Открыть карточку поставщика">{{ $s->supplier_name_1c }}</a>
+                                    <span class="text-fg-4 text-[11px]">→ {{ $card?->organization?->name ?: $card?->name ?: $card?->email }}</span>
+                                    @if($linkingId !== $s->id)<button type="button" wire:click="startLink({{ $s->id }})" class="text-fg-4 hover:text-fg-2 text-[11px] ml-1">сменить</button>@endif
                                 @else
-                                    {{ $s->supplier_name_1c }} <span class="text-fg-4 text-[11px]" title="В «Закупках 1С» этот поставщик не сопоставлен с карточкой справочника">· нет в справочнике</span>
+                                    {{ $s->supplier_name_1c }}
+                                    @if($linkingId !== $s->id)<button type="button" wire:click="startLink({{ $s->id }})" class="btn btn-xs ml-1">Привязать к карточке</button>@endif
+                                @endif
+                                @if($linkingId === $s->id)
+                                    <div class="mt-1.5 rounded-md border border-border bg-surface-2 p-2 space-y-1">
+                                        <div class="flex items-center gap-2">
+                                            <input type="search" wire:model.live.debounce.300ms="linkSearch" placeholder="Название, адрес, домен или организация" class="h-[28px] w-80 px-2 border border-border rounded-md bg-surface text-[12.5px]" autofocus>
+                                            <button type="button" wire:click="cancelLink" class="btn btn-xs btn-ghost">Отмена</button>
+                                        </div>
+                                        @forelse($candidates as $c)
+                                            <button type="button" wire:key="lc-{{ $c->id }}" wire:click="linkTo({{ $c->id }})" class="block w-full text-left rounded px-2 py-1 hover:bg-hover text-[12.5px]">
+                                                <span class="text-fg-1">{{ $c->name ?: '—' }}</span> <span class="mono text-fg-3">{{ $c->email }}</span>@if($c->organization) <span class="text-fg-3">· {{ $c->organization->name }}</span>@endif
+                                            </button>
+                                        @empty
+                                            <div class="text-fg-4 text-[12px] px-2">{{ mb_strlen(trim($linkSearch)) < 2 ? 'Введите хотя бы 2 символа.' : 'Ничего не найдено — поставщика можно завести в «Поставщики» → «Реестр».' }}</div>
+                                        @endforelse
+                                    </div>
                                 @endif
                             </td>
                             <td class="px-3 py-1.5 text-right mono">{{ $s->items_count }}</td>

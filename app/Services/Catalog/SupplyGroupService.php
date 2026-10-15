@@ -109,6 +109,33 @@ class SupplyGroupService
     }
 
     /**
+     * «Привязать к карточке»: поставщик 1С — это карточка справочника. Закупки с этим названием
+     * получают карточку сразу; следующие загрузки «Закупок 1С» берут привязку раньше названия.
+     *
+     * @return int сколько закупок привязано
+     */
+    public function linkSupplier(int $regionId, int $supplierId, User $by): int
+    {
+        $row = DB::table('purchase_supplier_regions')->where('id', $regionId)->first() ?? abort(404);
+        abort_unless(DB::table('suppliers')->where('id', $supplierId)->exists(), 404);
+
+        return DB::transaction(function () use ($row, $supplierId, $by) {
+            DB::table('purchase_supplier_regions')->where('id', $row->id)
+                ->update(['supplier_id' => $supplierId, 'updated_by_user_id' => $by->id, 'updated_at' => now()]);
+
+            return DB::table('catalog_supplier_prices')->where('supplier_name_1c', $row->supplier_name_1c)
+                ->update(['supplier_id' => $supplierId, 'updated_at' => now()]);
+        });
+    }
+
+    /** Привязки «поставщик 1С → карточка», сделанные руками. @return array<string, int> */
+    public static function manualLinks(): array
+    {
+        return DB::table('purchase_supplier_regions')->whereNotNull('supplier_id')->pluck('supplier_id', 'supplier_name_1c')
+            ->map(fn ($id) => (int) $id)->all();
+    }
+
+    /**
      * Пересчитать группы позиций по регионам поставщиков (кроме заданных руками).
      *
      * @return array<string, int> группа => сколько позиций

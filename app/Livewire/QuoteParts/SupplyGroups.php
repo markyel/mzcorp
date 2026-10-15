@@ -35,6 +35,11 @@ class SupplyGroups extends Component
 
     public ?int $itemId = null;
 
+    /** Строка поставщика 1С, которую привязываем к карточке справочника, и поиск карточки. */
+    public ?int $linkingId = null;
+
+    public string $linkSearch = '';
+
     public function mount(): void
     {
         abort_unless(auth()->user()?->hasAnyRole(['director', 'admin']), 403);
@@ -51,6 +56,28 @@ class SupplyGroups extends Component
     {
         $service->setRegion($id, $region === '' ? null : $region, auth()->user());
         $this->dispatch('toast', type: 'success', message: 'Регион сохранён. Группы позиций обновятся после «Пересчитать».');
+    }
+
+    /** «Привязать к карточке»: поиск по справочнику начинается с названия 1С до скобок. */
+    public function startLink(int $regionId): void
+    {
+        $name = (string) DB::table('purchase_supplier_regions')->where('id', $regionId)->value('supplier_name_1c');
+        $this->linkingId = $regionId;
+        $this->linkSearch = trim((string) preg_split('/[(\[]/u', $name)[0]);
+    }
+
+    public function cancelLink(): void
+    {
+        $this->linkingId = null;
+        $this->linkSearch = '';
+    }
+
+    public function linkTo(int $supplierId, SupplyGroupService $service): void
+    {
+        abort_if($this->linkingId === null, 404);
+        $count = $service->linkSupplier($this->linkingId, $supplierId, auth()->user());
+        $this->cancelLink();
+        $this->dispatch('toast', type: 'success', message: 'Привязано: закупок '.$count.'. Название в выгрузке цен и регион при приглашении берутся теперь из этой карточки.');
     }
 
     public function rebuild(SupplyGroupService $service): void
@@ -94,14 +121,23 @@ class SupplyGroups extends Component
         $item = $this->itemId ? CatalogItem::query()->find($this->itemId, ['id', 'sku', 'name']) : null;
         $itemSource = $this->itemId ? DB::table('catalog_item_supply_groups')->where('catalog_item_id', $this->itemId)->value('source') : null;
 
-        // Карточка поставщика в справочнике: по закупкам 1С с этим названием (самая частая привязка).
+        // Карточка поставщика в справочнике: привязанная руками, иначе по закупкам 1С с этим названием (самая частая).
         $cards = DB::table('catalog_supplier_prices')->whereIn('supplier_name_1c', collect($suppliers->items())->pluck('supplier_name_1c'))
             ->whereNotNull('supplier_id')->selectRaw('supplier_name_1c, supplier_id, count(*) as c')->groupBy('supplier_name_1c', 'supplier_id')
-            ->orderByDesc('c')->get()->unique('supplier_name_1c')->pluck('supplier_id', 'supplier_name_1c');
+            ->orderByDesc('c')->get()->unique('supplier_name_1c')->pluck('supplier_id', 'supplier_name_1c')
+            ->merge(collect($suppliers->items())->whereNotNull('supplier_id')->pluck('supplier_id', 'supplier_name_1c'));
+        $cardNames = \App\Models\Supplier::query()->with('organization:id,name')->whereIn('id', $cards->values())->get(['id', 'name', 'email', 'supplier_organization_id'])->keyBy('id');
+        $term = trim($this->linkSearch);
+        $candidates = $this->linkingId === null || mb_strlen($term) < 2 ? collect() : \App\Models\Supplier::query()->with('organization:id,name')
+            ->where(fn ($q) => $q->where('name', 'ilike', '%'.$term.'%')->orWhere('email', 'ilike', '%'.$term.'%')->orWhere('domain', 'ilike', '%'.$term.'%')
+                ->orWhereHas('organization', fn ($o) => $o->where('name', 'ilike', '%'.$term.'%')))
+            ->orderBy('name')->limit(12)->get(['id', 'name', 'email', 'supplier_organization_id']);
 
         return view('livewire.quoteparts.supply-groups', [
             'suppliers' => $suppliers,
             'cards' => $cards,
+            'cardNames' => $cardNames,
+            'candidates' => $candidates,
             'groupCounts' => $service->counts(),
             'regionCounts' => DB::table('purchase_supplier_regions')->selectRaw("coalesce(region, 'none') as r, count(*) as c")->groupBy('r')->pluck('c', 'r')->all(),
             'item' => $item,
