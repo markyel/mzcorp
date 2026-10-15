@@ -1047,7 +1047,10 @@ return [
         'token' => env('QUOTEPARTS_API_TOKEN', ''),
         'timeout' => (int) env('QUOTEPARTS_TIMEOUT', 30),
         // Сколько позиций в одном запросе sync (лимит API — 500).
-        'batch' => (int) env('QUOTEPARTS_BATCH', 200),
+        // Позиций в одном items/sync: QuoteParts тратит ~0,15 с на позицию (удалённая БД), пачка
+        // должна укладываться в sync_timeout с запасом.
+        'batch' => (int) env('QUOTEPARTS_BATCH', 50),
+        'sync_timeout' => (int) env('QUOTEPARTS_SYNC_TIMEOUT', 120),
         // Главный выключатель канала «Запрос через QuoteParts» (переопределяется в Настройках).
         'rfq_enabled' => (bool) env('QUOTEPARTS_RFQ_ENABLED', false),
         // Подпись уведомлений QuoteParts (POST /api/quoteparts/webhook): HMAC-SHA256 «timestamp.body».

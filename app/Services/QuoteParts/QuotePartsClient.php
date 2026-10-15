@@ -22,7 +22,8 @@ class QuotePartsClient
      */
     public function syncItems(array $items): array
     {
-        $response = $this->http()->post('/api/v1/items/sync', ['items' => $items]);
+        // Пачка позиций обрабатывается дольше обычного запроса — свой таймаут.
+        $response = $this->http()->timeout((int) config('services.quoteparts.sync_timeout', 120))->post('/api/v1/items/sync', ['items' => $items]);
 
         if (! $response->successful()) {
             throw new RuntimeException('QuoteParts items/sync: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 500));
