@@ -51,6 +51,15 @@ class QuotePartsWebhookTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_a_supplier_message_in_a_conversation_is_queued(): void
+    {
+        $this->deliver(['event' => 'conversation.message', 'conversation_id' => 5, 'subject' => 'Claim', 'started_by' => 'supplier', 'supplier' => 'org:7', 'crm_author_ref' => null])
+            ->assertStatus(202);
+
+        Queue::assertPushed(\App\Jobs\QuoteParts\HandleQuotePartsConversationJob::class, fn ($job) => $job->payload['conversation_id'] === 5
+            && $job->payload['started_by'] === 'supplier');
+    }
+
     public function test_unknown_event_is_refused(): void
     {
         $this->deliver(['event' => 'item.deleted', 'rfq_id' => 42])->assertStatus(422);

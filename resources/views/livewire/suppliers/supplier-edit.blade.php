@@ -18,6 +18,11 @@
         <livewire:suppliers.quote-parts-invite :supplier="$supplier" :key="'qp-'.$supplier->id" />
     @endif
 
+    {{-- Обращения через QuoteParts (вне запросов цен): пилот, снабжение, руководство. --}}
+    @if(\App\Services\QuoteParts\QuotePartsPilot::canConverse(auth()->user()) && $supplier->email)
+        <livewire:suppliers.quote-parts-conversations :supplier="$supplier" :key="'qpc-'.$supplier->id" />
+    @endif
+
     {{-- Группы: клик включает / исключает поставщика, сохраняется сразу. По группам
          выбирают поставщиков для запроса цены (заявка → «Поставщики», «Снабжение»). --}}
     <div class="flex flex-wrap items-center gap-1.5">

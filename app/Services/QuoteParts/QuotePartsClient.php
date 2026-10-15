@@ -253,6 +253,92 @@ class QuotePartsClient
         return $response->json();
     }
 
+    /**
+     * Обращения к поставщику вне запросов (переписка по темам).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function conversations(string $supplierKey): array
+    {
+        $response = $this->http()->get('/api/v1/conversations', ['supplier' => $supplierKey]);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts conversations: HTTP '.$response->status());
+        }
+
+        return $response->json('conversations', []);
+    }
+
+    /**
+     * @param  array<string, mixed>  $fields  supplier, topic, subject, text, author_ref, author_name, external_ref
+     * @param  list<array{path:string, name:string}>  $files  локальные файлы
+     * @return array<string, mixed>
+     */
+    public function startConversation(array $fields, array $files = []): array
+    {
+        return $this->multipart('/api/v1/conversations', $fields, $files, 'conversations');
+    }
+
+    /**
+     * @param  list<array{path:string, name:string}>  $files
+     * @return array<string, mixed>
+     */
+    public function sendConversationMessage(int $id, string $text, ?string $authorName, array $files = []): array
+    {
+        return $this->multipart('/api/v1/conversations/'.$id.'/messages', ['text' => $text, 'author_name' => $authorName], $files, 'conversation message');
+    }
+
+    /** @return array<string, mixed> */
+    public function closeConversation(int $id): array
+    {
+        $response = $this->http()->post('/api/v1/conversations/'.$id.'/close');
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts close conversation: HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
+    /** Файл сообщения обращения: [содержимое, имя, тип]. @return array{0:string, 1:string, 2:string} */
+    public function conversationFile(int $id, int $messageId, int $index): array
+    {
+        $response = $this->http()->get('/api/v1/conversations/'.$id.'/messages/'.$messageId.'/attachments/'.$index);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts file: HTTP '.$response->status());
+        }
+        $name = 'file';
+        if (preg_match('/filename\*?=(?:UTF-8\'\')?"?([^";]+)"?/i', (string) $response->header('Content-Disposition'), $m)) {
+            $name = rawurldecode($m[1]);
+        }
+
+        return [$response->body(), $name, (string) ($response->header('Content-Type') ?: 'application/octet-stream')];
+    }
+
+    /**
+     * @param  array<string, mixed>  $fields
+     * @param  list<array{path:string, name:string}>  $files
+     * @return array<string, mixed>
+     */
+    private function multipart(string $url, array $fields, array $files, string $what): array
+    {
+        $request = $this->http();
+        foreach ($files as $file) {
+            $request = $request->attach('files[]', (string) file_get_contents($file['path']), $file['name']);
+        }
+        $response = $request->post($url, array_filter($fields, fn ($v) => $v !== null));
+
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял '.$what.'.');
+        }
+        if ($response->status() === 502 && $response->json('message')) {
+            throw new RuntimeException((string) $response->json('message'));
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts '.$what.': HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
     private function http(): PendingRequest
     {
         if (! $this->isConfigured()) {

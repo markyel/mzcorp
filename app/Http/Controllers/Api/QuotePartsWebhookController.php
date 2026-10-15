@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\QuoteParts\HandleQuotePartsConversationJob;
 use App\Jobs\QuoteParts\HandleQuotePartsEventJob;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,6 +36,16 @@ class QuotePartsWebhookController extends Controller
 
         $data = json_decode($body, true);
         $event = is_array($data) ? (string) ($data['event'] ?? '') : '';
+
+        // Поставщик написал в обращении вне запросов — сказать автору обращения или снабжению.
+        if ($event === 'conversation.message' && is_int($data['conversation_id'] ?? null)) {
+            HandleQuotePartsConversationJob::dispatch(array_intersect_key($data, array_flip([
+                'conversation_id', 'tag', 'topic', 'subject', 'started_by', 'crm_author_ref', 'supplier', 'preview',
+            ])));
+
+            return response()->json(['ok' => true], 202);
+        }
+
         if (! in_array($event, self::EVENTS, true) || ! is_int($data['rfq_id'] ?? null)) {
             return response()->json(['message' => 'Unknown event.'], 422);
         }

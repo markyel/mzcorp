@@ -403,6 +403,11 @@ Route::middleware('auth')->group(function () {
             ->name('quoteparts.purchase-prices.upload');
     });
 
+    // Файл из обращения к поставщику через QuoteParts (доступ проверяет контроллер: QuotePartsPilot::canConverse).
+    Route::get('/dashboard/quoteparts/conversations/{conversation}/messages/{message}/files/{index}', \App\Http\Controllers\QuoteParts\ConversationFileController::class)
+        ->whereNumber(['conversation', 'message', 'index'])
+        ->name('quoteparts.conversation-file');
+
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director,admin')->group(function () {
         // «Боты» — диалоги ботов заявок Telegram/MAX: воронка и ленты для разбора.

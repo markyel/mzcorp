@@ -20,6 +20,18 @@ class QuotePartsPilot
         return (bool) app_setting(self::SETTING, config('services.quoteparts.rfq_enabled', false));
     }
 
+    /**
+     * Обращения к поставщикам через QuoteParts (карточка поставщика): участникам пилота,
+     * а также снабжению и руководству — им приходят обращения, начатые поставщиком.
+     */
+    public static function canConverse(?User $user): bool
+    {
+        return $user !== null
+            && self::switchedOn()
+            && app(QuotePartsClient::class)->isConfigured()
+            && ((bool) $user->quoteparts_pilot || $user->hasAnyRole(['procurement', 'head_of_sales', 'director', 'admin']));
+    }
+
     public static function enabledFor(?User $user): bool
     {
         return $user !== null
