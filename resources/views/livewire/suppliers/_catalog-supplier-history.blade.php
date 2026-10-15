@@ -50,7 +50,7 @@
                                     <span class="chip {{ $q['review'] === 'accepted' ? 'chip-ok' : ($q['review'] === 'rejected' ? 'chip-neutral' : 'chip-warn') }} text-[10px]">{{ ['accepted' => 'принято к закупке', 'rejected' => 'отклонено'][$q['review']] ?? 'на разборе' }}</span>
                                 @endif
                                 @if($q['note'])<span class="text-fg-3">«{{ \Illuminate\Support\Str::limit($q['note'], 60) }}»</span>@endif
-                                @for($i = 0; $i < $q['photos']; $i++)<a href="{{ route('quoteparts.offer-photo', [$q['remote_id'], $i]) }}" target="_blank" class="text-sky-700 text-[11px]">📷</a>@endfor
+                                @php $__g = $q['photos'] > 0 ? collect(range(0, $q['photos'] - 1))->map(fn ($i) => ['src' => route('quoteparts.offer-photo', [$q['remote_id'], $i]), 'name' => 'Фото '.($i + 1), 'dl' => route('quoteparts.offer-photo', [$q['remote_id'], $i])])->all() : []; @endphp @foreach($__g as $__i => $ph)<a href="{{ $ph['src'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $__g, 'index' => $__i]) }})" class="text-sky-700 text-[11px]">📷</a>@endforeach
                             </td>
                             <td class="py-1 pl-2 text-fg-4 whitespace-nowrap">{{ $q['status'] }}{{ $q['valid_until'] ? ' · до '.$q['valid_until']->format('d.m.Y') : '' }}</td>
                         </tr>

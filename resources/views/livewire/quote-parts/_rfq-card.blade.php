@@ -97,10 +97,11 @@
                                             </span>
                                             @if(! empty($of['note']))<div class="text-fg-3 text-[11.5px]">«{{ $of['note'] }}»</div>@endif
                                             @if(! empty($of['photos']) && ! empty($of['id']))
+                                                @php $gallery = collect(range(0, (int) $of['photos'] - 1))->map(fn ($i) => ['src' => route('quoteparts.offer-photo', [$of['id'], $i]), 'name' => 'Фото '.($i + 1), 'dl' => route('quoteparts.offer-photo', [$of['id'], $i])])->all(); @endphp
                                                 <div class="mt-0.5 flex flex-wrap gap-1">
-                                                    @for($i = 0; $i < (int) $of['photos']; $i++)
-                                                        <a href="{{ route('quoteparts.offer-photo', [$of['id'], $i]) }}" target="_blank" class="block h-10 w-10 overflow-hidden rounded border border-border"><img src="{{ route('quoteparts.offer-photo', [$of['id'], $i]) }}" alt="" class="h-full w-full object-cover" loading="lazy"></a>
-                                                    @endfor
+                                                    @foreach($gallery as $i => $ph)
+                                                        <a href="{{ $ph['src'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $gallery, 'index' => $i]) }})" class="block h-10 w-10 overflow-hidden rounded border border-border cursor-zoom-in"><img src="{{ $ph['src'] }}" alt="" class="h-full w-full object-cover" loading="lazy"></a>
+                                                    @endforeach
                                                 </div>
                                             @endif
                                         </div>
@@ -141,13 +142,19 @@
                                             </div>
                                             <div class="whitespace-pre-wrap">{{ \Illuminate\Support\Str::limit($m['text'], 1500) }}</div>
                                             @if(! empty($m['files']))
+                                                @php
+                                                    // Фото письма — галерея в просмотрщике (partials.image-lightbox), прочие файлы — ссылкой.
+                                                    $isImage = fn ($f) => in_array($f['mime'] ?? '', ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true);
+                                                    $fileUrl = fn ($f) => route('quoteparts.rfq-file', [$rfq->remote_id, $f['message_id'], $f['index']]);
+                                                    $gallery = collect($m['files'])->filter($isImage)->values()->map(fn ($f) => ['src' => $fileUrl($f), 'name' => $f['name'], 'dl' => $fileUrl($f)])->all();
+                                                    $shot = 0;
+                                                @endphp
                                                 <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
                                                     @foreach($m['files'] as $f)
-                                                        @php $fileUrl = route('quoteparts.rfq-file', [$rfq->remote_id, $f['message_id'], $f['index']]); @endphp
-                                                        @if(in_array($f['mime'] ?? '', ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true))
-                                                            <a href="{{ $fileUrl }}" target="_blank" title="{{ $f['name'] }}" class="block h-16 w-16 overflow-hidden rounded border border-border bg-surface"><img src="{{ $fileUrl }}" alt="" class="h-full w-full object-cover" loading="lazy"></a>
+                                                        @if($isImage($f))
+                                                            <a href="{{ $fileUrl($f) }}" title="{{ $f['name'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $gallery, 'index' => $shot++]) }})" class="block h-16 w-16 overflow-hidden rounded border border-border bg-surface cursor-zoom-in"><img src="{{ $fileUrl($f) }}" alt="" class="h-full w-full object-cover" loading="lazy"></a>
                                                         @else
-                                                            <a href="{{ $fileUrl }}" target="_blank" class="chip chip-neutral max-w-[260px] truncate">📎 {{ $f['name'] }}</a>
+                                                            <a href="{{ $fileUrl($f) }}" target="_blank" class="chip chip-neutral max-w-[260px] truncate">📎 {{ $f['name'] }}</a>
                                                         @endif
                                                     @endforeach
                                                 </div>

@@ -8,7 +8,9 @@
      Поворот: кнопки ⟲ ⟳ и клавиша R — фото с телефона часто приходят лежащими.
      Увеличенную картинку можно таскать мышью.
      Подключается @include('partials.image-lightbox') — используется и в
-     клиентском треде (detail), и в переписке с поставщиком (suppliers/show). --}}
+     клиентском треде (detail), и в переписке с поставщиком (suppliers/show);
+     один экземпляр есть в layouts.app на любой странице. Если их на странице
+     несколько, открывается только один (window.__imageLightbox). --}}
 <div x-data="{
         lbOpen: false,
         lbItems: [],
@@ -34,6 +36,12 @@
             this.reset();
         },
         open(detail) {
+            // Просмотрщик есть и в общем шаблоне, и на отдельных страницах: открывается один —
+            // тот, что первым взял событие и ещё на странице.
+            if (window.__imageLightbox && window.__imageLightbox !== this.$root && window.__imageLightbox.isConnected) {
+                return;
+            }
+            window.__imageLightbox = this.$root;
             if (detail && Array.isArray(detail.items) && detail.items.length > 0) {
                 this.lbItems = detail.items.slice();
                 this.lbIdx = Math.max(0, Math.min(parseInt(detail.index) || 0, this.lbItems.length - 1));

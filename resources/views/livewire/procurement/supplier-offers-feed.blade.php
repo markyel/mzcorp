@@ -63,7 +63,7 @@
                                     <span class="text-fg-3">оригинал</span>
                                 @endif
                                 @if($o['note'])<div class="text-fg-3 text-[11.5px] max-w-[300px] truncate" title="{{ $o['note'] }}">«{{ $o['note'] }}»</div>@endif
-                                @for($i = 0; $i < $o['photos']; $i++)<a href="{{ route('quoteparts.offer-photo', [$o['remote_id'], $i]) }}" target="_blank" class="text-sky-700 text-[11px]">📷</a>@endfor
+                                @php $__g = $o['photos'] > 0 ? collect(range(0, $o['photos'] - 1))->map(fn ($i) => ['src' => route('quoteparts.offer-photo', [$o['remote_id'], $i]), 'name' => 'Фото '.($i + 1), 'dl' => route('quoteparts.offer-photo', [$o['remote_id'], $i])])->all() : []; @endphp @foreach($__g as $__i => $ph)<a href="{{ $ph['src'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $__g, 'index' => $__i]) }})" class="text-sky-700 text-[11px]">📷</a>@endforeach
                             </td>
                             <td class="px-3 py-1.5 text-right whitespace-nowrap mono font-semibold">{{ $o['price'] !== null ? $money($o['price']).' '.$o['currency'] : '—' }}</td>
                             <td class="px-3 py-1.5 whitespace-nowrap text-fg-3">{{ $o['lead'] !== null ? $o['lead'].' дн.' : '' }}{{ $o['lead'] !== null && $o['valid'] ? ' · ' : '' }}{{ $o['valid'] ? 'до '.$o['valid'] : '' }}</td>

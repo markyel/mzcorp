@@ -149,6 +149,9 @@
                     });
                 })();
             </script>
+
+            {{-- Просмотрщик фото на любой странице: открывается событием open-image (см. partials.image-lightbox). --}}
+            @include('partials.image-lightbox')
         @endauth
     </body>
 </html>
