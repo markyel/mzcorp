@@ -420,6 +420,11 @@ Route::middleware('auth')->group(function () {
         ->whereNumber(['offer', 'index'])
         ->name('quoteparts.offer-photo');
 
+    // Файл из переписки по запросу через QuoteParts (письмо поставщика, вопрос из кабинета).
+    Route::get('/dashboard/quoteparts/rfqs/{rfq}/messages/{message}/files/{index}', \App\Http\Controllers\QuoteParts\RfqFileController::class)
+        ->whereNumber(['rfq', 'message', 'index'])
+        ->name('quoteparts.rfq-file');
+
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director,admin')->group(function () {
         // «Боты» — диалоги ботов заявок Telegram/MAX: воронка и ленты для разбора.

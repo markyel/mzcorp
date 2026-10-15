@@ -346,6 +346,25 @@ class QuotePartsClient
         return $response->json('emails', []);
     }
 
+    /**
+     * Файл письма или вопроса поставщика в переписке по запросу: [содержимое, имя, тип].
+     *
+     * @return array{0:string, 1:string, 2:string}
+     */
+    public function rfqFile(int $rfqId, int $messageId, int $index): array
+    {
+        $response = $this->http()->get('/api/v1/rfqs/'.$rfqId.'/messages/'.$messageId.'/files/'.$index);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts request file: HTTP '.$response->status());
+        }
+        $name = 'file';
+        if (preg_match('/filename\*?=(?:UTF-8\'\')?"?([^";]+)"?/i', (string) $response->header('Content-Disposition'), $m)) {
+            $name = rawurldecode($m[1]);
+        }
+
+        return [$response->body(), $name, (string) ($response->header('Content-Type') ?: 'application/octet-stream')];
+    }
+
     /** Фото предложения поставщика: [содержимое, тип]. @return array{0:string, 1:string} */
     public function offerPhoto(int $offerId, int $index): array
     {

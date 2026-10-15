@@ -140,6 +140,18 @@
                                                 {{ ! empty($m['auto']) ? '· автоответ' : '' }}
                                             </div>
                                             <div class="whitespace-pre-wrap">{{ \Illuminate\Support\Str::limit($m['text'], 1500) }}</div>
+                                            @if(! empty($m['files']))
+                                                <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                                    @foreach($m['files'] as $f)
+                                                        @php $fileUrl = route('quoteparts.rfq-file', [$rfq->remote_id, $f['message_id'], $f['index']]); @endphp
+                                                        @if(in_array($f['mime'] ?? '', ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true))
+                                                            <a href="{{ $fileUrl }}" target="_blank" title="{{ $f['name'] }}" class="block h-16 w-16 overflow-hidden rounded border border-border bg-surface"><img src="{{ $fileUrl }}" alt="" class="h-full w-full object-cover" loading="lazy"></a>
+                                                        @else
+                                                            <a href="{{ $fileUrl }}" target="_blank" class="chip chip-neutral max-w-[260px] truncate">📎 {{ $f['name'] }}</a>
+                                                        @endif
+                                                    @endforeach
+                                                </div>
+                                            @endif
                                         </div>
                                     @endforeach
                                     @if($canAnswer)
