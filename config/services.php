@@ -1150,6 +1150,12 @@ return [
         ],
     ],
 
+    // Ручная синхронизация каталога (раздел «Синхронизация каталога»): цена из выгрузки 1С
+    // держится столько дней, если выгрузка mylift так и не догнала её.
+    'catalog_manual_sync' => [
+        'hold_days' => (int) env('CATALOG_MANUAL_SYNC_HOLD_DAYS', 14),
+    ],
+
     'catalog_sync' => [
         // Public URL до .mdb (mylift.ru/getxfile.php?id=...). Команда
         // catalog:sync-from-url HEAD-проверяет Last-Modified и SHA-256,

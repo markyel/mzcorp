@@ -50,6 +50,7 @@
                 $resolvedRailActive = ($railActive ?? null) ?: match (true) {
                     request()->routeIs('dashboard')         => 'dashboard',
                     request()->routeIs('requests.*')        => 'requests',
+                    request()->routeIs('catalog-sync.*')    => 'catalog-sync',
                     request()->routeIs('catalog.*')         => 'catalog',
                     request()->routeIs('mail.*')            => 'mail',
                     request()->routeIs('invoices.*')        => 'invoices',

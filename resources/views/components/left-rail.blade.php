@@ -72,6 +72,12 @@
         $rail[] = ['icon' => '⧉', 'label' => 'Честный знак', 'href' => route('honest-sign.index'), 'key' => 'honest-sign'];
     }
 
+    // «Синхронизация каталога» — выгрузка 1С с актуализированными ценами (секретарь и др.,
+    // гейт продублирован на роуте).
+    if ($railUser?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'procurement', 'admin'])) {
+        $rail[] = ['icon' => '⟳', 'label' => 'Синхронизация каталога', 'href' => route('catalog-sync.index'), 'key' => 'catalog-sync'];
+    }
+
     // Phase 2 placeholder'ы — disabled (без href), показываются для
     // структуры UI.
     $railDisabled = [

@@ -158,6 +158,10 @@ class CatalogImportService
             return $import;
         }
 
+        // Цены из ручной синхронизации (выгрузка 1С секретарём) держим, пока выгрузка mylift
+        // отдаёт старые: иначе плановый импорт откатил бы их через несколько часов.
+        $normalized = $this->holdManualPrices($normalized);
+
         $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'soft_deleted' => 0, 'marked_unavailable' => 0];
 
         // catalog_item_id, у которых цена стала актуальной в этом прогоне
@@ -796,6 +800,54 @@ class CatalogImportService
      * Изменилась ли цена численно. null/'' с одной стороны (появилась/исчезла
      * цена) считаем изменением; равные числа (в т.ч. «1234.50» vs «1234.5») — нет.
      */
+    /**
+     * Ручная цена (CatalogManualPrice) поверх строки выгрузки: цена, минимальная, закупочная и
+     * «актуальна». Снимается, когда выгрузка догнала 1С (та же цена и актуальна) или истёк срок.
+     *
+     * @param  list<array<string, mixed>>  $normalized
+     * @return list<array<string, mixed>>
+     */
+    public function holdManualPrices(array $normalized): array
+    {
+        $holds = \App\Models\CatalogManualPrice::query()->whereIn('sku', array_column($normalized, 'sku'))->get()->keyBy('sku');
+        if ($holds->isEmpty()) {
+            return $normalized;
+        }
+
+        $release = [];
+        $held = 0;
+        foreach ($normalized as $i => $row) {
+            $hold = $holds->get($row['sku']);
+            if ($hold === null) {
+                continue;
+            }
+            $caughtUp = ($row['is_price_actual'] ?? false) === true
+                && ! $this->priceDiffers($hold->price, $row['price'] ?? null)
+                && ($hold->price_min === null || ! $this->priceDiffers($hold->price_min, $row['price_min'] ?? null));
+            if ($caughtUp || $hold->hold_until->isPast()) {
+                $release[] = $hold->id;
+
+                continue;
+            }
+            $row['price'] = $hold->price ?? $row['price'] ?? null;
+            $row['price_min'] = $hold->price_min ?? $row['price_min'] ?? null;
+            $row['purchase_price'] = $hold->purchase_price ?? $row['purchase_price'] ?? null;
+            $row['is_price_actual'] = true;
+            unset($row['source_hash']);
+            $row['source_hash'] = $this->hashRow($row);
+            $normalized[$i] = $row;
+            $held++;
+        }
+        if ($release !== []) {
+            \App\Models\CatalogManualPrice::query()->whereIn('id', $release)->delete();
+        }
+        if ($held > 0 || $release !== []) {
+            Log::info('CatalogImport: manual prices', ['held' => $held, 'released' => count($release)]);
+        }
+
+        return $normalized;
+    }
+
     private function priceDiffers(mixed $old, mixed $new): bool
     {
         $a = ($old === null || $old === '') ? null : (float) $old;
