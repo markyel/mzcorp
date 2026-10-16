@@ -44,6 +44,7 @@
             $rows = collect($sync->rows ?? []);
             $shown = $rowFilter === 'all' ? $rows : $rows->where('status', $rowFilter);
             $counts = $rows->countBy('status');
+            $sharp = $rows->filter(fn ($r) => ($r['old']['price'] ?? null) && abs(($r['price'] - $r['old']['price']) / $r['old']['price']) >= 0.3)->count();
             $st = $statusLabel[$sync->status] ?? [$sync->status, 'chip-neutral'];
         @endphp
         <div class="ds-card">
@@ -64,6 +65,9 @@
                 @endif
             </div>
             <div class="ds-card-body space-y-3">
+                @if($sharp > 0 && $sync->status === \App\Models\CatalogManualSync::STATUS_PARSED)
+                    <div class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">⚠ У {{ $sharp }} поз. цена меняется больше чем на 30% — проверьте их перед «Применить» (отмечены в таблице).</div>
+                @endif
                 <div class="flex flex-wrap gap-2 text-[12px]">
                     @foreach(['all' => 'все '.$rows->count(), 'changed' => 'цена изменится '.($counts['changed'] ?? 0), 'same' => 'без изменений '.($counts['same'] ?? 0), 'unknown' => 'нет в каталоге '.($counts['unknown'] ?? 0), 'invalid' => 'ошибки '.($counts['invalid'] ?? 0)] as $k => $label)
                         <button type="button" wire:click="$set('rowFilter', '{{ $k }}')"
@@ -110,6 +114,7 @@
                                     <td class="px-2 py-1.5 text-right mono whitespace-nowrap">
                                         {!! $old ? $cell($old['price'], $r['price']) : e($money($r['price'])) !!}
                                         @if($pct !== null && abs($pct) >= 0.01)<div class="text-[10.5px] {{ $pct > 0 ? 'text-red-700' : 'text-emerald-700' }}">{{ $pct > 0 ? '+' : '' }}{{ number_format($pct, 1, ',', ' ') }}%</div>@endif
+                                        @if($pct !== null && abs($pct) >= 30)<div class="text-[10.5px] font-semibold text-amber-700" title="Цена меняется больше чем на 30% — проверьте, нет ли ошибки в выгрузке">⚠ резкое изменение</div>@endif
                                     </td>
                                     <td class="px-2 py-1.5 text-right mono whitespace-nowrap">{!! $old ? $cell($old['price_min'], $r['price_min']) : e($money($r['price_min'])) !!}</td>
                                     <td class="px-2 py-1.5 text-right mono whitespace-nowrap">{!! $old ? $cell($old['purchase_price'], $r['purchase_price']) : e($money($r['purchase_price'])) !!}</td>
