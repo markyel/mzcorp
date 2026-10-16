@@ -197,8 +197,16 @@ class MediaPublisherService
     {
         // Артикулы в тексте превращаем в ссылки на карточки товара: читателю
         // из ленты идти больше некуда, а по артикулу он искать не станет.
+        $text = $this->text($publication);
+        // Хэштеги темы — в конец поста (кликабельны и в Telegram, и во ВКонтакте, и в MAX).
+        $tags = $publication->topic?->hashtagList() ?? [];
+        if ($tags !== [] && ! str_contains($text, $tags[0])) {
+            $text .= "\n\n".implode(' ', $tags);
+        }
         ['text' => $text, 'html' => $html] = app(MediaLinkService::class)
-            ->linkify($this->text($publication), (string) $channel->kind);
+            ->linkify($text, (string) $channel->kind);
+        // Заголовки выделяем: жирным там, где есть разметка, маркером — во ВКонтакте.
+        ['text' => $text, 'html' => $html] = self::formatHeadings($text, (string) $channel->kind, $html);
 
         $images = $this->usableImages($publication->images());
 
@@ -688,6 +696,50 @@ class MediaPublisherService
         }
 
         return $out;
+    }
+
+    /** Маркер раздела во ВКонтакте: разметки на стене нет, жирным не выделить. */
+    public const VK_HEADING_MARK = '▪️ ';
+
+    /**
+     * Заголовки в посте: первая строка (название материала) и строки разделов — короткая строка,
+     * которая кончается двоеточием («Программы замены и модернизации:»), а за ней идёт текст.
+     * Telegram и MAX — жирным (текст переводится в HTML, если ещё не), ВКонтакте — маркером в
+     * начале строки раздела (стена разметку не понимает). Пункты списка заголовками не считаем.
+     *
+     * @return array{text: string, html: bool}
+     */
+    public static function formatHeadings(string $text, string $kind, bool $html): array
+    {
+        $bold = in_array($kind, ['telegram', 'max'], true);
+        if (! $bold && $kind !== 'vk') {
+            return ['text' => $text, 'html' => $html];
+        }
+        if ($bold && ! $html) {
+            $text = htmlspecialchars($text, ENT_NOQUOTES | ENT_HTML5, 'UTF-8');
+            $html = true;
+        }
+
+        $lines = explode("\n", $text);
+        $firstContent = null;
+        foreach ($lines as $i => $line) {
+            if (trim($line) !== '') {
+                $firstContent = $i;
+                break;
+            }
+        }
+        foreach ($lines as $i => $line) {
+            $plain = trim($bold ? strip_tags($line) : $line);
+            $next = trim($lines[$i + 1] ?? '');
+            $isTitle = $bold && $i === $firstContent && mb_strlen($plain) <= 150;
+            $isSection = $plain !== '' && mb_strlen($plain) <= 90 && str_ends_with($plain, ':') && $next !== ''
+                && preg_match('/^(?:[•#\-–—]|\d+[.)])/u', $plain) !== 1;
+            if ($isTitle || $isSection) {
+                $lines[$i] = $bold ? '<b>'.trim($line).'</b>' : self::VK_HEADING_MARK.trim($line);
+            }
+        }
+
+        return ['text' => implode("\n", $lines), 'html' => $html];
     }
 
     /**

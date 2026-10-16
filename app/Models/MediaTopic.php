@@ -37,7 +37,7 @@ class MediaTopic extends Model
 
     protected $fillable = [
         'title', 'brief', 'source', 'cadence_days', 'next_due_on',
-        'publish_weekday', 'is_active', 'created_by_user_id', 'advanced_on',
+        'publish_weekday', 'is_active', 'created_by_user_id', 'advanced_on', 'hashtags',
     ];
 
     protected $casts = [
@@ -75,6 +75,27 @@ class MediaTopic extends Model
             && $this->cadence_days
             && $this->next_due_on !== null
             && $this->next_due_on->startOfDay()->lte(now()->startOfDay());
+    }
+
+    /**
+     * Хэштеги в конец поста: свои темы (поле «Хэштеги») или по типу темы, плюс общие. Каждый —
+     * с «#», без пробелов и знаков (иначе соцсеть оборвёт тег), без повторов.
+     *
+     * @return list<string>
+     */
+    public function hashtagList(): array
+    {
+        $own = preg_split('/[\s,;]+/u', trim((string) $this->hashtags), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $topical = $own !== [] ? $own : (array) config('services.marketing.hashtags.by_source.'.$this->source, []);
+        $out = [];
+        foreach ([...$topical, ...(array) config('services.marketing.hashtags.common', [])] as $tag) {
+            $tag = preg_replace('/[^\p{L}\p{N}_]/u', '', (string) $tag) ?? '';
+            if ($tag !== '') {
+                $out[mb_strtolower($tag)] ??= '#'.$tag;
+            }
+        }
+
+        return array_slice(array_values($out), 0, 8);
     }
 
     public function weekdayLabel(): ?string

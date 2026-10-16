@@ -77,6 +77,9 @@ class MediaPlan extends Component
     /** День недели публикации: 1 — понедельник … 7 — воскресенье, '' — любой. */
     public string $tpWeekday = '';
 
+    /** Хэштеги темы через пробел; пусто — по типу темы (config services.marketing.hashtags). */
+    public string $tpHashtags = '';
+
     /* --------------------------- Публикации ----------------------------- */
 
     /** Открытая на редактирование публикация. */
@@ -413,6 +416,7 @@ class MediaPlan extends Component
         $this->tpCadence = '';
         $this->tpNextDue = now()->toDateString();
         $this->tpWeekday = '';
+        $this->tpHashtags = '';
     }
 
     public function editTopic(int $id): void
@@ -429,6 +433,7 @@ class MediaPlan extends Component
         $this->tpCadence = $t->cadence_days !== null ? (string) $t->cadence_days : '';
         $this->tpNextDue = $t->next_due_on?->toDateString() ?? '';
         $this->tpWeekday = $t->publish_weekday ? (string) $t->publish_weekday : '';
+        $this->tpHashtags = (string) $t->hashtags;
     }
 
     public function cancelTopic(): void
@@ -459,6 +464,7 @@ class MediaPlan extends Component
                 'cadence_days' => ctype_digit(trim($this->tpCadence)) ? (int) $this->tpCadence : null,
                 'next_due_on' => trim($this->tpNextDue) !== '' ? trim($this->tpNextDue) : null,
                 'publish_weekday' => $weekday,
+                'hashtags' => trim($this->tpHashtags) !== '' ? mb_substr(trim($this->tpHashtags), 0, 500) : null,
                 'created_by_user_id' => $this->tpEditId ? null : auth()->id(),
             ] + ($this->tpEditId ? [] : ['is_active' => true]),
         );

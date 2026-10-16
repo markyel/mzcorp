@@ -299,6 +299,9 @@
                 </div>
                 <textarea wire:model="tpBrief" rows="3" class="{{ $area }}"
                           placeholder="Бриф: о чём тема, для кого, что в ней должно быть всегда"></textarea>
+                @php $tagPreview = (new \App\Models\MediaTopic(['source' => $tpSource, 'hashtags' => $tpHashtags]))->hashtagList(); @endphp
+                <input type="text" wire:model.live.debounce.400ms="tpHashtags" placeholder="Хэштеги темы через пробел, например: #лифтоваяотрасль #новости — пусто: по типу темы" class="{{ $inp }} mt-2 w-full">
+                <div class="mt-1 text-[11.5px] text-fg-4">В конце поста (Telegram, ВКонтакте, MAX): <span class="text-sky-700">{{ implode(' ', $tagPreview) ?: '—' }}</span></div>
                 <div class="flex items-center gap-2 mt-2">
                     <span class="flex-1 text-[11.5px] text-fg-4">{{ $this->sourceNote($tpSource) }}</span>
                     <button type="button" class="btn btn-sm" wire:click="cancelTopic">Отмена</button>
