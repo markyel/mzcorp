@@ -37,12 +37,13 @@ class MediaTopic extends Model
 
     protected $fillable = [
         'title', 'brief', 'source', 'cadence_days', 'next_due_on',
-        'publish_weekday', 'is_active', 'created_by_user_id',
+        'publish_weekday', 'is_active', 'created_by_user_id', 'advanced_on',
     ];
 
     protected $casts = [
         'cadence_days' => 'integer',
         'next_due_on' => 'date',
+        'advanced_on' => 'date',
         'publish_weekday' => 'integer',
         'is_active' => 'boolean',
     ];
@@ -126,16 +127,30 @@ class MediaTopic extends Model
      */
     public function advanceAfter(MediaPublication $publication): void
     {
-        if (! $this->cadence_days) {
+        if (! $this->shouldAdvance($publication, now())) {
             return;
         }
 
+        $this->forceFill(['next_due_on' => $this->nextDueAfterPublish()->toDateString(), 'advanced_on' => now()->toDateString()])->save();
+    }
+
+    /**
+     * Закрывает ли этот выпуск текущий срок темы. Нет, если материал запланирован раньше срока
+     * (второй канал того же выпуска после сдвига, старый черновик), и нет, если срок уже сдвинул
+     * выпуск сегодня: тот же выпуск позже в другой канал, у материала без даты плана. 09.10.2026
+     * дайджест ушёл в Telegram в 09:15, во ВКонтакте в 09:19 — и уехал на 23.10 вместо 16.10.
+     */
+    public function shouldAdvance(MediaPublication $publication, Carbon $day): bool
+    {
+        if (! $this->cadence_days) {
+            return false;
+        }
         $planned = $publication->planned_for;
         if ($this->next_due_on !== null && $planned !== null && $planned->lt($this->next_due_on->copy()->startOfDay())) {
-            return;
+            return false;
         }
 
-        $this->forceFill(['next_due_on' => $this->nextDueAfterPublish()->toDateString()])->save();
+        return $this->advanced_on === null || ! $this->advanced_on->isSameDay($day);
     }
 
     /** Ближайший «свой» день недели, начиная с указанной даты. */

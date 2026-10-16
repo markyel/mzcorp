@@ -35,6 +35,26 @@ class MediaScheduleTest extends TestCase
         $this->assertSame('2026-10-01', $biweekly->nextDueAfter(Carbon::parse('2026-09-29'), $biweekly->next_due_on)->toDateString());
     }
 
+    public function test_a_second_channel_of_the_same_release_does_not_move_the_due_date_again(): void
+    {
+        $digest = $this->topic(6, 'Дайджест новостей отрасли', 5, 7, '2026-10-09');
+        $friday = Carbon::parse('2026-10-09 09:15');
+
+        // Первый канал выпуска (автопубликация, запланирован на срок) — сдвигает срок.
+        $telegram = new \App\Models\MediaPublication(['planned_for' => '2026-10-09']);
+        $this->assertTrue($digest->shouldAdvance($telegram, $friday));
+        $digest->next_due_on = $digest->nextDueAfter($friday, $digest->next_due_on);
+        $digest->advanced_on = $friday->copy();
+        $this->assertSame('2026-10-16', $digest->next_due_on->toDateString());
+
+        // ВКонтакте того же выпуска в 09:19, без даты плана — срок не трогает (было: 23.10).
+        $vk = new \App\Models\MediaPublication(['planned_for' => null]);
+        $this->assertFalse($digest->shouldAdvance($vk, Carbon::parse('2026-10-09 09:19')));
+
+        // Следующий выпуск 16.10 — снова сдвигает.
+        $this->assertTrue($digest->shouldAdvance(new \App\Models\MediaPublication(['planned_for' => '2026-10-16']), Carbon::parse('2026-10-16 09:15')));
+    }
+
     public function test_own_weekday_topic_goes_first_then_the_most_overdue(): void
     {
         $tuesday = Carbon::parse('2026-09-29');
