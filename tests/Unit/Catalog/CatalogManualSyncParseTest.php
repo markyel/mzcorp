@@ -29,7 +29,7 @@ class CatalogManualSyncParseTest extends TestCase
         $path = $this->file(
             ['Веб', 'Артикул', 'Наименование', 'Цена закупки', 'Маржа%', 'Цена продажи', 'Цена продажи (мин)', 'Дата цены продажи', 'На складе <Свободно>'],
             [
-                ['Да', 'M10776', 'Поручень резин. 7539FWNX', '2 727,00', 1.61, '4 399,00', '3 519,20', 46311, 0],
+                ['Да', 'M10776', 'Поручень резин. 7539FWNX', '2 727,00', 1.61, '4 399,00', '3 519,20', 46311, '1 122'],
                 ['Нет', 'm13575 ', 'Предохранитель ВП1-1В 5А', 44.25, 1.6, 70.8, 60.18, '16.10.2026', 0],
                 ['Да', 'M00001', 'Без цены', '', 1.6, '', '', 46311, 0],
                 ['Да', 'M10776', 'Повтор', '1,00', 1, '2,00', '1,00', 46311, 0],
@@ -45,6 +45,7 @@ class CatalogManualSyncParseTest extends TestCase
         $this->assertSame([null, null, 'нет цены продажи'], [$rows[0]['error'], $rows[1]['error'], $rows[2]['error']]);
         $this->assertStringContainsString('повторяется', (string) $rows[3]['error']);
         $this->assertSame(2, $rows[0]['line']);
+        $this->assertSame([1122, 0], [$rows[0]['stock'], $rows[1]['stock']]);   // «На складе <Свободно>»
     }
 
     public function test_plain_numbers_and_headers_without_spaces(): void

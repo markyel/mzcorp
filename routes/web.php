@@ -113,12 +113,13 @@ Route::middleware('auth')->group(function () {
         })->name('honest-sign.index');
     });
 
-    // «Синхронизация каталога» — выгрузка 1С с актуализированными ценами: разбор, «было → стало»,
-    // применение. Секретарь (выгружает из 1С), РОП, директорат, снабжение, админ.
-    Route::middleware('role:head_of_sales,director,secretary,procurement,admin')->group(function () {
-        Route::get('/dashboard/catalog-sync', fn () => view('catalog-sync.index'))->name('catalog-sync.index');
-        Route::post('/dashboard/catalog-sync', \App\Http\Controllers\Catalog\ManualSyncUploadController::class)->name('catalog-sync.upload');
-    });
+    // «Синхронизация каталога» — выгрузка 1С с актуализированными ценами и остатками: разбор,
+    // «было → стало», применение. Раздел виден всем; загружает и применяет секретарь (выгружает
+    // из 1С) и руководство — ManualSync::MANAGE_ROLES.
+    Route::get('/dashboard/catalog-sync', fn () => view('catalog-sync.index'))->name('catalog-sync.index');
+    Route::post('/dashboard/catalog-sync', \App\Http\Controllers\Catalog\ManualSyncUploadController::class)
+        ->middleware('role:'.implode(',', \App\Livewire\Catalog\ManualSync::MANAGE_ROLES))
+        ->name('catalog-sync.upload');
 
     // «Использование системы» — статистика активности менеджеров
     // (время в системе, отправленные письма, сопоставления каталогу,

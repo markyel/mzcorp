@@ -22,10 +22,12 @@ use RuntimeException;
  * продажи, остатки, ячейка) и загружает в раздел «Синхронизация каталога».
  *
  * Разбор → предпросмотр «было → стало» → «Применить». Обновляются только позиции файла: цена,
- * минимальная, закупочная, «цена актуальна»; история цен — как у планового импорта
- * (catalog_price_changes), заявки, ждущие цену, подхватывает ReconcilePriceRefreshJob. Остатки
- * из файла не берём — их 6 раз в сутки обновляет плановый импорт. Цена держится
- * (CatalogManualPrice), пока выгрузка mylift отдаёт старую, см. CatalogImportService::holdManualPrices.
+ * минимальная, закупочная, «цена актуальна» и свободный остаток на складе; история цен — как у
+ * планового импорта (catalog_price_changes), заявки, ждущие цену, подхватывает
+ * ReconcilePriceRefreshJob. Цена держится (CatalogManualPrice), пока выгрузка mylift отдаёт старую,
+ * см. CatalogImportService::holdManualPrices. Остаток не держим: следующая новая выгрузка mylift —
+ * более свежий снимок склада. «В пути» из файла не берём: в нём нет дат прихода, а витрины и КП
+ * показывают партии в пути по датам.
  *
  * Файл бывает в двух видах: числа числами или текстом «2 727,00», заголовки с пробелами или без.
  */
@@ -41,6 +43,7 @@ class CatalogManualSyncService
         'ценапродажи(мин)' => 'price_min',
         'датаценыпродажи' => 'price_date',
         'веб' => 'web',
+        'наскладе<свободно>' => 'stock',
     ];
 
     /**
@@ -90,6 +93,7 @@ class CatalogManualSyncService
                 'purchase_price' => isset($map['purchase_price']) ? self::number($row[$map['purchase_price']] ?? null) : null,
                 'margin' => isset($map['margin']) ? self::number($row[$map['margin']] ?? null) : null,
                 'price_date' => isset($map['price_date']) ? self::date($row[$map['price_date']] ?? null) : null,
+                'stock' => isset($map['stock']) && ($st = self::number($row[$map['stock']] ?? null)) !== null ? max(0, (int) round($st)) : null,
                 'error' => null,
             ];
             if ($item['price'] === null || $item['price'] <= 0) {
@@ -113,7 +117,7 @@ class CatalogManualSyncService
     public function preview(array $rows): array
     {
         $catalog = CatalogItem::query()->whereIn('sku', array_column($rows, 'sku'))
-            ->get(['id', 'sku', 'name', 'price', 'price_min', 'purchase_price', 'is_price_actual', 'is_active'])
+            ->get(['id', 'sku', 'name', 'price', 'price_min', 'purchase_price', 'is_price_actual', 'is_active', 'stock_available'])
             ->keyBy(fn ($c) => mb_strtoupper(trim((string) $c->sku)));
 
         return array_map(function (array $r) use ($catalog) {
@@ -125,6 +129,7 @@ class CatalogManualSyncService
                 'price_min' => $c->price_min !== null ? (float) $c->price_min : null,
                 'purchase_price' => $c->purchase_price !== null ? (float) $c->purchase_price : null,
                 'actual' => (bool) $c->is_price_actual,
+                'stock' => $c->stock_available !== null ? (int) $c->stock_available : null,
             ] : null;
             $r['status'] = match (true) {
                 $r['error'] !== null => CatalogManualSync::ROW_INVALID,
@@ -132,6 +137,7 @@ class CatalogManualSyncService
                 self::differs($r['old']['price'], $r['price'])
                     || ($r['price_min'] !== null && self::differs($r['old']['price_min'], $r['price_min']))
                     || ($r['purchase_price'] !== null && self::differs($r['old']['purchase_price'], $r['purchase_price']))
+                    || ($r['stock'] ?? null) !== null && $r['stock'] !== $r['old']['stock']
                     || ! $r['old']['actual'] => CatalogManualSync::ROW_CHANGED,
                 default => CatalogManualSync::ROW_SAME,
             };
@@ -199,6 +205,15 @@ class CatalogManualSyncService
                         }
                         if ($r['purchase_price'] !== null) {
                             $fields['purchase_price'] = $r['purchase_price'];
+                        }
+                        if (($r['stock'] ?? null) !== null && $r['stock'] !== $old['stock']) {
+                            $fields['stock_available'] = $r['stock'];
+                            // Как у планового импорта: «на складе с» — с момента, когда появился остаток.
+                            if ($r['stock'] <= 0) {
+                                $fields['in_stock_since'] = null;
+                            } elseif ((int) ($old['stock'] ?? 0) <= 0) {
+                                $fields['in_stock_since'] = $now;
+                            }
                         }
                         CatalogItem::query()->whereKey($r['catalog_item_id'])->update($fields);
                         $updated++;

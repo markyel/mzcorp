@@ -16,6 +16,9 @@ use Throwable;
  */
 class ManualSync extends Component
 {
+    /** Кто загружает и применяет (раздел виден всем): секретарь выгружает из 1С, руководство. */
+    public const MANAGE_ROLES = ['secretary', 'head_of_sales', 'director', 'procurement', 'admin'];
+
     /** Открытая загрузка. */
     #[Url(as: 'sync')]
     public ?int $syncId = null;
@@ -26,8 +29,13 @@ class ManualSync extends Component
 
     public function mount(): void
     {
-        abort_unless(auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'secretary', 'procurement', 'admin']), 403);
         $this->syncId ??= CatalogManualSync::query()->where('status', CatalogManualSync::STATUS_PARSED)->latest('id')->value('id');
+    }
+
+    #[Computed]
+    public function canManage(): bool
+    {
+        return (bool) auth()->user()?->hasAnyRole(self::MANAGE_ROLES);
     }
 
     #[Computed]
@@ -51,6 +59,7 @@ class ManualSync extends Component
 
     public function apply(CatalogManualSyncService $service): void
     {
+        abort_unless($this->canManage, 403);
         $sync = $this->sync ?? abort(404);
         try {
             $r = $service->apply($sync, auth()->user());
@@ -65,6 +74,7 @@ class ManualSync extends Component
 
     public function cancel(): void
     {
+        abort_unless($this->canManage, 403);
         $sync = $this->sync ?? abort(404);
         if ($sync->status === CatalogManualSync::STATUS_PARSED) {
             $sync->forceFill(['status' => CatalogManualSync::STATUS_CANCELLED])->save();

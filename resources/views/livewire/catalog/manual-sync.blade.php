@@ -9,7 +9,7 @@
             \App\Models\CatalogManualSync::STATUS_FAILED => ['ошибка', 'chip-neutral'],
         ];
         $rowLabel = [
-            'changed' => ['цена изменится', 'chip-sky'],
+            'changed' => ['изменится', 'chip-sky'],
             'same' => ['без изменений', 'chip-neutral'],
             'unknown' => ['нет в каталоге', 'chip-warn'],
             'invalid' => ['ошибка в строке', 'chip-warn'],
@@ -26,14 +26,19 @@
             <div class="text-[12.5px] text-fg-3">
                 Выгрузите из 1С список позиций с актуализированной ценой (Артикул, Наименование, Цена закупки, Маржа%,
                 Цена продажи, Цена продажи (мин), Дата цены продажи…) и загрузите файл. Система покажет, что изменится, —
-                цены попадут в каталог только после кнопки «Применить». Позиции станут «цена актуальна», в историю цен
-                запишутся изменения. Остатки из файла не берём: их несколько раз в день обновляет основная выгрузка каталога.
+                цены и остатки попадут в каталог только после кнопки «Применить». Позиции станут «цена актуальна», в историю цен
+                запишутся изменения, остаток на складе — из колонки «На складе &lt;Свободно&gt;». «В пути» берётся из основной
+                выгрузки каталога: в файле 1С нет дат прихода.
             </div>
+            @if($this->canManage)
             <form method="post" action="{{ route('catalog-sync.upload') }}" enctype="multipart/form-data" class="flex flex-wrap items-center gap-3">
                 @csrf
                 <input type="file" name="file" accept=".xlsx,.xls" required class="text-[13px]">
                 <button type="submit" class="btn btn-primary">Загрузить и разобрать</button>
             </form>
+            @else
+                <div class="text-[12px] text-fg-4">Загружает и применяет выгрузку секретарь — здесь видно, что и когда обновлялось.</div>
+            @endif
             @error('file')<div class="text-[12.5px] text-red-700">{{ $message }}</div>@enderror
         </div>
     </div>
@@ -54,11 +59,11 @@
                 <span class="text-[12px] text-fg-3">загрузил {{ $sync->user?->name ?? '—' }} · {{ $sync->created_at->timezone('Europe/Moscow')->format('d.m.Y H:i') }}
                     @if($sync->applied_at) · применил {{ $sync->appliedBy?->name ?? '—' }} {{ $sync->applied_at->timezone('Europe/Moscow')->format('d.m H:i') }}@endif
                 </span>
-                @if($sync->status === \App\Models\CatalogManualSync::STATUS_PARSED)
+                @if($sync->status === \App\Models\CatalogManualSync::STATUS_PARSED && $this->canManage)
                     <span class="flex-1"></span>
                     <button type="button" wire:click="cancel" class="btn btn-sm" wire:confirm="Отменить эту загрузку? Каталог не изменится.">Отменить</button>
                     <button type="button" wire:click="apply" wire:loading.attr="disabled" wire:target="apply" class="btn btn-sm btn-primary"
-                            wire:confirm="Применить: обновить цены у {{ $sync->rows_changed }} поз. и отметить цены актуальными?">
+                            wire:confirm="Применить: обновить цены и остатки у {{ $sync->rows_changed }} поз. и отметить цены актуальными?">
                         <span wire:loading.remove wire:target="apply">Применить ({{ $sync->rows_changed }})</span>
                         <span wire:loading wire:target="apply">Применяю…</span>
                     </button>
@@ -69,7 +74,7 @@
                     <div class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">⚠ У {{ $sharp }} поз. цена меняется больше чем на 30% — проверьте их перед «Применить» (отмечены в таблице).</div>
                 @endif
                 <div class="flex flex-wrap gap-2 text-[12px]">
-                    @foreach(['all' => 'все '.$rows->count(), 'changed' => 'цена изменится '.($counts['changed'] ?? 0), 'same' => 'без изменений '.($counts['same'] ?? 0), 'unknown' => 'нет в каталоге '.($counts['unknown'] ?? 0), 'invalid' => 'ошибки '.($counts['invalid'] ?? 0)] as $k => $label)
+                    @foreach(['all' => 'все '.$rows->count(), 'changed' => 'изменится '.($counts['changed'] ?? 0), 'same' => 'без изменений '.($counts['same'] ?? 0), 'unknown' => 'нет в каталоге '.($counts['unknown'] ?? 0), 'invalid' => 'ошибки '.($counts['invalid'] ?? 0)] as $k => $label)
                         <button type="button" wire:click="$set('rowFilter', '{{ $k }}')"
                                 class="h-[26px] px-2.5 rounded-md border {{ $rowFilter === $k ? 'bg-[var(--accent)] text-fg-on-accent border-[var(--accent)]' : 'bg-surface text-fg-2 border-border hover:text-fg-1' }}">{{ $label }}</button>
                     @endforeach
@@ -84,6 +89,7 @@
                                 <th class="text-right px-2 py-1.5">Цена продажи</th>
                                 <th class="text-right px-2 py-1.5">Цена мин.</th>
                                 <th class="text-right px-2 py-1.5">Закупка</th>
+                                <th class="text-right px-2 py-1.5" title="На складе &lt;Свободно&gt;">Остаток</th>
                                 <th class="text-left px-2 py-1.5">Дата цены</th>
                                 <th class="text-left px-2 py-1.5"></th>
                             </tr>
@@ -118,6 +124,10 @@
                                     </td>
                                     <td class="px-2 py-1.5 text-right mono whitespace-nowrap">{!! $old ? $cell($old['price_min'], $r['price_min']) : e($money($r['price_min'])) !!}</td>
                                     <td class="px-2 py-1.5 text-right mono whitespace-nowrap">{!! $old ? $cell($old['purchase_price'], $r['purchase_price']) : e($money($r['purchase_price'])) !!}</td>
+                                    <td class="px-2 py-1.5 text-right mono whitespace-nowrap">
+                                        @php $was = $old['stock'] ?? null; $now = $r['stock'] ?? null; @endphp
+                                        @if($now === null){{ $was ?? '—' }}@elseif($old && $was !== $now)<span class="text-fg-4 line-through">{{ $was ?? '—' }}</span><br><b>{{ $now }}</b>@else{{ $now }}@endif
+                                    </td>
                                     <td class="px-2 py-1.5 whitespace-nowrap text-fg-3">{{ $r['price_date'] ? \Illuminate\Support\Carbon::parse($r['price_date'])->format('d.m.Y') : '—' }}</td>
                                     <td class="px-2 py-1.5 whitespace-nowrap">
                                         <span class="chip {{ $rl[1] }} text-[10.5px]">{{ $rl[0] }}</span>
@@ -126,7 +136,7 @@
                                     </td>
                                 </tr>
                             @empty
-                                <tr><td colspan="8" class="px-2 py-6 text-center text-fg-3">Строк с таким статусом нет.</td></tr>
+                                <tr><td colspan="9" class="px-2 py-6 text-center text-fg-3">Строк с таким статусом нет.</td></tr>
                             @endforelse
                         </tbody>
                     </table>
@@ -147,7 +157,7 @@
                             <th class="text-left px-2 py-1.5">Файл</th>
                             <th class="text-left px-2 py-1.5">Кто</th>
                             <th class="text-right px-2 py-1.5">Строк</th>
-                            <th class="text-right px-2 py-1.5">Изменение цены</th>
+                            <th class="text-right px-2 py-1.5">Изменений</th>
                             <th class="text-right px-2 py-1.5">Нет в каталоге</th>
                             <th class="text-left px-2 py-1.5">Статус</th>
                         </tr>
