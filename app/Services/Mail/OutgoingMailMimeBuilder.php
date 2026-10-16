@@ -383,6 +383,19 @@ class OutgoingMailMimeBuilder
             if ($id === '' || substr_count($id, '@') !== 1 || preg_match('/[\s<>]/', $id)) {
                 continue;
             }
+            // Пустая часть до/после «@» (minudo.ru шлёт Message-ID «uuid@»,
+            // 12.10.2026) и прочее, что Symfony не примет как addr-spec:
+            // проверяем тем же Address, что и IdentificationHeader, и
+            // выбрасываем только этот ID — тред держится на остальных.
+            [$local, $domain] = explode('@', $id);
+            if ($local === '' || $domain === '') {
+                continue;
+            }
+            try {
+                new Address($id);
+            } catch (\Throwable) {
+                continue;
+            }
             $out[] = $id;
         }
 
