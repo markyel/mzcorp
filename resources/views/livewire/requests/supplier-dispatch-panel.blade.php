@@ -12,6 +12,31 @@
         <div class="ds-card"><div class="ds-card-body text-[13px] text-emerald-700">{{ session('status') }}</div></div>
     @endif
 
+    {{-- Фоновая рассылка запросов: пока идёт — обновляется сама. --}}
+    @if($run = $this->dispatchRun)
+        <div class="ds-card" @if($run['active']) wire:poll.3s @endif>
+            <div class="ds-card-body text-[13px] space-y-1">
+                <div class="flex flex-wrap items-center gap-2">
+                    @if($run['active'])
+                        <span class="inline-block h-2 w-2 rounded-full bg-sky-500 animate-pulse"></span>
+                        <b>Рассылка запросов идёт:</b> отправлено {{ $run['sent'] }} из {{ $run['total'] }}
+                        @if($run['current'])<span class="text-fg-3">· сейчас: {{ $run['current'] }}</span>@endif
+                    @elseif($run['status'] === 'failed')
+                        <b class="text-red-700">Рассылка прервалась:</b> отправлено {{ $run['sent'] }} из {{ $run['total'] }}
+                        @if($run['error'])<span class="text-red-700">· {{ $run['error'] }}</span>@endif
+                    @else
+                        <b class="text-emerald-700">Рассылка завершена:</b> отправлено {{ $run['sent'] }} из {{ $run['total'] }}
+                    @endif
+                    <span class="text-fg-4 text-[11.5px]">{{ $run['user_name'] }} · {{ \Illuminate\Support\Carbon::parse($run['started_at'])->timezone('Europe/Moscow')->format('H:i') }}</span>
+                </div>
+                @if($run['failed'] > 0)<div class="text-red-700 text-[12px]">Не ушло писем: {{ $run['failed'] }} — проверьте адреса поставщиков или отправьте им ещё раз.</div>@endif
+                @if(! empty($run['skipped']))
+                    <div class="text-fg-3 text-[12px]">Повторно не отправлено — эти позиции им уже ушли: {{ collect($run['skipped'])->map(fn ($x) => $x['supplier'].' в '.$x['at'])->implode(', ') }}</div>
+                @endif
+            </div>
+        </div>
+    @endif
+
     {{-- 0. Уже отправленные запросы (кому + сколько позиций) --}}
     @if($this->sentInquiries->isNotEmpty())
         <div class="ds-card">

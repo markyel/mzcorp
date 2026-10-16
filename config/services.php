@@ -1056,6 +1056,14 @@ return [
     // QuoteParts — отдельная платформа работы с поставщиками (quoteparts.ru). mzcorp — её
     // клиент через API: передаёт пул позиций (часть карточки + закупки 1С) и держит его
     // в актуальном состоянии. Ключ API выдаёт QuoteParts (qp:api-token:create).
+    // Запросы поставщикам письмом из заявки (панель «Поставщики»).
+    'supplier_dispatch' => [
+        // Те же позиции заявки тому же поставщику за это окно (мин) повторно не уходят.
+        'duplicate_window_min' => (int) env('SUPPLIER_DISPATCH_DUPLICATE_WINDOW_MIN', 30),
+        // Рассылка уходит фоновой задачей (письмо — до минуты, страница ждёт 60 с).
+        'queue' => env('SUPPLIER_DISPATCH_QUEUE', 'default'),
+    ],
+
     'quoteparts' => [
         'url' => env('QUOTEPARTS_URL', 'https://quoteparts.ru'),
         'token' => env('QUOTEPARTS_API_TOKEN', ''),

@@ -86,6 +86,8 @@ class SupplierDispatchService
         $sent = 0;
         $failed = 0;
         $suppliers = [];
+        /** @var list<array{supplier: string, at: string}> $skipped поставщики, кому эти позиции только что уже ушли */
+        $skipped = [];
 
         $supplierIds = array_values(array_unique(array_map('intval', $supplierIds)));
         $selectedSuppliers = $supplierIds === []
@@ -99,6 +101,14 @@ class SupplierDispatchService
         foreach ($selectedSuppliers as $supplier) {
             if (trim((string) $supplier->email) === '') {
                 $failed++;
+                continue;
+            }
+
+            // Эти позиции этой заявки этому поставщику только что уже ушли — второй раз не шлём
+            // (16.10.2026: страница отвалилась по таймауту, менеджер нажал ещё раз — дубли).
+            if (($dup = $this->recentDuplicate($request, (string) $supplier->email, $items->pluck('id')->all())) !== null) {
+                $skipped[] = ['supplier' => (string) ($supplier->name ?: $supplier->email), 'at' => $dup->created_at->timezone('Europe/Moscow')->format('H:i')];
+
                 continue;
             }
 
@@ -228,7 +238,36 @@ class SupplierDispatchService
             'failed' => $failed,
             'no_supplier' => 0,
             'suppliers' => $suppliers,
+            'skipped' => $skipped,
         ];
+    }
+
+    /**
+     * Запрос этому поставщику по этой заявке, ушедший недавно (окно — config
+     * services.supplier_dispatch.duplicate_window_min) и покрывающий все эти позиции: повтор.
+     * Частичное пересечение — не повтор: новые позиции спросить можно.
+     *
+     * @param  list<int>  $itemIds
+     */
+    public function recentDuplicate(RequestModel $request, string $email, array $itemIds): ?SupplierInquiry
+    {
+        $window = (int) config('services.supplier_dispatch.duplicate_window_min', 30);
+        if ($window <= 0 || $itemIds === []) {
+            return null;
+        }
+        $recent = SupplierInquiry::query()
+            ->where('related_request_id', $request->id)
+            ->where('supplier_email', mb_strtolower(trim($email)))
+            ->where('created_at', '>=', now()->subMinutes($window))
+            ->latest('id')->get(['id', 'created_at']);
+        foreach ($recent as $inquiry) {
+            $asked = SupplierInquiryItem::query()->where('supplier_inquiry_id', $inquiry->id)->pluck('request_item_id')->all();
+            if (array_diff($itemIds, $asked) === []) {
+                return $inquiry;
+            }
+        }
+
+        return null;
     }
 
     /**

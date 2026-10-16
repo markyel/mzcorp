@@ -263,6 +263,26 @@ class SupplierDispatchPanel extends Component
             : 'Сохранено как ваш текст по умолчанию', type: 'success');
     }
 
+    /* ------------------------ Фоновая рассылка ------------------------ */
+
+    /**
+     * Ход фоновой рассылки по заявке (SendSupplierDispatchJob): показываем, пока идёт, и два
+     * часа после — чтобы было видно, что ушло и что отсеяно как повтор.
+     *
+     * @return array<string, mixed>|null
+     */
+    #[Computed]
+    public function dispatchRun(): ?array
+    {
+        $run = app(\App\Services\Supplier\SupplierDispatchRuns::class)->current($this->requestId);
+        if ($run === null) {
+            return null;
+        }
+        $active = in_array($run['status'], ['queued', 'running'], true);
+
+        return $active || \Illuminate\Support\Carbon::parse($run['updated_at'])->gt(now()->subHours(2)) ? $run + ['active' => $active] : null;
+    }
+
     /* ----------------------- Уже отправленные запросы --------------------- */
 
     /**
@@ -1052,24 +1072,44 @@ class SupplierDispatchPanel extends Component
         ];
         // Поставщики, принявшие приглашение QuoteParts, — через платформу; остальным письмо.
         $route = app(\App\Services\QuoteParts\QuotePartsRouting::class)->split($supplierIds);
+        $runs = app(\App\Services\Supplier\SupplierDispatchRuns::class);
+        if ($route['mail'] !== [] && ($active = $runs->active($req->id)) !== null) {
+            $this->addError('send', 'По заявке уже идёт рассылка ('.$active['user_name'].': отправлено '.$active['sent'].' из '.$active['total'].') — дождитесь, она видна выше.');
+
+            return null;
+        }
         // В QuoteParts — те же вложения, что и в письмо: фото позиций, загруженные файлы, отмеченные файлы заявки.
         $qpFiles = $extraFiles;
         foreach (\App\Models\EmailAttachment::query()->whereIn('id', $reqAttIds)->get() as $a) {
             $qpFiles[] = ['path' => (string) $a->file_path, 'disk' => (string) ($a->disk ?: 'local'), 'name' => (string) $a->filename, 'mime' => (string) ($a->mime_type ?: 'application/octet-stream')];
         }
         $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($req, $itemIds, $route['quoteparts'], $user, $qpFiles) : null;
-        $result = $route['mail'] === []
-            ? ['sent' => 0, 'failed' => 0]
-            : $dispatcher->dispatch($req, $route['mail'], $itemIds, $this->note, $user, $reqAttIds, $extraFiles, $edits);
-        if ($result['sent'] > 0 || ($qpMsg !== null && $route['mail'] === [])) {
+        // Письма — фоновой рассылкой (письмо уходит до минуты, страница ждёт 60 с: по таймауту
+        // менеджер жал ещё раз и поставщики получали дубли). Повторы отсеиваем сразу.
+        $skipped = [];
+        $toSend = [];
+        $names = [];
+        foreach (Supplier::query()->whereIn('id', $route['mail'])->get(['id', 'name', 'email']) as $s) {
+            if (($dup = $dispatcher->recentDuplicate($req, (string) $s->email, $itemIds)) !== null) {
+                $skipped[] = ['supplier' => (string) ($s->name ?: $s->email), 'at' => $dup->created_at->timezone('Europe/Moscow')->format('H:i')];
+
+                continue;
+            }
+            $toSend[] = (int) $s->id;
+            $names[] = (string) ($s->name ?: $s->email);
+        }
+        if ($toSend !== []) {
+            $run = $runs->start($req->id, (int) $user->id, (string) $user->name, $names, $skipped);
+            \App\Jobs\Suppliers\SendSupplierDispatchJob::dispatch($run['id'], $req->id, $toSend, $itemIds, $this->note, (int) $user->id, $reqAttIds, $extraFiles, $edits);
+        }
+        if ($qpMsg !== null && $route['mail'] === []) {
             \App\Models\SupplierDispatchDraft::query()->where('request_id', $this->requestId)->where('user_id', $user->id)->delete();
         }
 
-        $msg = ($qpMsg ? $qpMsg.' ' : '').($route['mail'] === [] ? '' : "Отправлено запросов поставщикам: {$result['sent']}.");
-        if ($result['failed'] > 0) {
-            $msg .= " Ошибок: {$result['failed']}.";
-        }
-        session()->flash('status', $msg);
+        $msg = ($qpMsg ? $qpMsg.' ' : '')
+            .($toSend !== [] ? 'Рассылка запущена: '.count($toSend).' '.trans_choice('поставщику|поставщикам|поставщикам', count($toSend)).' — письма уходят в фоне, ход виден выше.' : '')
+            .($skipped !== [] ? ' Повторно не отправлено (эти позиции уже ушли): '.collect($skipped)->map(fn ($x) => $x['supplier'].' в '.$x['at'])->implode(', ').'.' : '');
+        session()->flash('status', trim($msg));
 
         return $this->redirect(route('requests.show', ['request' => $req, 'tab' => 'suppliers']), navigate: false);
     }
