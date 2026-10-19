@@ -26,6 +26,9 @@
         <button type="button" wire:click="setTab('suppliers')" class="btn btn-sm {{ $tab === 'suppliers' ? 'btn-primary' : '' }}">
             Поставщики <span class="opacity-70">{{ $this->invitedSuppliers->count() }}</span>
         </button>
+        <button type="button" wire:click="setTab('offers')" class="btn btn-sm {{ $tab === 'offers' ? 'btn-primary' : '' }}" title="Свежие предложения поставщиков: ответы на запросы, кабинет, прайсы">
+            Актуализация цен <span class="opacity-70">{{ $this->freshOffersCount }}</span>
+        </button>
         <button type="button" wire:click="setTab('prices')" class="btn btn-sm {{ $tab === 'prices' ? 'btn-primary' : '' }}">Закупки 1С</button>
         <button type="button" wire:click="setTab('groups')" class="btn btn-sm {{ $tab === 'groups' ? 'btn-primary' : '' }}">Группы товаров</button>
         <button type="button" wire:click="setTab('pilot')" class="btn btn-sm {{ $tab === 'pilot' ? 'btn-primary' : '' }}">
@@ -184,6 +187,10 @@
                 </table>
             </div>
         </div>
+    @endif
+
+    @if($tab === 'offers')
+        <livewire:quote-parts.price-offers />
     @endif
 
     @if($tab === 'prices')

@@ -37,6 +37,9 @@ class QuotePartsOffer extends Model
         'review_status',
         'reviewed_by_user_id',
         'reviewed_at',
+        'rfq_remote_id',
+        'rfq_tag',
+        'request_id',
     ];
 
     /** Разбор отклонения (не оригинала): ждёт, принято к закупке, отклонено. */
@@ -72,6 +75,12 @@ class QuotePartsOffer extends Model
     public function catalogItem(): BelongsTo
     {
         return $this->belongsTo(CatalogItem::class);
+    }
+
+    /** Заявка, по которой шёл запрос QuoteParts (ответ на запрос по заявке). */
+    public function request(): BelongsTo
+    {
+        return $this->belongsTo(Request::class);
     }
 
     /** Цена годится как цена позиции: оригинал или отклонение, принятое к закупке. */

@@ -71,7 +71,7 @@ class SupplierOffersFeed extends Component
         $rows = collect();
 
         if ($this->source !== 'email') {
-            $qp = QuotePartsOffer::query()->with('catalogItem:id,sku,name')
+            $qp = QuotePartsOffer::query()->with(['catalogItem:id,sku,name', 'request:id,internal_code'])
                 ->where(fn ($q) => $q->where('remote_updated_at', '>=', $since)->orWhere('created_at', '>=', $since))
                 ->when($this->toReview, fn ($q) => $q->where('review_status', QuotePartsOffer::REVIEW_PENDING))
                 ->get();
@@ -87,7 +87,7 @@ class SupplierOffersFeed extends Component
                     'price' => $o->price !== null ? (float) $o->price : null, 'currency' => $o->currency,
                     'lead' => $o->lead_time_days, 'valid' => $o->valid_until?->format('d.m.Y'),
                     'stale' => $o->superseded || ! in_array($o->status, ['active', 'expiring'], true),
-                    'source' => 'quoteparts', 'ref' => $o->id, 'request' => null, 'request_id' => null, 'outcome' => 'quoted',
+                    'source' => 'quoteparts', 'ref' => $o->id, 'request' => $o->request?->internal_code, 'request_id' => $o->request_id, 'outcome' => 'quoted',
                 ]);
             }
         }

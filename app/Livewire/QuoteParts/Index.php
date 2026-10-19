@@ -45,7 +45,7 @@ class Index extends Component
 
     public function setTab(string $tab): void
     {
-        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
+        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
         $this->perPage = self::PER_PAGE;
     }
 
@@ -110,6 +110,15 @@ class Index extends Component
     public function poolCounts(): array
     {
         return QuotePartsPoolItem::query()->inPool()->selectRaw('status, count(*) as n')->groupBy('status')->pluck('n', 'status')->all();
+    }
+
+    /** Свежие (7 дней) действующие предложения поставщиков — счётчик вкладки «Актуализация цен». */
+    #[Computed]
+    public function freshOffersCount(): int
+    {
+        return \App\Models\QuotePartsOffer::query()->where('superseded', false)->whereIn('status', ['active', 'expiring'])
+            ->where(fn ($q) => $q->where('remote_updated_at', '>=', now()->subDays(7))->orWhere('created_at', '>=', now()->subDays(7)))
+            ->count();
     }
 
     /** Поставщики, приглашённые в QuoteParts (приглашают из карточки поставщика). */

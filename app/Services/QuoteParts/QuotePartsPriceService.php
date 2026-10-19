@@ -160,6 +160,11 @@ class QuotePartsPriceService
 
         $names = app(QuotePartsRfqService::class)->supplierNames([(object) ['snapshot' => ['suppliers' => collect($offers)->map(fn ($o) => ['external_id' => $o['supplier'] ?? null])->all()]]]);
         $catalog = CatalogItem::query()->whereIn('sku', collect($offers)->pluck('item_code')->filter()->unique())->pluck('id', 'sku');
+        // Ответ на запрос: заявка — по нашему запросу (quoteparts_rfqs), иначе по коду заявки в external_ref.
+        $rfqIds = collect($offers)->pluck('rfq.id')->filter()->unique()->values();
+        $requestByRfq = $rfqIds->isEmpty() ? collect() : \App\Models\QuotePartsRfq::query()->whereIn('remote_id', $rfqIds)->whereNotNull('request_id')->pluck('request_id', 'remote_id');
+        $refs = collect($offers)->pluck('rfq.external_ref')->filter()->unique()->values();
+        $requestByRef = $refs->isEmpty() ? collect() : \App\Models\Request::query()->whereIn('internal_code', $refs)->pluck('id', 'internal_code');
 
         foreach ($offers as $o) {
             $tiers = (array) ($o['tiers'] ?? []);
@@ -184,6 +189,11 @@ class QuotePartsPriceService
                 'product_name' => $o['product']['name'] ?? null,
                 'note' => isset($o['note']) ? mb_substr((string) $o['note'], 0, 1000) : null,
                 'photos' => (int) ($o['photos'] ?? 0),
+                'rfq_remote_id' => $o['rfq']['id'] ?? null,
+                'rfq_tag' => $o['rfq']['tag'] ?? null,
+                'request_id' => isset($o['rfq']['id'])
+                    ? ($requestByRfq[$o['rfq']['id']] ?? $requestByRef[$o['rfq']['external_ref'] ?? ''] ?? null)
+                    : null,
             ]);
             // Не оригинал — на разбор снабжению; то же предложение, уже разобранное раньше (продлённое,
             // повторённое), наследует решение.
