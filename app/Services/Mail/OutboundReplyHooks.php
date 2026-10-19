@@ -30,7 +30,6 @@ class OutboundReplyHooks
     public function __construct(
         private readonly RequestStateService $stateService,
         private readonly QuotationService $quotationService,
-        private readonly MailRouter $mailRouter,
     ) {}
 
     /**
@@ -68,21 +67,20 @@ class OutboundReplyHooks
     }
 
     /**
-     * Send-time детект приложенных документов (счёт/КП файлом) — та же
-     * идемпотентная процедура, что синк/крон, но сразу. Только для писем с
-     * вложением, привязанных к заявке. Non-fatal.
+     * Send-time детект исходящего клиенту: КП/счёт файлом, запрос уточнения, отказ — та же
+     * идемпотентная процедура, что синк/крон, но сразу. Для любого письма, привязанного к заявке:
+     * раньше — только с вложением, и вопрос клиенту без файла («Уточните марку лифта», «Пришлите
+     * фото») статус не двигал никогда — синк «Отправленных» это письмо уже не разбирает (оно
+     * известно). Заявки M-2026-19220/19234/19396/19819 висели «Назначена» с заданным вопросом. Non-fatal.
      */
     public function detectOutboundDocuments(EmailMessage $sent): void
     {
         try {
-            if ($sent->related_request_id === null || $sent->attachments()->count() === 0) {
+            if ($sent->related_request_id === null) {
                 return;
             }
-            $request = Request::find($sent->related_request_id);
-            if ($request === null) {
-                return;
-            }
-            $this->mailRouter->runOutboundDocumentDetection($sent, $request);
+            // В фоне: письмо без файла разбирает ИИ-классификатор, отправка его не ждёт.
+            \App\Jobs\Mail\DetectSentDocumentsJob::dispatch($sent->id);
         } catch (\Throwable $e) {
             Log::warning('OutboundReplyHooks: send-time outbound detection failed (non-fatal)', [
                 'email_message_id' => $sent->id,
