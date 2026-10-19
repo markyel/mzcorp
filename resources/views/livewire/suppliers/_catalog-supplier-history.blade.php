@@ -29,37 +29,34 @@
         </div>
     @endif
 
-    {{-- Предложения через QuoteParts: все варианты (оригинал, аналог…) и прежние цены. --}}
+    {{-- Предложения через QuoteParts: все варианты (оригинал, аналог…) и прежние цены. Списком, а не
+         таблицей: блок стоит в узкой колонке карточки — цена и срок не должны уезжать за край. --}}
     @if($h['quoteparts'] !== [])
-        <div class="mb-2 overflow-x-auto">
+        <div class="mb-2">
             <div class="text-[10px] uppercase tracking-wider text-fg-4 mb-0.5">Через QuoteParts</div>
-            <table class="w-full text-[12px]">
-                <tbody>
-                    @foreach($h['quoteparts'] as $q)
-                        <tr @class(['border-t border-border-subtle align-baseline', 'opacity-60' => ! $q['current']])>
-                            <td class="py-1 pr-2 text-fg-1">{{ \Illuminate\Support\Str::limit($q['supplier'], 40) }}</td>
-                            <td class="py-1 px-2 text-fg-3 whitespace-nowrap">{{ $q['at']?->format('d.m.Y') }} · {{ $q['source'] }}</td>
-                            <td class="py-1 px-2 whitespace-nowrap">
-                                <span class="mono tnum font-semibold {{ $q['current'] ? 'text-emerald-700' : 'text-fg-2' }}">{{ $q['price'] !== null ? $money($q['price']).' '.$q['currency'] : '—' }}</span>
-                                @if(count($q['tiers']) > 1)<span class="text-fg-4">· {{ collect($q['tiers'])->skip(1)->map(fn ($t) => 'от '.(float) $t['min_qty'].': '.$money($t['price']))->implode(', ') }}</span>@endif
-                                @if($q['lead_time_days'] !== null)<span class="text-fg-4">· {{ $q['lead_time_days'] }} дн.</span>@endif
-                            </td>
-                            <td class="py-1 px-2">
-                                @if($q['kind'] !== 'original')
-                                    <span class="chip chip-sky text-[10px]">{{ \App\Models\QuotePartsOffer::kindLabel($q['kind']) }}</span>@if($q['product'] !== '') <span class="mono text-fg-3">{{ $q['product'] }}</span>@endif
-                                    <span class="chip {{ $q['review'] === 'accepted' ? 'chip-ok' : ($q['review'] === 'rejected' ? 'chip-neutral' : 'chip-warn') }} text-[10px]">{{ ['accepted' => 'принято к закупке', 'rejected' => 'отклонено'][$q['review']] ?? 'на разборе' }}</span>
-                                @endif
-                                @if($q['note'])<span class="text-fg-3">«{{ \Illuminate\Support\Str::limit($q['note'], 60) }}»</span>@endif
-                                @php $__g = $q['photos'] > 0 ? collect(range(0, $q['photos'] - 1))->map(fn ($i) => ['src' => route('quoteparts.offer-photo', [$q['remote_id'], $i]), 'name' => 'Фото '.($i + 1), 'dl' => route('quoteparts.offer-photo', [$q['remote_id'], $i])])->all() : []; @endphp @foreach($__g as $__i => $ph)<a href="{{ $ph['src'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $__g, 'index' => $__i]) }})" class="text-sky-700 text-[11px]">📷</a>@endforeach
-                            </td>
-                            <td class="py-1 pl-2 text-fg-4 whitespace-nowrap">{{ $q['status'] }}{{ $q['valid_until'] ? ' · до '.$q['valid_until']->format('d.m.Y') : '' }}</td>
-                        </tr>
-                    @endforeach
-                </tbody>
-            </table>
+            @foreach($h['quoteparts'] as $q)
+                <div @class(['border-t border-border-subtle py-1 text-[12px]', 'opacity-60' => ! $q['current']])>
+                    <div class="flex flex-wrap items-baseline gap-x-2">
+                        <span class="text-fg-1 font-medium">{{ $q['supplier'] }}</span>
+                        <span class="mono tnum font-semibold {{ $q['current'] ? 'text-emerald-700' : 'text-fg-2' }}">{{ $q['price'] !== null ? $money($q['price']).' '.$q['currency'] : '—' }}</span>
+                        @if(count($q['tiers']) > 1)<span class="text-fg-4">{{ collect($q['tiers'])->skip(1)->map(fn ($t) => 'от '.(float) $t['min_qty'].': '.$money($t['price']))->implode(', ') }}</span>@endif
+                        @if($q['lead_time_days'] !== null)<span class="text-fg-3">{{ $q['lead_time_days'] }} дн.</span>@endif
+                        @if($q['valid_until'])<span class="text-fg-3">до {{ $q['valid_until']->format('d.m.Y') }}</span>@endif
+                    </div>
+                    <div class="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-fg-3">
+                        <span>{{ $q['at']?->format('d.m.Y') }} · {{ $q['source'] }}{{ $q['current'] ? '' : ' · '.$q['status'] }}</span>
+                        @if($q['kind'] !== 'original')
+                            <span class="chip chip-info text-[10px]">{{ \App\Models\QuotePartsOffer::kindLabel($q['kind']) }}</span>@if($q['product'] !== '')<span class="mono">{{ $q['product'] }}</span>@endif
+                            <span class="chip {{ $q['review'] === 'accepted' ? 'chip-ok' : ($q['review'] === 'rejected' ? 'chip-neutral' : 'chip-warn') }} text-[10px]">{{ ['accepted' => 'принято к закупке', 'rejected' => 'отклонено'][$q['review']] ?? 'на разборе' }}</span>
+                        @endif
+                        @php $__g = $q['photos'] > 0 ? collect(range(0, $q['photos'] - 1))->map(fn ($i) => ['src' => route('quoteparts.offer-photo', [$q['remote_id'], $i]), 'name' => 'Фото '.($i + 1), 'dl' => route('quoteparts.offer-photo', [$q['remote_id'], $i])])->all() : []; @endphp
+                        @foreach($__g as $__i => $ph)<a href="{{ $ph['src'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $__g, 'index' => $__i]) }})" class="text-sky-700" style="cursor:zoom-in">📷</a>@endforeach
+                    </div>
+                    @if($q['note'])<div class="text-[11px] text-fg-3 break-words">{{ $q['note'] }}</div>@endif
+                </div>
+            @endforeach
         </div>
     @endif
-
     @if($h['asked'] !== [])
         <div class="overflow-x-auto">
             <table class="w-full text-[12px]">
@@ -103,7 +100,7 @@
         </div>
     @elseif($h['onec'] === [] && $h['quoteparts'] === [])
         <p class="text-[12px] text-fg-3">По этой позиции поставщиков ещё не спрашивали, закупок в 1С нет.</p>
-    @else
+    @elseif($h['quoteparts'] === [])
         <p class="text-[12px] text-fg-3">Через систему поставщиков по этой позиции ещё не спрашивали.</p>
     @endif
 </div>
