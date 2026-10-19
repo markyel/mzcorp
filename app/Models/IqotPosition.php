@@ -470,6 +470,22 @@ class IqotPosition extends Model
     }
 
     /**
+     * Есть КП конкурентов по запросу, отправленному в окне актуальности. Считаем от
+     * last_enqueued_at, а не analyzed_at: опрос IQOT ставит analyzed_at = now() при каждом
+     * обновлении, и позиция, отправленная в июне, выглядела «свежей» (19.10: 16 из 16
+     * отмеченных в «Запросить КП» отсеялись, в т.ч. «без предложений»).
+     */
+    public function hasRecentOffers(?int $freshDays = null): bool
+    {
+        $freshDays ??= (int) app_setting('iqot.report_fresh_days', config('services.iqot.report_fresh_days', 90));
+        $offers = is_array($this->report) ? (int) ($this->report['offers_count'] ?? count($this->report['all_offers'] ?? [])) : 0;
+
+        return $offers > 0
+            && $this->last_enqueued_at !== null
+            && $this->last_enqueued_at->gte(now()->subDays(max(1, $freshDays)));
+    }
+
+    /**
      * Позиции со свежим отчётом (для подсветки/дедупа). Окно — в днях.
      */
     public function scopeWithFreshReport(Builder $q, int $freshDays): Builder

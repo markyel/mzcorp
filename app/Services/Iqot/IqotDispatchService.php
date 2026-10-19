@@ -84,14 +84,15 @@ class IqotDispatchService
     /**
      * Запрос КП по выбранной группе позиций каталога (раздел IQOT, «Запросить КП») —
      * прежняя заявка IQOT на сбор КП, и в режиме мониторинга тоже: мониторинг даёт цены
-     * сайтов, а по группе позиций нужны живые КП поставщиков. Позиции со свежим отчётом
-     * повторно не шлём (бережём баланс), уже отправленные ждут свой отчёт. Дневной лимит
+     * сайтов, а по группе позиций нужны живые КП поставщиков. Позиции с КП конкурентов по
+     * недавнему запросу повторно не шлём (бережём баланс; $force — шлём), «без предложений» —
+     * шлём всегда, уже отправленные (analyzing) ждут свой отчёт. Дневной лимит
      * соблюдается: группа больше остатка — не отправляем ничего, пусть уменьшат выбор.
      *
      * @param  list<int>  $catalogItemIds
      * @return array<string, mixed>
      */
-    public function dispatchCatalogItems(array $catalogItemIds, ?int $userId = null): array
+    public function dispatchCatalogItems(array $catalogItemIds, ?int $userId = null, bool $force = false): array
     {
         if (! (bool) app_setting('iqot.enabled', config('services.iqot.enabled', false))) {
             return ['skipped' => 'disabled'];
@@ -111,8 +112,9 @@ class IqotDispatchService
         $remaining = min(max(0, $dailyLimit - $usedToday), self::MAX_LINES);
 
         $existing = IqotPosition::query()->whereIn('catalog_item_id', $catalogItemIds)->get()->keyBy('catalog_item_id');
-        $fresh = $existing->filter(fn (IqotPosition $p) => $p->hasFreshReport())->keys()->all();
-        $analyzing = $existing->filter(fn (IqotPosition $p) => $p->status === IqotPositionStatus::Analyzing->value && ! $p->hasFreshReport())->keys()->all();
+        // Уже есть КП конкурентов по недавнему запросу — повторно не шлём, если не просят ($force).
+        $analyzing = $existing->filter(fn (IqotPosition $p) => $p->status === IqotPositionStatus::Analyzing->value)->keys()->all();
+        $fresh = $force ? [] : $existing->filter(fn (IqotPosition $p) => $p->status !== IqotPositionStatus::Analyzing->value && $p->hasRecentOffers())->keys()->all();
         $toSend = array_values(array_diff($catalogItemIds, $fresh, $analyzing));
         $skipped = ['fresh' => count($fresh), 'analyzing' => count($analyzing)];
 
@@ -124,7 +126,7 @@ class IqotDispatchService
         }
 
         foreach ($toSend as $id) {
-            $this->pool->enqueueCatalogItem($id, $userId);
+            $this->pool->enqueueCatalogItem($id, $userId, true);
         }
         $positions = IqotPosition::with('catalogItem')
             ->whereIn('catalog_item_id', $toSend)

@@ -212,13 +212,14 @@ class IqotPoolService
      * Ручное добавление позиции каталога в пул (из карточки каталога).
      * Принудительно ставит в очередь (manual = приоритет), даже если есть отчёт.
      */
-    public function enqueueCatalogItem(int $catalogItemId, ?int $userId = null): IqotPosition
+    public function enqueueCatalogItem(int $catalogItemId, ?int $userId = null, bool $force = false): IqotPosition
     {
         $pos = IqotPosition::firstOrNew(['catalog_item_id' => $catalogItemId]);
         // Есть свежий отчёт — повторно на расценку НЕ кидаем (бережём баланс IQOT).
         // Отчёт обновляется сам, пока submission собирает офферы; принудительный
         // повторный анализ возможен только после устаревания отчёта.
-        if ($pos->exists && $pos->hasFreshReport()) {
+        // $force — запрос КП по группе: отбор уже сделан (IqotDispatchService::dispatchCatalogItems).
+        if (! $force && $pos->exists && $pos->hasFreshReport()) {
             return $pos;
         }
         if (! $pos->exists) {

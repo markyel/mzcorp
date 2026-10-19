@@ -91,7 +91,7 @@
                 <div class="text-fg-1 font-semibold text-[12.5px]">Запрос КП по группе</div>
                 <div class="text-fg-3 text-[11.5px] mt-0.5 max-w-[340px]">
                     Отметьте позиции в таблице или впишите M-артикулы — уйдут в IQOT заявкой на сбор КП поставщиков, как раньше.
-                    Свежие отчёты повторно не отправляются; лимит на сегодня — ещё {{ max(0, $stats['daily_limit'] - $stats['used_today']) }}.
+                    Где КП конкурентов уже есть по недавнему запросу — не отправляются (если не отметить «запросить заново»); лимит на сегодня — ещё {{ max(0, $stats['daily_limit'] - $stats['used_today']) }}.
                 </div>
             </div>
             <textarea wire:model="kpSkus" x-model="skus" rows="2" placeholder="M02502, M05531 …"
@@ -103,6 +103,9 @@
                     <span wire:loading.remove wire:target="requestQuotes">Запросить КП<template x-if="$wire.selected.length > 0"><span x-text="' (' + $wire.selected.length + ' отм.)'"></span></template></span>
                     <span wire:loading wire:target="requestQuotes">Отправляем…</span>
                 </button>
+                <label class="inline-flex items-center gap-1.5 text-[11px] text-fg-2 cursor-pointer" title="Отправить и позиции, по которым уже есть КП конкурентов">
+                    <input type="checkbox" wire:model="kpForce" class="accent-[var(--accent)]"> запросить заново, где КП уже есть
+                </label>
                 <div class="flex items-center gap-2 text-[11px]">
                     <button type="button" class="text-sky-700 hover:underline"
                             x-on:click="$wire.selected = [...new Set([...$wire.selected.map(String), ...@js(array_map('strval', $pageIds))])]">отметить страницу</button>

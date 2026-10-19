@@ -208,6 +208,9 @@ class Index extends Component
     /** M-артикулы списком — позиции, которых ещё нет в таблице. */
     public string $kpSkus = '';
 
+    /** Запросить заново и там, где КП конкурентов уже есть. */
+    public bool $kpForce = false;
+
     /**
      * «Запросить КП» по группе: выбранные строки + M-артикулы из поля — прежней заявкой IQOT
      * на сбор КП, и в режиме мониторинга (IqotDispatchService::dispatchCatalogItems).
@@ -221,9 +224,9 @@ class Index extends Component
         $unknown = array_values(array_diff($skus, $bySku->keys()->all()));
         $ids = array_merge(array_map('intval', $this->selected), $bySku->values()->map(fn ($v) => (int) $v)->all());
 
-        $r = $dispatch->dispatchCatalogItems($ids, auth()->id());
+        $r = $dispatch->dispatchCatalogItems($ids, auth()->id(), $this->kpForce);
         $notes = array_filter([
-            ($r['fresh'] ?? 0) > 0 ? 'со свежим отчётом пропущено '.$r['fresh'] : null,
+            ($r['fresh'] ?? 0) > 0 ? 'уже есть КП по недавнему запросу — пропущено '.$r['fresh'].' (галочка «запросить заново» отправит и их)' : null,
             ($r['analyzing'] ?? 0) > 0 ? 'уже ждут КП '.$r['analyzing'] : null,
             $unknown !== [] ? 'не найдены в каталоге: '.implode(', ', array_slice($unknown, 0, 10)) : null,
         ]);
@@ -239,6 +242,7 @@ class Index extends Component
         if (isset($r['submitted'])) {
             $this->selected = [];
             $this->kpSkus = '';
+            $this->kpForce = false;
         }
         session()->flash('iqot-flash', $msg);
         unset($this->stats, $this->positions);
