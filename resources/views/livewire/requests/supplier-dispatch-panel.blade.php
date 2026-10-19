@@ -135,8 +135,7 @@
                                                 <span class="text-sky-700 text-[11px]">👁 просмотр</span>
                                             </button>
                                         @else
-                                            <a href="{{ route('attachments.download', $att['id']) }}" target="_blank"
-                                               class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover">📎 {{ $att['name'] }}</a>
+                                            @include('partials.file-link', ['url' => route('attachments.preview', $att['id']), 'fileDl' => route('attachments.download', $att['id']), 'name' => (string) $att['name'], 'mime' => $att['mime'] ?? null, 'fileClass' => 'inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover'])
                                         @endif
                                     @endforeach
                                 </div>
@@ -525,10 +524,9 @@
                                     </button>
                                     @php $imgIdx++; @endphp
                                 @else
-                                    <a href="{{ route('attachments.download', $a->id) }}" target="_blank" rel="noopener"
-                                       class="flex items-center justify-center bg-surface-2 text-sky-700 hover:bg-hover text-[11px]" style="width:116px;height:80px">
-                                        <span class="text-center"><span class="text-[18px] block">📄</span>{{ \Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($a->filename, '.')) ?: 'BIN' }}</span>
-                                    </a>
+                                    @include('partials.file-link', ['url' => route('attachments.preview', $a->id), 'fileDl' => route('attachments.download', $a->id), 'name' => (string) $a->filename, 'mime' => $a->mime_type,
+                                        'fileClass' => 'flex items-center justify-center bg-surface-2 text-sky-700 hover:bg-hover text-[11px]', 'fileStyle' => 'width:116px;height:80px',
+                                        'fileLabel' => '<span class="text-center"><span class="text-[18px] block">📄</span>'.e(\Illuminate\Support\Str::upper(\Illuminate\Support\Str::afterLast($a->filename, '.')) ?: 'BIN').'</span>'])
                                 @endif
                                 <label class="flex items-center gap-1 px-1.5 py-1 cursor-pointer border-t border-border-subtle">
                                     <input type="checkbox" wire:model.live="selectedAttachments.{{ $a->id }}">

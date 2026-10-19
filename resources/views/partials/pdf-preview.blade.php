@@ -13,6 +13,11 @@
         pdfDl: '',
         openPdf(detail) {
             if (! detail || ! detail.src) return;
+            // Предпросмотр есть и в общем шаблоне, и на отдельных страницах: открывается один.
+            if (window.__pdfPreview && window.__pdfPreview !== this.$root && window.__pdfPreview.isConnected) {
+                return;
+            }
+            window.__pdfPreview = this.$root;
             this.pdfSrc = detail.src;
             this.pdfName = detail.name || '';
             this.pdfDl = detail.dl || '';

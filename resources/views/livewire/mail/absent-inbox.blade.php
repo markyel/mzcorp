@@ -143,8 +143,7 @@
                                                     @if($atts->isNotEmpty())
                                                         <div class="flex flex-wrap gap-2 mt-2">
                                                             @foreach($atts as $att)
-                                                                <a href="{{ route('attachments.download', $att) }}" target="_blank"
-                                                                   class="chip chip-neutral text-[11px] hover:underline">📎 {{ \Illuminate\Support\Str::limit($att->filename, 40) }}</a>
+                                                                @include('partials.file-link', ['url' => route('attachments.preview', $att), 'fileDl' => route('attachments.download', $att), 'name' => (string) $att->filename, 'mime' => $att->mime_type, 'fileClass' => 'chip chip-neutral text-[11px] hover:underline max-w-[300px] truncate'])
                                                             @endforeach
                                                         </div>
                                                     @endif

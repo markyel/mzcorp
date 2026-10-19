@@ -68,7 +68,7 @@
                                 </div>
                                 <div class="whitespace-pre-wrap">{{ $m['text'] }}</div>
                                 @foreach($m['attachments'] as $a)
-                                    <a href="{{ route('quoteparts.conversation-file', [$c['id'], $m['id'], $a['index']]) }}" target="_blank" rel="noopener" class="mr-3 text-sky-700 hover:underline text-[12px]">📎 {{ $a['name'] }}</a>
+                                    @include('partials.file-link', ['url' => route('quoteparts.conversation-file', [$c['id'], $m['id'], $a['index']]), 'name' => $a['name'], 'mime' => $a['mime'] ?? null, 'fileClass' => 'mr-3 text-sky-700 hover:underline text-[12px]'])
                                 @endforeach
                             </div>
                         @endforeach

@@ -199,7 +199,7 @@
                                                         @if($isImage($f))
                                                             <a href="{{ $fileUrl($f) }}" title="{{ $f['name'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $gallery, 'index' => $shot++]) }})" class="block h-16 w-16 overflow-hidden rounded border border-border bg-surface cursor-zoom-in"><img src="{{ $fileUrl($f) }}" alt="" class="h-full w-full object-cover" loading="lazy"></a>
                                                         @else
-                                                            <a href="{{ $fileUrl($f) }}" target="_blank" class="chip chip-neutral max-w-[260px] truncate">📎 {{ $f['name'] }}</a>
+                                                            @include('partials.file-link', ['url' => $fileUrl($f), 'name' => $f['name'], 'mime' => $f['mime'] ?? null])
                                                         @endif
                                                     @endforeach
                                                 </div>

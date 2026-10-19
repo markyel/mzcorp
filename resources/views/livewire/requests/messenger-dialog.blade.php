@@ -147,7 +147,7 @@
                                                      style="width: 120px; height: 90px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-subtle);">
                                             </a>
                                         @else
-                                            <a href="{{ $url }}" target="_blank" rel="noopener" class="text-sky-700 hover:underline" style="font-size: 12px;">📎 {{ $a['name'] }}</a>
+                                            @include('partials.file-link', ['url' => $url, 'name' => (string) ($a['name'] ?? 'файл'), 'mime' => $a['mime'] ?? null, 'fileClass' => 'text-sky-700 hover:underline text-[12px]'])
                                         @endif
                                     @endforeach
                                 </div>

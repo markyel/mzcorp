@@ -40,8 +40,9 @@
     {{-- ─── Левая колонка: фото + meta + price panel ─── --}}
     <div class="flex flex-col gap-2">
         @if($cat->photo_url)
-            <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
-               class="block w-full rounded-md overflow-hidden bg-surface border border-border"
+            <a href="{{ $cat->photo_url }}" rel="noopener noreferrer"
+               x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['src' => route('catalog.photo', $cat->id), 'name' => $cat->sku.' · '.$cat->name, 'dl' => $cat->photo_url]) }})"
+               class="block w-full rounded-md overflow-hidden bg-surface border border-border cursor-zoom-in"
                style="aspect-ratio: 1/1;">
                 <img src="{{ route('catalog.photo', $cat->id) }}" alt="{{ $cat->name }}"
                      loading="lazy" referrerpolicy="no-referrer"
@@ -69,7 +70,8 @@
                 ↗ Открыть на mylift.ru
             </a>
             @if($cat->photo_url)
-                <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
+                <a href="{{ $cat->photo_url }}" rel="noopener noreferrer"
+                   x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['src' => route('catalog.photo', $cat->id), 'name' => $cat->sku.' · '.$cat->name, 'dl' => $cat->photo_url]) }})"
                    class="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-surface border border-border text-sky-700 text-[11px] font-medium hover:bg-[var(--bg-hover)]">
                     ⛶ Полный размер фото
                 </a>

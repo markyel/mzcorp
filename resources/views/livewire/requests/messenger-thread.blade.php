@@ -39,8 +39,7 @@
                     @if($atts)
                         <div class="flex flex-wrap gap-1.5 mt-1">
                             @foreach($atts as $i => $a)
-                                <a href="{{ route('messenger.file', ['message' => $m->id, 'index' => $i]) }}" target="_blank" rel="noopener"
-                                   class="text-[11.5px] text-sky-700 hover:underline">📎 {{ $a['name'] ?? 'файл' }}</a>
+                                @include('partials.file-link', ['url' => route('messenger.file', ['message' => $m->id, 'index' => $i]), 'name' => (string) ($a['name'] ?? 'файл'), 'mime' => $a['mime'] ?? null, 'fileClass' => 'text-[11.5px] text-sky-700 hover:underline'])
                             @endforeach
                         </div>
                     @elseif($files)

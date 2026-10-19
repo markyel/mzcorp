@@ -1160,7 +1160,13 @@ body.mail-resizing iframe{pointer-events:none}
                                 <div class="attachments">
                                     @foreach($files as $att)
                                         @php $ext = strtoupper(pathinfo($att->display_filename, PATHINFO_EXTENSION) ?: 'FILE'); @endphp
-                                        <a class="att" href="{{ route('attachments.preview', $att->id) }}" target="_blank" rel="noopener" title="Открыть / скачать">
+                                        @php
+                                            $attMime = (string) $att->mime_type;
+                                            $attViewer = str_starts_with($attMime, 'image/') && $attMime !== 'image/svg+xml' ? 'open-image' : ($attMime === 'application/pdf' || strtolower($ext) === 'pdf' ? 'open-pdf' : null);
+                                        @endphp
+                                        <a class="att" href="{{ $attViewer ? route('attachments.preview', $att->id) : route('attachments.download', $att->id) }}" @if(! $attViewer) download @endif
+                                           @if($attViewer) x-on:click.prevent="$dispatch('{{ $attViewer }}', {{ \Illuminate\Support\Js::from(['src' => route('attachments.preview', $att->id), 'name' => $att->display_filename, 'dl' => route('attachments.download', $att->id)]) }})" @endif
+                                           title="{{ $attViewer ? 'Открыть' : 'Скачать' }}">
                                             <span class="ico">{{ mb_substr($ext, 0, 4) }}</span>
                                             <span>
                                                 <span class="fn" style="display:block">{{ $att->display_filename }}</span>

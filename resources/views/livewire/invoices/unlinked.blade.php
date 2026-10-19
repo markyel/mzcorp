@@ -79,8 +79,9 @@
                                     <td colspan="6" class="px-3 py-3">
                                         <div class="flex items-center gap-3 mb-1">
                                             <span class="text-[11.5px] text-fg-3">Позиции счёта {{ $row['number'] ? '№'.$row['number'] : '' }} (текст из PDF):</span>
-                                            <a href="{{ route('attachments.preview', $row['att_id']) }}" target="_blank" rel="noopener"
-                                               class="text-[11.5px] text-[var(--sky-700)] hover:underline">📄 Открыть оригинал ↗</a>
+                                            <a href="{{ route('attachments.preview', $row['att_id']) }}"
+                                               x-on:click.prevent="$dispatch('open-pdf', {{ \Illuminate\Support\Js::from(['src' => route('attachments.preview', $row['att_id']), 'name' => 'Счёт '.($row['number'] ? '№'.$row['number'] : ''), 'dl' => route('attachments.download', $row['att_id'])]) }})"
+                                               class="text-[11.5px] text-[var(--sky-700)] hover:underline cursor-pointer">📄 Открыть оригинал</a>
                                         </div>
                                         @if($invoiceText)
                                             <pre class="text-[11px] text-fg-2 whitespace-pre-wrap mono bg-surface border border-border rounded-md p-2 max-h-[320px] overflow-y-auto">{{ $invoiceText }}</pre>

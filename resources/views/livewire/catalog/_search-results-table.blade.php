@@ -140,12 +140,13 @@
                 <div @click.stop>
                     @if($cat->photo_url)
                         @php $catThumb = route('catalog.photo', $cat->id); @endphp
-                        <a href="{{ $cat->photo_url }}" target="_blank" rel="noopener noreferrer"
+                        <a href="{{ $cat->photo_url }}" rel="noopener noreferrer"
+                           x-on:click.prevent="$dispatch('catalog-preview-close'); $dispatch('open-image', {{ \Illuminate\Support\Js::from(['src' => $catThumb, 'name' => $cat->sku.' · '.$cat->name, 'dl' => $cat->photo_url]) }})"
                            data-cat-preview-trigger
                            x-on:mouseenter="$dispatch('catalog-preview-open', { el: $el, url: '{{ addslashes($catThumb) }}' })"
                            x-on:mouseleave="$dispatch('catalog-preview-close')"
                            class="block w-14 h-14 rounded-md overflow-hidden bg-surface-2 border border-border"
-                           title="Открыть фото в новой вкладке">
+                           title="Открыть фото">
                             <img src="{{ $catThumb }}" alt=""
                                  loading="lazy" referrerpolicy="no-referrer"
                                  class="w-full h-full object-cover"

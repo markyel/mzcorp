@@ -153,6 +153,8 @@
 
             {{-- Просмотрщик фото на любой странице: открывается событием open-image (см. partials.image-lightbox). --}}
             @include('partials.image-lightbox')
+            {{-- …и PDF: событие open-pdf (partials.pdf-preview). Вложения смотрим во встроенном просмотрщике, не в новой вкладке. --}}
+            @include('partials.pdf-preview')
         @endauth
     </body>
 </html>
