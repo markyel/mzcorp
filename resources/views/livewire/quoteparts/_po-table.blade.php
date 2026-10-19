@@ -79,10 +79,11 @@
                         </td>
                     @endif
                     <td class="px-3 py-1.5 break-words">
-                        <div class="flex items-baseline gap-1.5 min-w-0">
-                            <span class="font-medium text-fg-1 shrink-0">{{ $r['supplier'] }}</span>
-                            @if($isBest)<span class="chip chip-ok text-[10px] shrink-0">лучшее</span>@endif
-                            @if($r['note'])<span class="text-[11.5px] text-fg-3 truncate min-w-0" title="{{ $r['note'] }}">{{ $r['note'] }}</span>@endif
+                        {{-- Поставщик и текст предложения одной строкой; текст — полностью, переносится. --}}
+                        <div>
+                            <span class="font-medium text-fg-1">{{ $r['supplier'] }}</span>
+                            @if($isBest)<span class="chip chip-ok text-[10px]">лучшее</span>@endif
+                            @if($r['note'])<span class="text-[11.5px] text-fg-3">· {{ $r['note'] }}</span>@endif
                         </div>
                         @if($deviation)
                             <div class="mt-0.5">
