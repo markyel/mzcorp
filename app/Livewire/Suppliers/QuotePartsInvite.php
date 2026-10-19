@@ -175,9 +175,12 @@ class QuotePartsInvite extends Component
             foreach (array_keys(self::TOPICS) as $topic) {
                 $topics[$topic] = in_array($topic, $c['topics'] ?? [], true);
             }
+            // Язык человека: из QuoteParts, а для нового — из справочника (ru / en).
+            $known = $this->supplier->quotepartsColleagues()->first(fn ($s) => mb_strtolower((string) $s->email) === $email);
             $this->contactRows[] = [
                 'email' => $email,
                 'name' => (string) ($c['name'] ?? $name),
+                'locale' => (string) ($c['locale'] ?? (($known?->language ?? $this->supplier->language) === 'ru' ? 'ru' : 'en')),
                 'position' => (string) ($c['position'] ?? $n),
                 'topics' => $topics,
             ];
@@ -206,6 +209,7 @@ class QuotePartsInvite extends Component
                 'name' => trim($row['name']) ?: null,
                 'topics' => $topics,
                 'position' => (int) ($row['position'] ?: 99),
+                'locale' => in_array($row['locale'] ?? null, ['ru', 'en', 'zh_CN'], true) ? $row['locale'] : null,
             ];
         }
 
@@ -221,6 +225,14 @@ class QuotePartsInvite extends Component
             $this->contactsError = mb_substr($e->getMessage(), 0, 400);
 
             return;
+        }
+
+        // Тот же язык — у адреса в справочнике: на нём пишет и прямой запрос из mzCorp (ru / en).
+        foreach ($contacts as $contact) {
+            if ($contact['locale'] !== null) {
+                \App\Models\Supplier::query()->whereRaw('lower(email) = ?', [mb_strtolower($contact['email'])])
+                    ->update(['language' => $contact['locale'] === 'ru' ? 'ru' : 'en']);
+            }
         }
 
         $this->contactsOpen = false;

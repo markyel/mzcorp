@@ -21,9 +21,20 @@ trait AnswersQuotePartsSuppliers
 
     abstract protected function quotePartsRfqForAnswer(int $id): QuotePartsRfq;
 
+    /**
+     * Отвечать поставщикам по запросу QuoteParts: участники пилота, снабжение и руководство —
+     * как обращения к поставщикам (QuotePartsPilot::canConverse). Раньше — только пилот, и
+     * админ не видел, как ответить UniSystem на вопрос по M-2026-19719.
+     */
     public function canAnswerQuoteParts(): bool
     {
-        return QuotePartsPilot::enabledFor(auth()->user());
+        return QuotePartsPilot::canConverse(auth()->user());
+    }
+
+    /** Язык, на котором работает поставщик (ru / en): ответ ему пишут только на нём. */
+    public function quotePartsSupplierLanguage(?string $supplierKey): string
+    {
+        return $supplierKey ? (app(QuotePartsRfqService::class)->supplierLanguages([$supplierKey])[$supplierKey] ?? 'ru') : 'ru';
     }
 
     public function answerQuotePartsSupplier(int $rfqId, int $supplierIndex, QuotePartsRfqService $service): void

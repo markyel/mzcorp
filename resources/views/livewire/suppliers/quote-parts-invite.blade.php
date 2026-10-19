@@ -61,6 +61,7 @@
                             <th class="text-left py-1 w-[60px]">Порядок</th>
                             <th class="text-left py-1">Адрес</th>
                             <th class="text-left py-1">Имя</th>
+                            <th class="text-left py-1" title="На каком языке поставщик работает: письма ему — только на нём">Язык</th>
                             @foreach(\App\Livewire\Suppliers\QuotePartsInvite::TOPICS as $t => $label)<th class="py-1 px-1">{{ $label }}</th>@endforeach
                         </tr>
                     </thead>
@@ -70,6 +71,13 @@
                                 <td class="py-1"><input type="number" min="1" wire:model="contactRows.{{ $i }}.position" class="{{ $inputCls }} !w-[50px]"></td>
                                 <td class="py-1 mono">{{ $row['email'] }}</td>
                                 <td class="py-1"><input type="text" wire:model="contactRows.{{ $i }}.name" class="{{ $inputCls }}"></td>
+                                <td class="py-1">
+                                    <select wire:model="contactRows.{{ $i }}.locale" class="{{ $inputCls }} !w-[110px]">
+                                        <option value="ru">Русский</option>
+                                        <option value="en">English</option>
+                                        <option value="zh_CN">中文</option>
+                                    </select>
+                                </td>
                                 @foreach(\App\Livewire\Suppliers\QuotePartsInvite::TOPICS as $t => $label)
                                     <td class="py-1 px-1 text-center"><input type="checkbox" wire:model="contactRows.{{ $i }}.topics.{{ $t }}" class="w-4 h-4 accent-sky-600"></td>
                                 @endforeach

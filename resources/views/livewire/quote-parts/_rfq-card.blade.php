@@ -194,7 +194,12 @@
                                         </div>
                                     @endforeach
                                     @if($canAnswer)
-                                        <textarea wire:model="qpAnswers.{{ $rfq->id }}.{{ $si }}" rows="3" placeholder="Answer in the supplier's language…"
+                                        @php $supLang = $this->quotePartsSupplierLanguage($s['external_id'] ?? null); @endphp
+                                        <div class="text-[11.5px] {{ $supLang === 'ru' ? 'text-fg-3' : 'text-amber-800' }}">
+                                            Поставщик работает на {{ $supLang === 'ru' ? 'русском' : 'английском' }} — пишите только на нём.
+                                            <span class="text-fg-4">Язык меняется в карточке поставщика → «Контакты в QuoteParts».</span>
+                                        </div>
+                                        <textarea wire:model="qpAnswers.{{ $rfq->id }}.{{ $si }}" rows="3" placeholder="{{ $supLang === 'ru' ? 'Ответ поставщику по-русски…' : 'Answer in English…' }}"
                                                   class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
                                         <div class="flex items-center gap-2">
                                             <button type="button" wire:click="answerQuotePartsSupplier({{ $rfq->id }}, {{ $si }})" wire:loading.attr="disabled" wire:target="answerQuotePartsSupplier"
