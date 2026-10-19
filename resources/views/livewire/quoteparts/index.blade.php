@@ -24,7 +24,7 @@
             @if(($counts['error'] ?? 0) > 0)<span class="chip chip-danger text-[10px] ml-1">ошибка {{ $counts['error'] }}</span>@endif
         </button>
         <button type="button" wire:click="setTab('suppliers')" class="btn btn-sm {{ $tab === 'suppliers' ? 'btn-primary' : '' }}">
-            Поставщики <span class="opacity-70">{{ $this->invitedSuppliers->count() }}</span>
+            Поставщики <span class="opacity-70">{{ $this->invitedGroups->count() }}</span>
         </button>
         <button type="button" wire:click="setTab('offers')" class="btn btn-sm {{ $tab === 'offers' ? 'btn-primary' : '' }}" title="Свежие предложения поставщиков: ответы на запросы, кабинет, прайсы">
             Актуализация цен <span class="opacity-70">{{ $this->freshOffersCount }}</span>
@@ -218,17 +218,25 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @forelse($this->invitedSuppliers as $s)
-                            <tr wire:key="qps-{{ $s->id }}" class="border-b border-border-subtle hover:bg-hover align-top">
+                        {{-- Один поставщик (связь QuoteParts, организация) — одна строка, все его адреса вместе. --}}
+                        @forelse($this->invitedGroups as $gi => $g)
+                            <tr wire:key="qps-{{ $gi }}" class="border-b border-border-subtle hover:bg-hover align-top">
                                 <td class="px-3 py-2">
-                                    <a href="{{ route('suppliers.registry-edit', $s) }}" class="text-sky-700 hover:underline">{{ $s->name ?: $s->email }}</a>
-                                    <div class="text-[11px] text-fg-4">{{ $s->email }}</div>
+                                    <div class="font-medium text-fg-1">{{ $g['name'] }}</div>
+                                    @foreach($g['suppliers'] as $s)
+                                        <div class="text-[11.5px] mt-0.5">
+                                            <a href="{{ route('suppliers.registry-edit', $s) }}" class="text-sky-700 hover:underline">{{ $s->email }}</a>
+                                            <span class="text-fg-4">{{ $s->contact_person ?: ($s->name !== $g['name'] ? $s->name : '') }}{{ $s->language ? ' · '.($s->language === 'ru' ? 'рус' : 'англ') : '' }}</span>
+                                        </div>
+                                    @endforeach
                                 </td>
                                 <td class="px-3 py-2">
-                                    <span class="chip {{ $s->quoteparts_status === 'active' ? 'chip-ok' : ($s->quoteparts_status === 'terms_discussed' ? 'chip-warn' : ($s->quoteparts_status === 'declined' ? 'chip-danger' : 'chip-sky')) }} text-[10.5px]">{{ $labels[$s->quoteparts_status] ?? $s->quoteparts_status }}</span>
-                                    @if($s->quoteparts_comment)<div class="mt-1 text-[11.5px] text-amber-800">«{{ $s->quoteparts_comment }}»</div>@endif
+                                    <span class="chip {{ $g['status'] === 'active' ? 'chip-ok' : ($g['status'] === 'terms_discussed' ? 'chip-warn' : ($g['status'] === 'declined' ? 'chip-danger' : 'chip-info')) }} text-[10.5px]">{{ $labels[$g['status']] ?? $g['status'] }}</span>
+                                    @if($g['comment'])<div class="mt-1 text-[11.5px] text-amber-800">«{{ $g['comment'] }}»</div>@endif
                                 </td>
-                                <td class="px-3 py-2 text-[11.5px] text-fg-3">{{ $s->quoteparts_invited_at?->format('d.m.Y H:i') }}</td>
+                                <td class="px-3 py-2 text-[11.5px] text-fg-3">{{ $g['invited_at'] ? \Illuminate\Support\Carbon::parse($g['invited_at'])->format('d.m.Y H:i') : '' }}
+                                    @if($g['suppliers']->count() > 1)<div class="text-fg-4">адресов: {{ $g['suppliers']->count() }}</div>@endif
+                                </td>
                             </tr>
                         @empty
                             <tr><td colspan="3" class="px-3 py-10 text-center text-fg-3 text-[13px]">Пока никого не пригласили.</td></tr>

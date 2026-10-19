@@ -128,7 +128,35 @@ class Index extends Component
         return \App\Models\Supplier::query()->whereNotNull('quoteparts_link_id')
             ->orderByRaw("case quoteparts_status when 'terms_discussed' then 0 when 'invited' then 1 when 'active' then 2 else 3 end")
             ->orderByDesc('quoteparts_invited_at')
-            ->get(['id', 'name', 'email', 'quoteparts_status', 'quoteparts_invited_at', 'quoteparts_comment']);
+            ->get(['id', 'name', 'email', 'contact_person', 'language', 'supplier_organization_id', 'quoteparts_link_id', 'quoteparts_status', 'quoteparts_invited_at', 'quoteparts_comment']);
+    }
+
+    /**
+     * Приглашённые поставщики группами: одна связь QuoteParts (организация) — одна строка со
+     * всеми её адресами. Статус и комментарий у связи общие.
+     *
+     * @return \Illuminate\Support\Collection<int, array{name:string, status:?string, comment:?string, invited_at:mixed, suppliers:\Illuminate\Support\Collection}>
+     */
+    #[Computed]
+    public function invitedGroups()
+    {
+        $orgs = \App\Models\SupplierOrganization::query()
+            ->whereIn('id', $this->invitedSuppliers->pluck('supplier_organization_id')->filter()->unique())->pluck('name', 'id');
+
+        return $this->invitedSuppliers
+            ->groupBy(fn ($s) => $s->quoteparts_link_id ?: 'sup-'.$s->id)
+            ->map(function ($rows) use ($orgs) {
+                $first = $rows->sortBy('quoteparts_invited_at')->first();
+
+                return [
+                    'name' => (string) ($orgs[$first->supplier_organization_id] ?? null ?: $first->name ?: $first->email),
+                    'status' => $rows->first()->quoteparts_status,
+                    'comment' => $rows->pluck('quoteparts_comment')->filter()->first(),
+                    'invited_at' => $rows->min('quoteparts_invited_at'),
+                    'suppliers' => $rows->sortBy('quoteparts_invited_at')->values(),
+                ];
+            })
+            ->values();
     }
 
     public function refreshSupplierStatuses(\App\Services\QuoteParts\QuotePartsSupplierService $service): void
