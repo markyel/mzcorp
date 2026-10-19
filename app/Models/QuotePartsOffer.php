@@ -40,6 +40,8 @@ class QuotePartsOffer extends Model
         'rfq_remote_id',
         'rfq_tag',
         'request_id',
+        'clarify_asked_at',
+        'clarify_cleared_at',
     ];
 
     /** Разбор отклонения (не оригинала): ждёт, принято к закупке, отклонено. */
@@ -56,6 +58,8 @@ class QuotePartsOffer extends Model
         'superseded' => 'boolean',
         'remote_updated_at' => 'datetime',
         'reviewed_at' => 'datetime',
+        'clarify_asked_at' => 'datetime',
+        'clarify_cleared_at' => 'datetime',
     ];
 
     /** Что предложено (вид оффера QuoteParts). */

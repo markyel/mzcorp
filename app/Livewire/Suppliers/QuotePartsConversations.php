@@ -122,6 +122,7 @@ class QuotePartsConversations extends Component
         $this->reset('composing', 'subject', 'subjectEn', 'text', 'textEn', 'files');
         $this->load($client);
         $this->dispatch('toast', type: 'success', message: 'Обращение отправлено поставщику.');
+        $this->dispatch('quoteparts-conversation-sent', supplierKey: $this->supplier->quotepartsKey());
     }
 
     public function open(int $id): void
@@ -148,6 +149,7 @@ class QuotePartsConversations extends Component
         }
         $this->reset('text', 'textEn', 'files');
         $this->load($client);
+        $this->dispatch('quoteparts-conversation-sent', supplierKey: $this->supplier->quotepartsKey());
     }
 
     public function close(int $id, QuotePartsClient $client): void

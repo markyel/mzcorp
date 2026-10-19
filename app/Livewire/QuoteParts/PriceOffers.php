@@ -12,7 +12,9 @@ use App\Services\QuoteParts\PriceRefreshReadiness;
 use App\Services\QuoteParts\QuotePartsPriceService;
 use App\Services\QuoteParts\QuotePartsRfqService;
 use Illuminate\Support\Collection;
+use App\Services\QuoteParts\OfferClarifications;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -147,9 +149,45 @@ class PriceOffers extends Component
         return QuotePartsRfq::query()->findOrFail($id);
     }
 
+    /** Написали поставщику из диалога по предложению — предложение ждёт его ответа. */
     protected function afterQuotePartsAnswer(): void
     {
+        $this->markAsked();
         unset($this->dialogRfq);
+    }
+
+    #[On('quoteparts-conversation-sent')]
+    public function onConversationSent(string $supplierKey = ''): void
+    {
+        if ($this->dialogOffer?->supplier_key === $supplierKey) {
+            $this->markAsked();
+        }
+    }
+
+    private function markAsked(): void
+    {
+        if ($o = $this->dialogOffer) {
+            $o->forceFill(['clarify_asked_at' => now()])->save();
+            unset($this->dialogOffer, $this->rows, $this->readyRows, $this->clarifications, $this->readyItems, $this->items, $this->groups);
+        }
+    }
+
+    /** «Решить без ответа»: снять ожидание уточнения — решение по предложению можно принимать. */
+    public function clearClarification(int $offerId): void
+    {
+        QuotePartsOffer::query()->whereKey($offerId)->update(['clarify_cleared_at' => now()]);
+        unset($this->rows, $this->readyRows, $this->clarifications, $this->readyItems, $this->items, $this->groups);
+    }
+
+    /**
+     * Уточнения по предложениям на экране: ждём ответа / ответил / не ответил в срок.
+     *
+     * @return array<int, array{state:string, asked_at:\Illuminate\Support\Carbon, until:\Illuminate\Support\Carbon, answered_at:?\Illuminate\Support\Carbon}>
+     */
+    #[Computed]
+    public function clarifications(): array
+    {
+        return app(OfferClarifications::class)->states($this->rows->merge($this->readyRows)->unique('id')->values());
     }
 
     /**
@@ -241,16 +279,31 @@ class PriceOffers extends Component
     #[Computed]
     public function readyItems(): Collection
     {
+        // Пока по позиции ждём ответа на уточнение — решение отложено, она не «готова».
+        $waiting = collect($this->clarifications)->where('state', OfferClarifications::WAITING)->keys()->all();
+
+        return $this->itemsFrom($this->readyRows)
+            ->reject(fn ($it) => $it['offers']->contains(fn ($r) => in_array($r['id'], $waiting, true)))
+            ->values();
+    }
+
+    /**
+     * Предложения позиций, где предложений уже достаточно (PriceRefreshReadiness), за окно запросов.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    #[Computed]
+    public function readyRows(): Collection
+    {
         $checker = app(PriceRefreshReadiness::class);
         $ready = array_keys(array_filter($this->readiness, fn ($st) => $checker->isReady($st)));
         if ($ready === []) {
             return collect();
         }
-        $rows = $this->query()->whereIn('sku', $ready)
+
+        return $this->query()->whereIn('sku', $ready)
             ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))
             ->get()->map(fn (QuotePartsOffer $o) => self::row($o));
-
-        return $this->itemsFrom($rows)->values();
     }
 
     /** @return Collection<int, array<string, mixed>> позиция и все предложения на неё */
@@ -258,8 +311,9 @@ class PriceOffers extends Component
     public function items(): Collection
     {
         $ready = $this->readyItems->pluck('sku')->all();
+        $rows = $this->rows->merge($this->readyRows->reject(fn ($r) => in_array($r['sku'], $ready, true)))->unique('id');
 
-        return $this->itemsFrom($this->rows->reject(fn ($r) => in_array($r['sku'], $ready, true)))->values();
+        return $this->itemsFrom($rows->reject(fn ($r) => in_array($r['sku'], $ready, true)))->values();
     }
 
     /**
@@ -355,6 +409,8 @@ class PriceOffers extends Component
             'key' => $o->supplier_key,
             'counts' => $o->countsAsItemPrice(),
             'rfq_remote_id' => $o->rfq_remote_id,
+            'clarify_asked_at' => $o->clarify_asked_at,
+            'clarify_cleared_at' => $o->clarify_cleared_at,
             'source' => $o->source_type,
             'kind' => $o->kind ?? 'original',
             'product' => trim(($o->brand ?? '').' '.($o->part_number ?? '')),

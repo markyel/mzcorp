@@ -7,6 +7,8 @@
     $cols = 6 + ($showItem ? 3 : 0) + ($showRequest ? 1 : 0);
     $bestIds = $this->bestIds;
     $choices = $this->choices;
+    $clarifications = $this->clarifications;
+    $tzc = config('app.timezone');
 @endphp
 {{-- Ширины колонок фиксированы и одинаковы во всех блоках: таблицы стоят друг под другом и не «пляшут». --}}
 <div class="overflow-x-auto">
@@ -46,6 +48,8 @@
                     $chosenHere = $choice && $choice->source === 'quoteparts' && (int) $choice->offer_ref === $r['id'];
                     $chosenSupplier = $choice && ! $chosenHere && $choice->supplier_key === $r['key'];
                     $deviation = $r['kind'] !== 'original';
+                    $cl = $clarifications[$r['id']] ?? null;
+                    $clWaiting = ($cl['state'] ?? null) === \App\Services\QuoteParts\OfferClarifications::WAITING;
                 @endphp
                 <tr wire:key="po-{{ $r['id'] }}" class="border-b border-border-subtle align-top {{ $r['stale'] ? 'opacity-60' : '' }} {{ $chosenHere ? 'bg-sky-50' : ($isBest ? 'bg-emerald-50' : '') }}">
                     <td class="px-3 py-1.5 whitespace-nowrap text-fg-3">
@@ -75,6 +79,18 @@
                         @endif
                         @if($r['note'])<div class="text-[11px] text-fg-3">«{{ \Illuminate\Support\Str::limit($r['note'], 160) }}»</div>@endif
                         @if($r['stale'])<div class="text-[10.5px] text-fg-4">устарело</div>@endif
+                        {{-- Уточнение у поставщика: ждём ответа (решение отложено), ответил, не ответил в срок. --}}
+                        @if($cl)
+                            <div class="mt-1">
+                                @if($clWaiting)
+                                    <span class="chip chip-warn text-[10.5px]" title="Спросили {{ $cl['asked_at']->timezone($tzc)->format('d.m H:i') }}; ждём ответа до {{ $cl['until']->timezone($tzc)->format('d.m H:i') }} (1 рабочий день)">⏳ задан уточняющий вопрос · ждём ответа до {{ $cl['until']->timezone($tzc)->format('d.m H:i') }}</span>
+                                @elseif($cl['state'] === \App\Services\QuoteParts\OfferClarifications::ANSWERED)
+                                    <span class="chip chip-ok text-[10.5px]" title="Спросили {{ $cl['asked_at']->timezone($tzc)->format('d.m H:i') }}">↩ ответил на уточнение {{ $cl['answered_at']->timezone($tzc)->format('d.m H:i') }} — решите по ответу</span>
+                                @else
+                                    <span class="chip chip-neutral text-[10.5px]" title="Спросили {{ $cl['asked_at']->timezone($tzc)->format('d.m H:i') }}">⌛ на уточнение не ответил за рабочий день</span>
+                                @endif
+                            </div>
+                        @endif
                     </td>
                     <td class="px-3 py-1.5 text-right mono whitespace-nowrap">
                         @forelse($r['tiers'] as $t)
@@ -103,7 +119,11 @@
                     @endif
                     <td class="px-3 py-1.5">
                         <div class="flex flex-wrap items-center gap-1">
-                            @if($deviation && $r['review'] !== 'accepted')
+                            @if($clWaiting)
+                                {{-- Задан уточняющий вопрос: решение — по ответу поставщика (или по истечении рабочего дня). --}}
+                                <span class="text-[11px] text-amber-700">решение после ответа</span>
+                                <button type="button" wire:click="clearClarification({{ $r['id'] }})" class="text-[11px] text-fg-4 hover:text-fg-1 underline" title="Снять ожидание и решить сейчас">решить без ответа</button>
+                            @elseif($deviation && $r['review'] !== 'accepted')
                                 {{-- Отклонение: сначала решить, учитывать ли. --}}
                                 <button type="button" wire:click="review({{ $r['id'] }}, true)" class="btn btn-sm" title="Цена идёт как цена позиции; в выгрузке 1С — с примечанием, что предложено">Учитывать</button>
                                 @if($r['review'] === 'rejected')

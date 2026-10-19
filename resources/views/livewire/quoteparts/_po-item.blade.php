@@ -27,6 +27,14 @@
         @endif
         <span class="text-fg-4">·</span>
         <span class="text-fg-3" title="Закупочная цена из каталога (1С) — с логистикой и таможней">закупка <span class="mono text-fg-1">{{ $it['purchase'] !== null ? $money($it['purchase']).' ₽' : '—' }}</span>@if($last)<span> · {{ $last->supplier_name_1c }}{{ $last->priced_at ? ', '.$last->priced_at->format('d.m.Y') : '' }}</span>@endif</span>
+        @php
+            $itemWaiting = $it['offers']->map(fn ($r) => ['r' => $r, 'c' => $this->clarifications[$r['id']] ?? null])
+                ->filter(fn ($x) => ($x['c']['state'] ?? null) === \App\Services\QuoteParts\OfferClarifications::WAITING);
+        @endphp
+        @if($itemWaiting->isNotEmpty())
+            <span class="text-fg-4">·</span>
+            <span class="chip chip-warn text-[11px]">⏳ ждём ответа на уточнение: {{ $itemWaiting->map(fn ($x) => $x['r']['supplier'].' до '.$x['c']['until']->timezone($tz)->format('d.m H:i'))->implode(', ') }}</span>
+        @endif
         @if($choice)
             <span class="text-fg-4">·</span>
             <span class="text-sky-700" title="Выбор снабжения: у кого закупаем">закупаем у: <b>{{ $choice->supplier_name }}</b>{{ $choice->price !== null ? ' · '.number_format((float) $choice->price, 2, ',', ' ').' '.$choice->currency : '' }}</span>
