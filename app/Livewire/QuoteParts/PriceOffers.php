@@ -164,6 +164,8 @@ class PriceOffers extends Component
         return $this->rows->merge($this->readyItems->flatMap(fn ($i) => $i['offers']))
             ->filter(fn ($r) => $r['sku'] && $r['rub'] !== null && ! $r['stale'] && $r['counts'])
             ->groupBy('sku')
+            // Выделять есть из чего, когда предложений на позицию хотя бы два.
+            ->filter(fn ($g) => $g->pluck('id')->unique()->count() > 1)
             ->map(fn ($g) => $g->sortBy('rub')->first()['id'])
             ->values()->all();
     }
