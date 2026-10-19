@@ -3,7 +3,6 @@
     $money = fn ($v, $d = 0) => $v === null ? '—' : number_format((float) $v, $d, ',', ' ');
     $card = $it['cid'] ? ($this->openCards[$it['cid']] ?? null) : null;
     $best = $it['best'];
-    $bestDelta = $best && $it['purchase'] ? ($best['rub'] - $it['purchase']) / $it['purchase'] * 100 : null;
 @endphp
 <div wire:key="poi-{{ $ready ? 'r' : 'w' }}-{{ $it['sku'] }}" class="border-t border-border-subtle first:border-t-0">
     <div class="grid grid-cols-[minmax(260px,1fr)_200px_150px_200px] items-start gap-x-6 gap-y-1 px-4 py-2.5 {{ $ready ? 'bg-emerald-50/50' : '' }}">
@@ -32,7 +31,7 @@
         <div class="text-right text-[12px] whitespace-nowrap">
             <div class="text-fg-3">лучшая цена</div>
             <div class="mono font-semibold text-fg-1">{{ $best ? $money($best['rub']).' ₽' : '—' }}</div>
-            @if($bestDelta !== null)<div class="text-[11px] {{ $bestDelta > 0 ? 'text-red-700' : 'text-emerald-700' }}" title="Лучшая цена поставщика в ₽ к закупочной цене из каталога">{{ $bestDelta > 0 ? '+' : '−' }}{{ number_format(abs($bestDelta), 0, ',', ' ') }}% к закупке</div>@endif
+            @if($best)<div class="text-[11px] text-fg-4">{{ $best['supplier'] }}</div>@endif
         </div>
         <div class="text-right text-[12px] whitespace-nowrap">
             <div class="text-fg-3">закупка · продажа</div>

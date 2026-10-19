@@ -26,13 +26,14 @@ class PriceOffersRowTest extends TestCase
         $r = self::row($o);
 
         $this->assertSame(1200.0, $r['rub']);
-        $this->assertEqualsWithDelta(20.0, $r['delta_pct'], 0.001);
+        $this->assertSame(1000.0, $r['purchase']);
+        $this->assertArrayNotHasKey('delta_pct', $r, 'с закупкой (логистика, таможня) не сравниваем');
         $this->assertSame(20019, $r['request_id']);
         $this->assertFalse($r['actual']);
         $this->assertFalse($r['stale']);
     }
 
-    public function test_superseded_offer_is_stale_and_without_purchase_no_delta(): void
+    public function test_superseded_offer_is_stale(): void
     {
         $o = new QuotePartsOffer(['sku' => 'M1', 'price' => 10, 'currency' => 'RUB', 'status' => 'active', 'superseded' => true]);
         $o->setRelation('catalogItem', null);
@@ -41,7 +42,7 @@ class PriceOffersRowTest extends TestCase
         $r = self::row($o);
 
         $this->assertTrue($r['stale']);
-        $this->assertNull($r['delta_pct']);
+        $this->assertNull($r['purchase']);
         $this->assertSame('M1', $r['sku']);
     }
 }

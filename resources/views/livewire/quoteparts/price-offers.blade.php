@@ -27,7 +27,7 @@
         </label>
         <input type="search" wire:model.live.debounce.300ms="search" placeholder="Артикул, позиция, поставщик, заявка, QP-…"
                class="h-[30px] w-full max-w-[320px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
-        <span class="text-fg-4">Предложений: {{ $rows->count() }}{{ $rows->count() >= 500 ? ' (последние 500)' : '' }}. ≈ ₽ — по курсу ЦБ; % — к закупочной цене каталога. Позицию можно раскрыть — карточка каталога.</span>
+        <span class="text-fg-4">Предложений: {{ $rows->count() }}{{ $rows->count() >= 500 ? ' (последние 500)' : '' }}. ≈ ₽ — по курсу ЦБ. Позицию можно раскрыть — карточка каталога.</span>
     </div>
 
     {{-- Готово к актуализации: цену дали больше половины спрошенных или есть предложение и прошло больше 2 рабочих дней. --}}

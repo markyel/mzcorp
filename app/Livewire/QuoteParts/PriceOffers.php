@@ -219,8 +219,7 @@ class PriceOffers extends Component
             'purchase' => $purchase,
             'sale' => $ci?->price !== null ? (float) $ci->price : null,
             'actual' => (bool) ($ci?->is_price_actual ?? false),
-            // Насколько оффер (в ₽) отличается от закупочной цены каталога.
-            'delta_pct' => $rub['known'] && $rub['rub'] !== null && $purchase !== null && $purchase > 0 ? ($rub['rub'] - $purchase) / $purchase * 100 : null,
+            // С закупкой не сравниваем: в ней логистика и таможня, цена поставщика — без них.
         ];
     }
 

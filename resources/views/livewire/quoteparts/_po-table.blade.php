@@ -3,7 +3,7 @@
     $sources = ['form' => 'форма запроса', 'email' => 'письмо', 'cabinet' => 'кабинет', 'price_list' => 'прайс', 'api' => 'API'];
     $money = fn ($v, $d = 2) => $v === null ? '—' : number_format((float) $v, $d, ',', ' ');
     $showItem = $showItem ?? true;
-    $cols = 6 + ($showItem ? 3 : 0) + ($showRequest ? 1 : 0);
+    $cols = 5 + ($showItem ? 3 : 0) + ($showRequest ? 1 : 0);
 @endphp
 {{-- Ширины колонок фиксированы и одинаковы во всех блоках: таблицы стоят друг под другом и не «пляшут». --}}
 <div class="overflow-x-auto">
@@ -14,7 +14,6 @@
             <col @if($showItem) style="width:230px" @endif>
             <col style="width:130px">
             <col style="width:100px">
-            <col style="width:90px">
             @if($showItem)<col style="width:100px"><col style="width:120px">@endif
             <col style="width:120px">
             @if($showRequest)<col style="width:140px">@endif
@@ -26,9 +25,9 @@
                 <th class="text-left px-3 py-2">Поставщик</th>
                 <th class="text-right px-3 py-2">Цена</th>
                 <th class="text-right px-3 py-2" title="Цена поставщика в рублях по курсу ЦБ">≈ ₽</th>
-                <th class="text-right px-3 py-2" title="Насколько цена поставщика (в ₽) выше или ниже закупочной цены из каталога: + дороже, − дешевле">К закупке</th>
+
                 @if($showItem)
-                    <th class="text-right px-3 py-2" title="Закупочная цена из каталога (1С)">Закупка</th>
+                    <th class="text-right px-3 py-2" title="Закупочная цена из каталога (1С) — с логистикой и таможней, с ценой поставщика напрямую не сравнивается">Закупка</th>
                     <th class="text-right px-3 py-2" title="Цена продажи в каталоге">Продажа</th>
                 @endif
                 <th class="text-left px-3 py-2">Срок · действует</th>
@@ -74,13 +73,6 @@
                         @endforelse
                     </td>
                     <td class="px-3 py-1.5 text-right mono whitespace-nowrap">{{ $r['rub'] !== null ? $money($r['rub'], 0).' ₽' : '—' }}</td>
-                    <td class="px-3 py-1.5 text-right mono whitespace-nowrap">
-                        @if($r['delta_pct'] !== null)
-                            <span class="{{ $r['delta_pct'] > 0 ? 'text-red-700' : 'text-emerald-700' }}" title="Цена поставщика {{ $money($r['rub'], 0) }} ₽ к закупочной {{ $money($r['purchase'], 0) }} ₽">{{ $r['delta_pct'] > 0 ? '+' : '−' }}{{ number_format(abs($r['delta_pct']), 0, ',', ' ') }}%</span>
-                        @else
-                            <span class="text-fg-4">—</span>
-                        @endif
-                    </td>
                     @if($showItem)
                         <td class="px-3 py-1.5 text-right mono whitespace-nowrap text-fg-2">{{ $r['purchase'] !== null ? $money($r['purchase'], 0).' ₽' : '—' }}</td>
                         <td class="px-3 py-1.5 text-right mono whitespace-nowrap text-fg-2">
