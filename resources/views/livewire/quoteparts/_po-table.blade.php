@@ -24,6 +24,7 @@
             @if($showRequest)<col style="width:130px">@endif
             <col style="width:200px">
         </colgroup>
+        @if($showItem)
         <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
             <tr>
                 <th class="text-left px-3 py-2">Когда</th>
@@ -40,6 +41,7 @@
                 <th class="text-left px-3 py-2">Решение</th>
             </tr>
         </thead>
+        @endif
         <tbody>
             @foreach($rows as $r)
                 @php
@@ -77,15 +79,17 @@
                         </td>
                     @endif
                     <td class="px-3 py-1.5 break-words">
-                        <span class="font-medium text-fg-1">{{ $r['supplier'] }}</span>
-                        @if($isBest)<span class="chip chip-ok text-[10px] ml-1">лучшее</span>@endif
+                        <div class="flex items-baseline gap-1.5 min-w-0">
+                            <span class="font-medium text-fg-1 shrink-0">{{ $r['supplier'] }}</span>
+                            @if($isBest)<span class="chip chip-ok text-[10px] shrink-0">лучшее</span>@endif
+                            @if($r['note'])<span class="text-[11.5px] text-fg-3 truncate min-w-0" title="{{ $r['note'] }}">{{ $r['note'] }}</span>@endif
+                        </div>
                         @if($deviation)
                             <div class="mt-0.5">
                                 <span class="chip chip-warn text-[10.5px] font-semibold" title="Не оригинал — учитывать или нет, решает снабжение">{{ mb_strtoupper(\App\Models\QuotePartsOffer::kindLabel($r['kind'])) }} · не оригинал</span>
                                 @if($r['product'])<span class="mono text-[11px] text-fg-2">{{ $r['product'] }}</span>@endif
                             </div>
                         @endif
-                        @if($r['note'])<div class="text-[11px] text-fg-3">«{{ \Illuminate\Support\Str::limit($r['note'], 160) }}»</div>@endif
                         @if($r['stale'])<div class="text-[10.5px] text-fg-4">устарело</div>@endif
                         {{-- Уточнение у поставщика: ждём ответа (решение отложено), ответил, не ответил в срок. --}}
                         @if($cl)
