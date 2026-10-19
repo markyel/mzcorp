@@ -4,7 +4,10 @@
     <div class="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-border-subtle">
         <span class="mono font-semibold">{{ $rfq->tag }}</span>
         <span class="chip {{ ($snap['status'] ?? $rfq->status) === 'open' ? 'chip-sky' : 'chip-neutral' }} text-[10.5px]">{{ ($snap['status'] ?? $rfq->status) === 'open' ? 'открыт' : 'закрыт' }}</span>
-        <span class="text-fg-3 text-[12px]">{{ $rfq->created_at->format('d.m.Y H:i') }} · {{ $rfq->createdBy?->name }}{{ $rfq->reply_by ? ' · ответить до '.$rfq->reply_by->format('d.m.Y') : '' }}</span>
+        <span class="text-fg-3 text-[12px]">{{ $rfq->created_at->format('d.m.Y H:i') }} · {{ $rfq->createdBy?->name ?? ($rfq->isSupplierQuestion() ? 'снабжение' : '') }}{{ $rfq->reply_by ? ' · ответить до '.$rfq->reply_by->format('d.m.Y') : '' }}</span>
+        @if($rfq->isSupplierQuestion())
+            <span class="chip chip-warn text-[10.5px]" title="Поставщик спросил по позиции из своей номенклатуры (её у него не запрашивали) — запрос открылся сам, отвечает снабжение">вопрос поставщика по позиции</span>
+        @endif
         @if(! empty($snap['mirror_email']))
             <span class="chip chip-neutral text-[10.5px]" title="Ответы поставщиков приходят копией на эту почту; ответ на копию уходит поставщику">✉ дублируется на {{ $snap['mirror_email'] }}</span>
         @endif

@@ -39,4 +39,12 @@ class QuotePartsRfq extends Model
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
     }
+
+    /** Запрос открыл поставщик вопросом по позиции из своей номенклатуры (её у него не запрашивали). */
+    public const ORIGIN_SUPPLIER_QUESTION = 'supplier_question';
+
+    public function isSupplierQuestion(): bool
+    {
+        return ($this->snapshot['origin'] ?? null) === self::ORIGIN_SUPPLIER_QUESTION;
+    }
 }

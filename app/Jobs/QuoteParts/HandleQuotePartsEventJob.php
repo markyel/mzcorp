@@ -43,7 +43,7 @@ class HandleQuotePartsEventJob implements ShouldQueue
 
     public function handle(QuotePartsRfqService $service): void
     {
-        $rfq = QuotePartsRfq::query()->where('remote_id', $this->remoteId)->first();
+        $rfq = QuotePartsRfq::query()->where('remote_id', $this->remoteId)->first() ?? $this->adoptSupplierQuestion($service);
         if ($rfq === null) {
             return; // не наш запрос (или создан не из mzcorp)
         }
@@ -64,7 +64,7 @@ class HandleQuotePartsEventJob implements ShouldQueue
             }
         }
 
-        if (! in_array($this->event, ['supplier.replied', 'supplier.question'], true) || $rfq->createdBy === null) {
+        if (! in_array($this->event, ['supplier.replied', 'supplier.question'], true)) {
             return;
         }
 
@@ -72,6 +72,52 @@ class HandleQuotePartsEventJob implements ShouldQueue
             ? ($service->supplierNames([$rfq])[$this->supplierKey] ?? null)
             : null;
 
-        $rfq->createdBy->notify(new QuotePartsSupplierNotification($rfq, $this->event, $supplierName, $this->questions));
+        // Запрос, открытый вопросом поставщика по позиции из номенклатуры, — общий для снабжения:
+        // «колокольчик» всем снабженцам, а вопросы ещё и письмом.
+        if ($rfq->isSupplierQuestion()) {
+            $staff = \App\Models\User::role(\App\Enums\Role::Procurement->value)->whereNull('archived_at')->get();
+            foreach ($staff as $user) {
+                $user->notify(new QuotePartsSupplierNotification($rfq, $this->event, $supplierName, $this->questions));
+                if ($this->event === 'supplier.question' && $user->email) {
+                    app(\App\Services\Mail\SystemNotificationMailer::class)->sendMailable(
+                        $user->email,
+                        new \App\Mail\QuotePartsItemQuestionMail($rfq, (string) ($supplierName ?: $this->supplierKey), $this->questions),
+                    );
+                }
+            }
+
+            return;
+        }
+
+        $rfq->createdBy?->notify(new QuotePartsSupplierNotification($rfq, $this->event, $supplierName, $this->questions));
+    }
+
+    /**
+     * Запроса нет у нас — его открыл сам поставщик вопросом по позиции из номенклатуры
+     * (QuoteParts: origin supplier_question). Заводим его без заявки и без автора — его ведёт
+     * снабжение («Снабжение» → «Запросы через QuoteParts»). Чужие запросы по-прежнему пропускаем.
+     */
+    private function adoptSupplierQuestion(QuotePartsRfqService $service): ?QuotePartsRfq
+    {
+        try {
+            $snapshot = app(\App\Services\QuoteParts\QuotePartsClient::class)->rfq($this->remoteId);
+        } catch (Throwable $e) {
+            Log::warning('QuoteParts event: unknown request not fetched', ['rfq' => $this->remoteId, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+        if (($snapshot['origin'] ?? null) !== QuotePartsRfq::ORIGIN_SUPPLIER_QUESTION) {
+            return null;
+        }
+
+        return QuotePartsRfq::query()->firstOrCreate(['remote_id' => $this->remoteId], [
+            'tag' => $snapshot['tag'] ?? null,
+            'request_id' => null,
+            'created_by_user_id' => null,
+            'reply_by' => $snapshot['reply_by'] ?? null,
+            'status' => $snapshot['status'] ?? 'open',
+            'snapshot' => $snapshot,
+            'synced_at' => now(),
+        ]);
     }
 }

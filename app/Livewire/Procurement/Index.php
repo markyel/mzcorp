@@ -199,7 +199,8 @@ class Index extends Component
         $creatorId = $this->effectiveCreatorId();
 
         return QuotePartsRfq::query()->whereNull('request_id')
-            ->when($creatorId !== null, fn ($q) => $q->where('created_by_user_id', $creatorId))
+            // Без автора — запрос открыл поставщик вопросом по позиции: он общий, виден каждому.
+            ->when($creatorId !== null, fn ($q) => $q->where(fn ($w) => $w->where('created_by_user_id', $creatorId)->orWhereNull('created_by_user_id')))
             ->where(fn ($q) => $q->where('status', 'open')->orWhere('created_at', '>=', now()->subDays(30)))
             ->with('createdBy:id,name')->latest('id')->limit(30)->get();
     }
