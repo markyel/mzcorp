@@ -147,6 +147,24 @@ class QuotePartsClient
      * @param  list<string>  $externalIds
      * @return list<array{id:int, external_id:?string, status:string, terms_confirmed:bool, supplier_comment:?string}>
      */
+    /**
+     * Ссылка для входа в кабинет поставщика от имени его человека (короткоживущая, QuoteParts её журналирует).
+     *
+     * @return array{url:string, email:string, expires_at:string}
+     */
+    public function supplierAccessLink(string $externalId, string $email, ?string $authorName): array
+    {
+        $response = $this->http()->post('/api/v1/supplier-links/'.rawurlencode($externalId).'/access-link', ['email' => $email, 'author_name' => $authorName]);
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не выдал ссылку.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts access link: HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
     public function supplierLinks(array $externalIds): array
     {
         $response = $this->http()->get('/api/v1/supplier-links', ['external_ids' => $externalIds]);

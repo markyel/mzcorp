@@ -159,6 +159,26 @@ class Index extends Component
             ->values();
     }
 
+    /**
+     * Ссылка для входа в личный кабинет поставщика от имени этого адреса — в буфер обмена
+     * (страница копирует её сама). Живёт 2 часа; каждую выдачу QuoteParts пишет в журнал.
+     */
+    public function accessLink(int $supplierId, QuotePartsClient $client): ?string
+    {
+        abort_unless(auth()->user()?->hasAnyRole(['director', 'admin']), 403);
+        $s = \App\Models\Supplier::query()->whereNotNull('quoteparts_link_id')->findOrFail($supplierId);
+        try {
+            $r = $client->supplierAccessLink($s->quotepartsKey(), (string) $s->email, auth()->user()->name);
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
+
+            return null;
+        }
+        \Illuminate\Support\Facades\Log::info('QuoteParts supplier cabinet link copied', ['user_id' => auth()->id(), 'supplier_id' => $s->id, 'email' => $r['email'] ?? $s->email]);
+
+        return (string) $r['url'];
+    }
+
     public function refreshSupplierStatuses(\App\Services\QuoteParts\QuotePartsSupplierService $service): void
     {
         try {

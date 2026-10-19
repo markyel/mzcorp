@@ -227,6 +227,15 @@
                                         <div class="text-[11.5px] mt-0.5">
                                             <a href="{{ route('suppliers.registry-edit', $s) }}" class="text-sky-700 hover:underline">{{ $s->email }}</a>
                                             <span class="text-fg-4">{{ $s->contact_person ?: ($s->name !== $g['name'] ? $s->name : '') }}{{ $s->language ? ' · '.($s->language === 'ru' ? 'рус' : 'англ') : '' }}</span>
+                                            {{-- Ссылка для входа в кабинет поставщика от имени этого адреса — сразу в буфер обмена. --}}
+                                            <button type="button" class="ml-1 text-[11px] text-sky-700 hover:underline"
+                                                    title="Скопировать ссылку для входа в личный кабинет поставщика от имени {{ $s->email }} (действует 2 часа; всё, что сделаете в кабинете, будет от имени поставщика)"
+                                                    x-data="{ busy: false }" :disabled="busy"
+                                                    x-on:click="busy = true; $wire.accessLink({{ $s->id }}).then(u => { busy = false; if (! u) return;
+                                                        const done = () => window.dispatchEvent(new CustomEvent('toast', { detail: { type: 'success', message: 'Ссылка в кабинет {{ $s->email }} скопирована — действует 2 часа' } }));
+                                                        (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(done, () => window.prompt('Скопируйте ссылку в кабинет поставщика:', u)); })">
+                                                <span x-show="! busy">🔑 ссылка в кабинет</span><span x-show="busy" x-cloak>…</span>
+                                            </button>
                                         </div>
                                     @endforeach
                                 </td>
