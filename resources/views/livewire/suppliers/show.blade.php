@@ -3,7 +3,7 @@
 
     {{-- Заголовок --}}
     <div class="flex items-center gap-3 flex-wrap">
-        <a href="{{ route('suppliers.index') }}" wire:navigate class="text-[12px] text-sky-700 hover:underline">← Поставщики</a>
+        <a href="{{ $backUrl ?: route('suppliers.index') }}" wire:navigate class="text-[12px] text-sky-700 hover:underline">{{ \App\Support\BackUrl::label($backUrl, '← Поставщики') }}</a>
         <h2 class="text-[16px] font-semibold text-fg-1">{{ $inquiry->supplier_name ?: $inquiry->supplier_email }}</h2>
         <span class="chip {{ $inquiry->status === 'closed' ? 'chip-neutral' : 'chip-sky' }} text-[11px]">{{ $inquiry->status === 'closed' ? 'закрыт' : 'открыт' }}</span>
     </div>

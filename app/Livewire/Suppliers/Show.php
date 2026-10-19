@@ -40,9 +40,13 @@ class Show extends Component
     /** Копия (CC) — адреса через запятую/точку с запятой. */
     public string $replyCc = '';
 
+    /** Куда ведёт «←»: страница, откуда открыли переписку, иначе раздел «Поставщики». */
+    public string $backUrl = '';
+
     public function mount(SupplierInquiry $inquiry): void
     {
         abort_unless(auth()->check(), 403);
+        $this->backUrl = \App\Support\BackUrl::from(route('suppliers.index'));
         $this->inquiry = $inquiry;
         $this->supplier_name = (string) ($inquiry->supplier_name ?? '');
         $this->notes = (string) ($inquiry->notes ?? '');

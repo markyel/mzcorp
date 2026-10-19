@@ -40,9 +40,13 @@ class SupplierEdit extends Component
 
     public const ALL = 'ВСЕ';
 
+    /** Куда ведёт «←»: страница, откуда открыли карточку (QuoteParts, снабжение…), иначе реестр. */
+    public string $backUrl = '';
+
     public function mount(Supplier $supplier): void
     {
         abort_unless(auth()->check(), 403);
+        $this->backUrl = \App\Support\BackUrl::from(route('suppliers.index', ['tab' => 'registry']));
         $this->supplier = $supplier;
         $this->fillForm();
     }

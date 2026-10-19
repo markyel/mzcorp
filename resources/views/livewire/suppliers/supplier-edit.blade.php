@@ -9,7 +9,7 @@
 
     {{-- Заголовок --}}
     <div class="flex items-center gap-3 flex-wrap">
-        <a href="{{ route('suppliers.index', ['tab' => 'registry']) }}" wire:navigate class="text-[12px] text-sky-700 hover:underline">← Поставщики</a>
+        <a href="{{ $backUrl ?: route('suppliers.index', ['tab' => 'registry']) }}" wire:navigate class="text-[12px] text-sky-700 hover:underline">{{ \App\Support\BackUrl::label($backUrl, '← Поставщики') }}</a>
         <h2 class="text-[16px] font-semibold text-fg-1">{{ $supplier->name ?: ($supplier->email ?: $supplier->domain) }}</h2>
     </div>
 
