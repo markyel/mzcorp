@@ -60,27 +60,27 @@
     @else
         @forelse($this->groups as $g)
             <div class="ds-card" wire:key="pog-{{ $g['key'] }}">
-                @if($view === 'request')
-                    <div class="ds-card-header flex-wrap gap-y-1">
-                        @if($g['request'])
-                            <a href="{{ route('requests.show', $g['request']->id) }}" class="mono font-semibold text-sky-700 hover:underline">{{ $g['request']->internal_code }}</a>
-                            <span class="text-[12px] text-fg-3 ml-2 truncate max-w-[520px]">{{ $g['request']->client_name ?: '' }}{{ $g['request']->client_name && $g['request']->subject ? ' · ' : '' }}{{ \Illuminate\Support\Str::limit((string) $g['request']->subject, 80) }}</span>
-                            @if($g['request']->assignedUser)<span class="text-[12px] text-fg-4 ml-2">· {{ $g['request']->assignedUser->name }}</span>@endif
-                        @else
-                            <h3>Без заявки</h3>
-                            <span class="text-[12px] text-fg-3 ml-2">кабинет, прайсы и запросы не по заявке</span>
-                        @endif
-                        <span class="ml-auto text-[11.5px] text-fg-3">
-                            @foreach($g['rfqs'] as $tag)<span class="mono">{{ $tag }}</span>@if(! $loop->last), @endif @endforeach
-                            · предложений {{ $g['rows']->count() }}
-                        </span>
-                    </div>
-                @endif
-                @include('livewire.quoteparts._po-table', ['rows' => $g['rows'], 'showRequest' => $view === 'list', 'showItem' => true])
+                <div class="ds-card-header flex-wrap gap-y-1">
+                    @if($g['request'])
+                        <a href="{{ route('requests.show', $g['request']->id) }}" class="mono font-semibold text-sky-700 hover:underline">{{ $g['request']->internal_code }}</a>
+                        <span class="text-[12px] text-fg-3 ml-2 truncate max-w-[520px]">{{ $g['request']->client_name ?: '' }}{{ $g['request']->client_name && $g['request']->subject ? ' · ' : '' }}{{ \Illuminate\Support\Str::limit((string) $g['request']->subject, 80) }}</span>
+                        @if($g['request']->assignedUser)<span class="text-[12px] text-fg-4 ml-2">· {{ $g['request']->assignedUser->name }}</span>@endif
+                    @else
+                        <h3>Без заявки</h3>
+                        <span class="text-[12px] text-fg-3 ml-2">кабинет, прайсы и запросы не по заявке</span>
+                    @endif
+                    <span class="ml-auto text-[11.5px] text-fg-3">
+                        @foreach($g['rfqs'] as $tag)<span class="mono">{{ $tag }}</span>@if(! $loop->last), @endif @endforeach
+                        · предложений {{ $g['rows']->count() }}
+                    </span>
+                </div>
+                @foreach($g['items'] as $it)
+                    @include('livewire.quoteparts._po-item', ['it' => $it, 'ready' => false])
+                @endforeach
             </div>
         @empty
             <div class="ds-card"><div class="ds-card-body text-center text-fg-3 text-[13px] py-8">
-                За {{ $days }} дн. свежих предложений нет. Они приходят из QuoteParts каждые 10 минут: ответы на запросы (форма, письмо), кабинет поставщика и прайсы.
+                За {{ $days }} дн. {{ $readyItems->isNotEmpty() ? 'других' : 'свежих' }} предложений нет. Они приходят из QuoteParts каждые 10 минут: ответы на запросы (форма, письмо), кабинет поставщика и прайсы.
             </div></div>
         @endforelse
     @endif

@@ -35,7 +35,8 @@ class PriceOffers extends Component
 
     public const DAYS = [3, 7, 30, 90];
 
-    public const VIEWS = ['request' => 'по заявкам', 'item' => 'по позициям', 'list' => 'списком'];
+    /** Вид «списком» (отдельная таблица) убран: везде одно оформление — позиция и её предложения. */
+    public const VIEWS = ['request' => 'по заявкам', 'item' => 'по позициям'];
 
     #[Url(as: 'pd', except: 7)]
     public int $days = 7;
@@ -375,23 +376,24 @@ class PriceOffers extends Component
     }
 
     /**
-     * Группы по заявкам: свежий ответ — выше, «Без заявки» — последней.
+     * Группы по заявкам: свежий ответ — выше, «Без заявки» — последней. Внутри — позиции с их
+     * предложениями, как в «Готово к актуализации» (те позиции здесь не повторяются).
      *
-     * @return Collection<int, array{key:string, request:?\App\Models\Request, rfqs:list<string>, rows:Collection, at:mixed}>
+     * @return Collection<int, array{key:string, request:?\App\Models\Request, rfqs:list<string>, rows:Collection, items:Collection, at:mixed}>
      */
     #[Computed]
     public function groups(): Collection
     {
-        if ($this->view === 'list') {
-            return collect([['key' => 'all', 'request' => null, 'rfqs' => [], 'rows' => $this->rows, 'at' => null]]);
-        }
+        $ready = $this->readyItems->pluck('sku')->all();
 
-        return $this->rows->groupBy(fn ($r) => $r['request_id'] ? 'r'.$r['request_id'] : 'none')
+        return $this->rows->reject(fn ($r) => in_array($r['sku'], $ready, true))
+            ->groupBy(fn ($r) => $r['request_id'] ? 'r'.$r['request_id'] : 'none')
             ->map(fn (Collection $rows, string $key) => [
                 'key' => $key,
                 'request' => $rows->first()['request'],
                 'rfqs' => $rows->pluck('rfq_tag')->filter()->unique()->values()->all(),
                 'rows' => $rows,
+                'items' => $this->itemsFrom($rows)->values(),
                 'at' => $rows->max('at'),
             ])
             ->sortBy(fn ($g) => [$g['key'] === 'none' ? 1 : 0, -($g['at']?->getTimestamp() ?? 0)])
@@ -456,7 +458,7 @@ class PriceOffers extends Component
     public function render()
     {
         if (! array_key_exists($this->view, self::VIEWS)) {
-            $this->view = 'request';
+            $this->view = $this->view === 'list' ? 'item' : 'request';
         }
 
         return view('livewire.quoteparts.price-offers');
