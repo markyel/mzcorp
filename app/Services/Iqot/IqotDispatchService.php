@@ -78,6 +78,76 @@ class IqotDispatchService
             return ['skipped' => 'empty_pool', 'used_today' => $usedToday, 'remaining' => $remaining];
         }
 
+        return $this->submit($positions, $usedToday, 'pool');
+    }
+
+    /**
+     * Запрос КП по выбранной группе позиций каталога (раздел IQOT, «Запросить КП») —
+     * прежняя заявка IQOT на сбор КП, и в режиме мониторинга тоже: мониторинг даёт цены
+     * сайтов, а по группе позиций нужны живые КП поставщиков. Позиции со свежим отчётом
+     * повторно не шлём (бережём баланс), уже отправленные ждут свой отчёт. Дневной лимит
+     * соблюдается: группа больше остатка — не отправляем ничего, пусть уменьшат выбор.
+     *
+     * @param  list<int>  $catalogItemIds
+     * @return array<string, mixed>
+     */
+    public function dispatchCatalogItems(array $catalogItemIds, ?int $userId = null): array
+    {
+        if (! (bool) app_setting('iqot.enabled', config('services.iqot.enabled', false))) {
+            return ['skipped' => 'disabled'];
+        }
+        if (! $this->api->isConfigured()) {
+            return ['skipped' => 'not_configured'];
+        }
+        $catalogItemIds = array_values(array_unique(array_filter(array_map('intval', $catalogItemIds))));
+        if ($catalogItemIds === []) {
+            return ['skipped' => 'empty_selection'];
+        }
+
+        $dailyLimit = (int) app_setting('iqot.daily_limit', config('services.iqot.daily_limit', 50));
+        $usedToday = IqotPosition::whereNotNull('last_enqueued_at')
+            ->where('last_enqueued_at', '>=', now()->startOfDay())
+            ->count();
+        $remaining = min(max(0, $dailyLimit - $usedToday), self::MAX_LINES);
+
+        $existing = IqotPosition::query()->whereIn('catalog_item_id', $catalogItemIds)->get()->keyBy('catalog_item_id');
+        $fresh = $existing->filter(fn (IqotPosition $p) => $p->hasFreshReport())->keys()->all();
+        $analyzing = $existing->filter(fn (IqotPosition $p) => $p->status === IqotPositionStatus::Analyzing->value && ! $p->hasFreshReport())->keys()->all();
+        $toSend = array_values(array_diff($catalogItemIds, $fresh, $analyzing));
+        $skipped = ['fresh' => count($fresh), 'analyzing' => count($analyzing)];
+
+        if ($toSend === []) {
+            return ['skipped' => 'nothing_to_send'] + $skipped;
+        }
+        if (count($toSend) > $remaining) {
+            return ['skipped' => 'daily_limit', 'selected' => count($toSend), 'remaining' => $remaining, 'used_today' => $usedToday] + $skipped;
+        }
+
+        foreach ($toSend as $id) {
+            $this->pool->enqueueCatalogItem($id, $userId);
+        }
+        $positions = IqotPosition::with('catalogItem')
+            ->whereIn('catalog_item_id', $toSend)
+            ->where('status', IqotPositionStatus::Pending->value)
+            ->get();
+        if ($positions->isEmpty()) {
+            return ['skipped' => 'nothing_to_send'] + $skipped;
+        }
+
+        return $this->submit($positions, $usedToday, 'group') + $skipped;
+    }
+
+    /** Потолок IQOT на одну submission. */
+    private const MAX_LINES = 300;
+
+    /**
+     * Собрать одну submission из позиций и отправить.
+     *
+     * @param  \Illuminate\Support\Collection<int, IqotPosition>  $positions
+     * @return array<string, mixed>
+     */
+    private function submit(\Illuminate\Support\Collection $positions, int $usedToday, string $refPrefix): array
+    {
         // Построить валидные строки; невалидные (пустое название) → failed.
         $batch = [];
         foreach ($positions as $pos) {
@@ -104,7 +174,7 @@ class IqotDispatchService
 
         $sub = IqotSubmission::create([
             'idempotency_key' => $idem,
-            'client_ref' => 'pool-' . now()->format('Ymd_His'),
+            'client_ref' => $refPrefix . '-' . now()->format('Ymd_His'),
             'local_status' => IqotSubmissionStatus::Sending->value,
             'catalog_item_ids' => array_map(fn ($b) => $b['pos']->catalog_item_id, $batch),
         ]);

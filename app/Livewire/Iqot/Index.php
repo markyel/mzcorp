@@ -202,6 +202,48 @@ class Index extends Component
         unset($this->stats, $this->positions);
     }
 
+    /** @var list<int> Выбранные позиции каталога для «Запросить КП». */
+    public array $selected = [];
+
+    /** M-артикулы списком — позиции, которых ещё нет в таблице. */
+    public string $kpSkus = '';
+
+    /**
+     * «Запросить КП» по группе: выбранные строки + M-артикулы из поля — прежней заявкой IQOT
+     * на сбор КП, и в режиме мониторинга (IqotDispatchService::dispatchCatalogItems).
+     */
+    public function requestQuotes(IqotDispatchService $dispatch): void
+    {
+        $this->assertManager();
+        preg_match_all('/\bM\d{4,6}\b/iu', $this->kpSkus, $m);
+        $skus = array_values(array_unique(array_map('mb_strtoupper', $m[0] ?? [])));
+        $bySku = $skus === [] ? collect() : \App\Models\CatalogItem::query()->whereIn('sku', $skus)->pluck('id', 'sku');
+        $unknown = array_values(array_diff($skus, $bySku->keys()->all()));
+        $ids = array_merge(array_map('intval', $this->selected), $bySku->values()->map(fn ($v) => (int) $v)->all());
+
+        $r = $dispatch->dispatchCatalogItems($ids, auth()->id());
+        $notes = array_filter([
+            ($r['fresh'] ?? 0) > 0 ? 'со свежим отчётом пропущено '.$r['fresh'] : null,
+            ($r['analyzing'] ?? 0) > 0 ? 'уже ждут КП '.$r['analyzing'] : null,
+            $unknown !== [] ? 'не найдены в каталоге: '.implode(', ', array_slice($unknown, 0, 10)) : null,
+        ]);
+        $tail = $notes !== [] ? ' ('.implode('; ', $notes).')' : '';
+        $msg = match (true) {
+            isset($r['submitted']) => "Запрос КП отправлен в IQOT: {$r['submitted']} позиц. (за сегодня: {$r['used_today']})".$tail.'. Отчёт — по мере ответов поставщиков.',
+            ($r['skipped'] ?? null) === 'daily_limit' => "Выбрано {$r['selected']} позиц., а дневной лимит IQOT позволяет ещё {$r['remaining']} — уменьшите выбор".$tail.'.',
+            ($r['skipped'] ?? null) === 'empty_selection' => 'Отметьте позиции в таблице или впишите M-артикулы'.$tail.'.',
+            ($r['skipped'] ?? null) === 'nothing_to_send' => 'Отправлять нечего'.$tail.'.',
+            in_array($r['skipped'] ?? null, ['disabled', 'not_configured'], true) => 'IQOT выключен или не задан ключ (Настройки).',
+            default => 'IQOT: '.($r['error'] ?? json_encode($r, JSON_UNESCAPED_UNICODE)),
+        };
+        if (isset($r['submitted'])) {
+            $this->selected = [];
+            $this->kpSkus = '';
+        }
+        session()->flash('iqot-flash', $msg);
+        unset($this->stats, $this->positions);
+    }
+
     public function runPoll(): void
     {
         $this->assertManager();

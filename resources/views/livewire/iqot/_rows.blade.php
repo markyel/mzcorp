@@ -3,6 +3,7 @@
 <table class="w-full text-[12.5px]">
     <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
         <tr>
+            <th class="pl-2 py-2 w-6" title="Отметить для «Запросить КП»"></th>
             <th class="px-2 py-2 text-left">Позиция</th>
             <th class="px-2 py-2 text-left">OEM</th>
             <th class="px-2 py-2 text-right">Кол-во</th>
@@ -28,6 +29,9 @@
         @endphp
         <tbody wire:key="iqc-{{ $ci->id }}" x-data="{ open: false }">
             <tr class="border-b border-border-subtle align-top {{ $isCritical ? 'bg-red-50 hover:bg-red-100 border-l-2 border-l-red-500' : 'hover:bg-hover' }}">
+                <td class="pl-2 py-1.5">
+                    <input type="checkbox" value="{{ $ci->id }}" wire:model="selected" class="mt-0.5 accent-[var(--accent)]" title="Отметить для «Запросить КП»">
+                </td>
                 <td class="px-2 py-1.5">
                     <div class="text-fg-1">{{ \Illuminate\Support\Str::limit($ci->name ?? '—', 60) }}</div>
                     <div class="mono text-[11px] text-fg-3">{{ $ci->sku ?? '—' }}</div>
@@ -120,7 +124,7 @@
             </tr>
             @if($mk['offers'] > 0)
                 <tr x-show="open" x-cloak class="border-b border-border-subtle bg-surface-2">
-                    <td colspan="10" class="px-4 py-2.5">
+                    <td colspan="11" class="px-4 py-2.5">
                         @include('livewire.iqot._market', ['market' => $mk, 'mon' => $mon, 'pos' => $p])
                     </td>
                 </tr>

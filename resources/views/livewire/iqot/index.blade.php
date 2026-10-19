@@ -83,6 +83,36 @@
         @endif
     </div>
 
+    {{-- Запрос КП по группе — прежняя заявка IQOT на сбор КП (и в режиме мониторинга). --}}
+    @php $pageIds = $this->positions->getCollection()->map(fn ($r) => $r->cat->id)->values()->all(); @endphp
+    <div class="ds-card" x-data="{ skus: '' }">
+        <div class="px-4 py-3 flex items-start gap-3 flex-wrap text-[12px]">
+            <div class="min-w-[220px]">
+                <div class="text-fg-1 font-semibold text-[12.5px]">Запрос КП по группе</div>
+                <div class="text-fg-3 text-[11.5px] mt-0.5 max-w-[340px]">
+                    Отметьте позиции в таблице или впишите M-артикулы — уйдут в IQOT заявкой на сбор КП поставщиков, как раньше.
+                    Свежие отчёты повторно не отправляются; лимит на сегодня — ещё {{ max(0, $stats['daily_limit'] - $stats['used_today']) }}.
+                </div>
+            </div>
+            <textarea wire:model="kpSkus" x-model="skus" rows="2" placeholder="M02502, M05531 …"
+                      class="flex-1 min-w-[220px] px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12.5px] mono outline-none focus:border-sky-500"></textarea>
+            <div class="flex flex-col items-end gap-1.5">
+                <button type="button" wire:click="requestQuotes" class="btn btn-sm btn-primary" wire:loading.attr="disabled" wire:target="requestQuotes"
+                        x-bind:disabled="$wire.selected.length === 0 && skus.trim() === ''"
+                        @if(! $stats['enabled'] || ! $stats['configured']) disabled title="Включите IQOT и задайте ключ в Настройках" @endif>
+                    <span wire:loading.remove wire:target="requestQuotes">Запросить КП<template x-if="$wire.selected.length > 0"><span x-text="' (' + $wire.selected.length + ' отм.)'"></span></template></span>
+                    <span wire:loading wire:target="requestQuotes">Отправляем…</span>
+                </button>
+                <div class="flex items-center gap-2 text-[11px]">
+                    <button type="button" class="text-sky-700 hover:underline"
+                            x-on:click="$wire.selected = [...new Set([...$wire.selected.map(String), ...@js(array_map('strval', $pageIds))])]">отметить страницу</button>
+                    <button type="button" class="text-fg-3 hover:underline" x-show="$wire.selected.length > 0" x-cloak
+                            x-on:click="$wire.selected = []">снять отметки</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     {{-- Filters --}}
     <div class="ds-card">
         <div class="px-4 py-3 flex items-center gap-2 gap-y-2 flex-wrap text-[12px]">
