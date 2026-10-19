@@ -57,7 +57,9 @@ class QuotePartsConversations extends Component
 
     public function mount(Supplier $supplier): void
     {
-        abort_unless(QuotePartsPilot::canConverse(auth()->user()), 403);
+        // Карточка поставщика показывает обращения при включённом пилоте (canConverse); уточнить уже
+        // пришедшее предложение (вкладка «Актуализация цен») можно и при выключенном — как ответ по запросу.
+        abort_unless(QuotePartsPilot::canConverse(auth()->user()) || QuotePartsPilot::canAnswer(auth()->user()), 403);
         $this->supplier = $supplier;
     }
 

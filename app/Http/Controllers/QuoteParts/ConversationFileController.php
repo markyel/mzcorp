@@ -15,7 +15,7 @@ class ConversationFileController extends Controller
 {
     public function __invoke(int $conversation, int $message, int $index, QuotePartsClient $client): Response
     {
-        abort_unless(QuotePartsPilot::canConverse(auth()->user()), 403);
+        abort_unless(QuotePartsPilot::canConverse(auth()->user()) || QuotePartsPilot::canAnswer(auth()->user()), 403);
 
         try {
             [$body, $name, $type] = $client->conversationFile($conversation, $message, $index);
