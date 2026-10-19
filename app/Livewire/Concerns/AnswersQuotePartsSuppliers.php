@@ -29,11 +29,7 @@ trait AnswersQuotePartsSuppliers
      */
     public function canAnswerQuoteParts(): bool
     {
-        $user = auth()->user();
-
-        return $user !== null
-            && app(\App\Services\QuoteParts\QuotePartsClient::class)->isConfigured()
-            && ((bool) $user->quoteparts_pilot || $user->hasAnyRole(['procurement', 'head_of_sales', 'director', 'admin']));
+        return QuotePartsPilot::canAnswer(auth()->user());
     }
 
     /** Язык, на котором работает поставщик (ru / en): ответ ему пишут только на нём. */

@@ -167,8 +167,8 @@ class QuotePartsRfqService
      */
     public function answer(QuotePartsRfq $rfq, int $supplierIndex, string $text, User $by): QuotePartsRfq
     {
-        if (! QuotePartsPilot::enabledFor($by)) {
-            throw new RuntimeException('QuoteParts выключен или вы не участник пилота.');
+        if (! QuotePartsPilot::canAnswer($by)) {
+            throw new RuntimeException('Отвечать поставщикам QuoteParts могут снабжение, руководство и участники пилота.');
         }
         $externalId = $rfq->snapshot['suppliers'][$supplierIndex]['external_id'] ?? null;
         if ($externalId === null || trim($text) === '') {
@@ -221,8 +221,8 @@ class QuotePartsRfqService
      */
     public function answerGroup(QuotePartsRfq $rfq, int $groupId, string $ru, ?string $en, User $by): QuotePartsRfq
     {
-        if (! QuotePartsPilot::enabledFor($by)) {
-            throw new RuntimeException('QuoteParts выключен или вы не участник пилота.');
+        if (! QuotePartsPilot::canAnswer($by)) {
+            throw new RuntimeException('Отвечать поставщикам QuoteParts могут снабжение, руководство и участники пилота.');
         }
         $group = collect($rfq->snapshot['question_groups'] ?? [])->firstWhere('id', $groupId);
         if ($group === null) {

@@ -32,6 +32,18 @@ class QuotePartsPilot
             && ((bool) $user->quoteparts_pilot || $user->hasAnyRole(['procurement', 'head_of_sales', 'director', 'admin']));
     }
 
+    /**
+     * Ответить поставщику по уже отправленному запросу QuoteParts: участники пилота, снабжение
+     * и руководство. Рубильник пилота не нужен — он про новые запросы, а на отправленные
+     * отвечать надо всегда.
+     */
+    public static function canAnswer(?User $user): bool
+    {
+        return $user !== null
+            && app(QuotePartsClient::class)->isConfigured()
+            && ((bool) $user->quoteparts_pilot || $user->hasAnyRole(['procurement', 'head_of_sales', 'director', 'admin']));
+    }
+
     public static function enabledFor(?User $user): bool
     {
         return $user !== null
