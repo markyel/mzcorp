@@ -11,6 +11,7 @@ use App\Services\QuoteParts\QuotePartsPilot;
 use App\Services\QuoteParts\QuotePartsRfqService;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 use Throwable;
 
 /**
@@ -21,6 +22,7 @@ use Throwable;
 class QuotePartsPanel extends Component
 {
     use AnswersQuotePartsSuppliers;
+    use WithFileUploads;
 
     public int $requestId;
 

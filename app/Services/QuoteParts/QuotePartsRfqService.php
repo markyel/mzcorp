@@ -165,7 +165,13 @@ class QuotePartsRfqService
      * Ответ поставщику из mzcorp: QuoteParts отправит письмо от MyZip в переписку поставщика.
      * Поставщик — по порядку в снимке запроса.
      */
-    public function answer(QuotePartsRfq $rfq, int $supplierIndex, string $text, User $by): QuotePartsRfq
+    /**
+     * Как ответ в классической переписке с поставщиком (раздел «Поставщики»): файлы, копия,
+     * подпись автора; цитату письма поставщика и тему «Re:» добавляет QuoteParts.
+     *
+     * @param  list<\Illuminate\Http\UploadedFile>  $files
+     */
+    public function answer(QuotePartsRfq $rfq, int $supplierIndex, string $text, User $by, array $files = [], string $cc = '', bool $withSignature = true): QuotePartsRfq
     {
         if (! QuotePartsPilot::canAnswer($by)) {
             throw new RuntimeException('Отвечать поставщикам QuoteParts могут снабжение, руководство и участники пилота.');
@@ -175,7 +181,11 @@ class QuotePartsRfqService
             throw new RuntimeException('Напишите ответ поставщику.');
         }
 
-        $snapshot = $this->client->answerSupplier($rfq->remote_id, $externalId, trim($text), $by->name);
+        $snapshot = $this->client->answerSupplier($rfq->remote_id, $externalId, trim($text), $by->name, [
+            'files' => $this->uploadedFiles($files),
+            'cc' => self::parseCc($cc),
+            'signature' => $withSignature ? $this->signature($by) : null,
+        ]);
         $rfq->forceFill([
             'snapshot' => $snapshot,
             'status' => $snapshot['status'] ?? $rfq->status,
@@ -219,7 +229,8 @@ class QuotePartsRfqService
      * английский (перевод, поправленный менеджером) — англоязычным. В карточку позиции
      * QuoteParts запоминает английский вариант, если он есть.
      */
-    public function answerGroup(QuotePartsRfq $rfq, int $groupId, string $ru, ?string $en, User $by): QuotePartsRfq
+    /** @param  list<\Illuminate\Http\UploadedFile>  $files */
+    public function answerGroup(QuotePartsRfq $rfq, int $groupId, string $ru, ?string $en, User $by, array $files = [], bool $withSignature = true): QuotePartsRfq
     {
         if (! QuotePartsPilot::canAnswer($by)) {
             throw new RuntimeException('Отвечать поставщикам QuoteParts могут снабжение, руководство и участники пилота.');
@@ -242,6 +253,7 @@ class QuotePartsRfqService
             $askers->map(fn ($key) => ['supplier' => $key, 'text' => $languages[$key] === 'en' ? $en : $ru])->values()->all(),
             $en !== '' ? $en : $ru,
             $by->name,
+            ['files' => $this->uploadedFiles($files), 'signature' => $withSignature ? $this->signature($by) : null],
         );
         $rfq->forceFill(['snapshot' => $snapshot, 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
 
@@ -317,6 +329,67 @@ class QuotePartsRfqService
         }
 
         return $n;
+    }
+
+    /**
+     * Загруженные файлы ответа — в base64 для QuoteParts, в пределах того же лимита, что у запроса.
+     *
+     * @param  list<\Illuminate\Http\UploadedFile>  $files
+     * @return list<array{name:string, mime:string, content:string}>
+     */
+    private function uploadedFiles(array $files): array
+    {
+        $out = [];
+        $total = 0;
+        $limit = (int) config('services.quoteparts.attachments_max_bytes', 15 * 1024 * 1024);
+        foreach ($files as $f) {
+            $bytes = (string) @file_get_contents($f->getRealPath());
+            if ($bytes === '') {
+                continue;
+            }
+            $total += strlen($bytes);
+            if ($total > $limit) {
+                throw new RuntimeException('Вложения больше '.round($limit / 1024 / 1024).' МБ — уберите часть файлов.');
+            }
+            $out[] = ['name' => mb_substr($f->getClientOriginalName() ?: 'file', 0, 200), 'mime' => $f->getMimeType() ?: 'application/octet-stream', 'content' => base64_encode($bytes)];
+        }
+
+        return $out;
+    }
+
+    /** Подпись автора — та же, что у писем из mzCorp, текстом. */
+    private function signature(User $by): ?string
+    {
+        $plain = trim((string) (app(\App\Services\Mail\EmailSignatureService::class)->render($by)['plain'] ?? ''));
+
+        return $plain !== '' ? mb_substr($plain, 0, 2000) : null;
+    }
+
+    /**
+     * Адреса копии: через запятую, точку с запятой или пробел, можно «Имя <адрес>».
+     *
+     * @return list<string>
+     */
+    public static function parseCc(string $raw): array
+    {
+        $out = [];
+        foreach (preg_split('/[,;\r\n]+/u', $raw) ?: [] as $part) {
+            if (trim($part) === '') {
+                continue;
+            }
+            if (preg_match_all('/[^\s<>"\']+@[^\s<>"\']+/u', $part, $m) === 0) {
+                throw new RuntimeException('Не понял адрес в копии: '.mb_substr(trim($part), 0, 60));
+            }
+            foreach ($m[0] as $email) {
+                $email = mb_strtolower(rtrim($email, '.'));
+                if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                    throw new RuntimeException('Неверный адрес в копии: '.$email);
+                }
+                $out[] = $email;
+            }
+        }
+
+        return array_values(array_unique($out));
     }
 
     /**

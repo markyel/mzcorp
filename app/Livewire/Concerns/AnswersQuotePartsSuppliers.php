@@ -38,20 +38,57 @@ trait AnswersQuotePartsSuppliers
         return $supplierKey ? (app(QuotePartsRfqService::class)->supplierLanguages([$supplierKey])[$supplierKey] ?? 'ru') : 'ru';
     }
 
+    /** @var array<int|string, array<int|string, list<\Livewire\Features\SupportFileUploads\TemporaryUploadedFile>>> файлы ответа поставщику */
+    public array $qpFiles = [];
+
+    /** @var array<int|string, array<int|string, string>> копия ответа (адреса) */
+    public array $qpCc = [];
+
+    /** @var array<int|string, array<int|string, bool>> ответ без подписи */
+    public array $qpNoSign = [];
+
+    public function removeQuotePartsFile(int $rfqId, int $supplierIndex, int $i): void
+    {
+        unset($this->qpFiles[$rfqId][$supplierIndex][$i]);
+        $this->qpFiles[$rfqId][$supplierIndex] = array_values($this->qpFiles[$rfqId][$supplierIndex] ?? []);
+    }
+
+    /** Перевести ответ на английский для англоязычного поставщика: перевод встаёт в поле, его можно поправить. */
+    public function translateQuotePartsAnswer(int $rfqId, int $supplierIndex, QuotePartsAnswerTranslator $translator): void
+    {
+        abort_unless($this->canAnswerQuoteParts(), 403);
+        $en = $translator->toEnglish((string) ($this->qpAnswers[$rfqId][$supplierIndex] ?? ''));
+        if ($en === null) {
+            $this->dispatch('toast', type: 'error', message: 'Не удалось перевести — напишите по-английски сами.');
+
+            return;
+        }
+        $this->qpAnswers[$rfqId][$supplierIndex] = $en;
+    }
+
     public function answerQuotePartsSupplier(int $rfqId, int $supplierIndex, QuotePartsRfqService $service): void
     {
         abort_unless($this->canAnswerQuoteParts(), 403);
+        $this->validate(["qpFiles.$rfqId.$supplierIndex.*" => ['file', 'max:25600']], [], ["qpFiles.$rfqId.$supplierIndex.*" => 'вложение']);
         $rfq = $this->quotePartsRfqForAnswer($rfqId);
 
         try {
-            $service->answer($rfq, $supplierIndex, (string) ($this->qpAnswers[$rfqId][$supplierIndex] ?? ''), auth()->user());
+            $service->answer(
+                $rfq,
+                $supplierIndex,
+                (string) ($this->qpAnswers[$rfqId][$supplierIndex] ?? ''),
+                auth()->user(),
+                array_values($this->qpFiles[$rfqId][$supplierIndex] ?? []),
+                (string) ($this->qpCc[$rfqId][$supplierIndex] ?? ''),
+                ! ($this->qpNoSign[$rfqId][$supplierIndex] ?? false),
+            );
         } catch (Throwable $e) {
             $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
 
             return;
         }
 
-        unset($this->qpAnswers[$rfqId][$supplierIndex]);
+        unset($this->qpAnswers[$rfqId][$supplierIndex], $this->qpFiles[$rfqId][$supplierIndex], $this->qpCc[$rfqId][$supplierIndex]);
         $this->afterQuotePartsAnswer();
         $this->dispatch('toast', type: 'success', message: 'Ответ отправлен поставщику через QuoteParts.');
     }
@@ -87,20 +124,25 @@ trait AnswersQuotePartsSuppliers
         $this->qpGroupEn[$rfqId][$groupId] = $en;
     }
 
+    /** @var array<int|string, array<int|string, list<\Livewire\Features\SupportFileUploads\TemporaryUploadedFile>>> файлы ответа на группу вопросов */
+    public array $qpGroupFiles = [];
+
     public function answerQuotePartsGroup(int $rfqId, int $groupId, QuotePartsRfqService $service): void
     {
         abort_unless($this->canAnswerQuoteParts(), 403);
+        $this->validate(["qpGroupFiles.$rfqId.$groupId.*" => ['file', 'max:25600']], [], ["qpGroupFiles.$rfqId.$groupId.*" => 'вложение']);
         $rfq = $this->quotePartsRfqForAnswer($rfqId);
 
         try {
-            $service->answerGroup($rfq, $groupId, (string) ($this->qpGroupRu[$rfqId][$groupId] ?? ''), $this->qpGroupEn[$rfqId][$groupId] ?? null, auth()->user());
+            $service->answerGroup($rfq, $groupId, (string) ($this->qpGroupRu[$rfqId][$groupId] ?? ''), $this->qpGroupEn[$rfqId][$groupId] ?? null, auth()->user(),
+                array_values($this->qpGroupFiles[$rfqId][$groupId] ?? []));
         } catch (Throwable $e) {
             $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
 
             return;
         }
 
-        unset($this->qpGroupRu[$rfqId][$groupId], $this->qpGroupEn[$rfqId][$groupId]);
+        unset($this->qpGroupRu[$rfqId][$groupId], $this->qpGroupEn[$rfqId][$groupId], $this->qpGroupFiles[$rfqId][$groupId]);
         $this->afterQuotePartsAnswer();
         $this->dispatch('toast', type: 'success', message: 'Ответ отправлен всем, кто спросил.');
     }

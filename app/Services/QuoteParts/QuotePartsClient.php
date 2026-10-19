@@ -215,12 +215,13 @@ class QuotePartsClient
      *
      * @return array<string, mixed> обновлённый снимок запроса
      */
-    public function answerSupplier(int $remoteId, string $externalId, string $text, ?string $authorName): array
+    /** @param  array{files?: list<array{name:string, mime:string, content:string}>, cc?: list<string>, signature?: ?string}  $extra */
+    public function answerSupplier(int $remoteId, string $externalId, string $text, ?string $authorName, array $extra = []): array
     {
-        $response = $this->http()->post('/api/v1/rfqs/'.$remoteId.'/suppliers/'.rawurlencode($externalId).'/answer', [
+        $response = $this->http()->timeout(120)->post('/api/v1/rfqs/'.$remoteId.'/suppliers/'.rawurlencode($externalId).'/answer', [
             'text' => $text,
             'author_name' => $authorName,
-        ]);
+        ] + array_filter($extra, fn ($v) => $v !== null && $v !== [] && $v !== ''));
 
         if (in_array($response->status(), [422, 502], true)) {
             throw new RuntimeException((string) ($response->json('message') ?: collect($response->json('errors', []))->flatten()->implode(' ')) ?: 'QuoteParts не отправил ответ.');
@@ -238,13 +239,14 @@ class QuotePartsClient
      * @param  list<array{supplier:string, text:string}>  $answers
      * @return array<string, mixed> обновлённый снимок запроса
      */
-    public function answerQuestionGroup(int $remoteId, int $groupId, array $answers, ?string $memory, ?string $authorName): array
+    /** @param  array{files?: list<array{name:string, mime:string, content:string}>, signature?: ?string}  $extra */
+    public function answerQuestionGroup(int $remoteId, int $groupId, array $answers, ?string $memory, ?string $authorName, array $extra = []): array
     {
-        $response = $this->http()->post('/api/v1/rfqs/'.$remoteId.'/question-groups/'.$groupId.'/answer', [
+        $response = $this->http()->timeout(120)->post('/api/v1/rfqs/'.$remoteId.'/question-groups/'.$groupId.'/answer', [
             'answers' => $answers,
             'memory' => $memory,
             'author_name' => $authorName,
-        ]);
+        ] + array_filter($extra, fn ($v) => $v !== null && $v !== [] && $v !== ''));
 
         if (in_array($response->status(), [422, 502], true)) {
             throw new RuntimeException((string) ($response->json('message') ?: collect($response->json('errors', []))->flatten()->implode(' ')) ?: 'QuoteParts не отправил ответ.');
@@ -351,9 +353,10 @@ class QuotePartsClient
      *
      * @return array{0:string, 1:string, 2:string}
      */
-    public function rfqFile(int $rfqId, int $messageId, int $index): array
+    public function rfqFile(int $rfqId, int $messageId, int $index, bool $relay = false): array
     {
-        $response = $this->http()->get('/api/v1/rfqs/'.$rfqId.'/messages/'.$messageId.'/files/'.$index);
+        // relay — файл нашего ответа поставщику, иначе — письма поставщика.
+        $response = $this->http()->get('/api/v1/rfqs/'.$rfqId.'/messages/'.$messageId.'/files/'.$index, $relay ? ['relay' => 1] : []);
         if (! $response->successful()) {
             throw new RuntimeException('QuoteParts request file: HTTP '.$response->status());
         }

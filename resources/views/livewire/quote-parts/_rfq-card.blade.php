@@ -51,8 +51,18 @@
                                 <textarea wire:model="qpGroupEn.{{ $rfq->id }}.{{ $g['id'] }}" rows="2" placeholder="English version"
                                           class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
                             @endif
-                            <button type="button" wire:click="answerQuotePartsGroup({{ $rfq->id }}, {{ $g['id'] }})" wire:loading.attr="disabled" wire:target="answerQuotePartsGroup"
-                                    class="btn btn-sm btn-primary">Ответить всем ({{ $askers }})</button>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <label class="btn btn-xs cursor-pointer">📎 Файлы
+                                    <input type="file" multiple wire:model="qpGroupFiles.{{ $rfq->id }}.{{ $g['id'] }}" class="hidden" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx,.zip">
+                                </label>
+                                @foreach($qpGroupFiles[$rfq->id][$g['id']] ?? [] as $up)
+                                    <span class="chip chip-neutral text-[11px] max-w-[220px] truncate">📎 {{ $up->getClientOriginalName() }}</span>
+                                @endforeach
+                                <span wire:loading wire:target="qpGroupFiles.{{ $rfq->id }}.{{ $g['id'] }}" class="text-[11px] text-fg-4">загружаем…</span>
+                                <button type="button" wire:click="answerQuotePartsGroup({{ $rfq->id }}, {{ $g['id'] }})" wire:loading.attr="disabled" wire:target="answerQuotePartsGroup"
+                                        class="btn btn-sm btn-primary">Ответить всем ({{ $askers }})</button>
+                                <span class="text-[11px] text-fg-4">с вашей подписью и цитатой письма каждого поставщика</span>
+                            </div>
                         </div>
                     @endif
                 </div>
@@ -161,6 +171,7 @@
                                                 · {{ $m['at'] ? \Illuminate\Support\Carbon::parse($m['at'])->timezone(config('app.timezone'))->format('d.m.Y H:i') : '' }}
                                                 {{ ! empty($m['auto']) ? '· автоответ' : '' }}
                                                 {{ ! empty($m['restored']) ? '· текст восстановлен по запросу' : '' }}
+                                                {{ ! empty($m['cc']) ? '· копия: '.implode(', ', $m['cc']) : '' }}
                                             </div>
                                             @if(! empty($m['subject']))<div class="font-medium text-fg-1 mb-0.5">{{ $m['subject'] }}</div>@endif
                                             @if(! empty($m['error']))<div class="text-[11px] text-red-700">не отправлено: {{ $m['error'] }}</div>@endif
@@ -177,7 +188,7 @@
                                                 @php
                                                     // Фото письма — галерея в просмотрщике (partials.image-lightbox), прочие файлы — ссылкой.
                                                     $isImage = fn ($f) => in_array($f['mime'] ?? '', ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true);
-                                                    $fileUrl = fn ($f) => route('quoteparts.rfq-file', [$rfq->remote_id, $f['message_id'], $f['index']]);
+                                                    $fileUrl = fn ($f) => route('quoteparts.rfq-file', [$rfq->remote_id, $f['message_id'], $f['index']] + (! empty($f['relay']) ? ['relay' => 1] : []));
                                                     $gallery = collect($m['files'])->filter($isImage)->values()->map(fn ($f) => ['src' => $fileUrl($f), 'name' => $f['name'], 'dl' => $fileUrl($f)])->all();
                                                     $shot = 0;
                                                 @endphp
@@ -199,12 +210,39 @@
                                             Поставщик работает на {{ $supLang === 'ru' ? 'русском' : 'английском' }} — пишите только на нём.
                                             <span class="text-fg-4">Язык меняется в карточке поставщика → «Контакты в QuoteParts».</span>
                                         </div>
-                                        <textarea wire:model="qpAnswers.{{ $rfq->id }}.{{ $si }}" rows="3" placeholder="{{ $supLang === 'ru' ? 'Ответ поставщику по-русски…' : 'Answer in English…' }}"
+                                        <div class="flex items-center gap-2 text-[12px]">
+                                            <span class="text-fg-3 w-[52px]">Копия</span>
+                                            <input type="text" wire:model="qpCc.{{ $rfq->id }}.{{ $si }}" placeholder="адреса через запятую"
+                                                   class="flex-1 h-[28px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                                        </div>
+                                        <textarea wire:model="qpAnswers.{{ $rfq->id }}.{{ $si }}" rows="4" placeholder="{{ $supLang === 'ru' ? 'Ответ поставщику по-русски…' : 'Answer in English…' }}"
                                                   class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500"></textarea>
-                                        <div class="flex items-center gap-2">
+                                        @if(! empty($qpFiles[$rfq->id][$si]))
+                                            <div class="flex flex-wrap gap-1.5">
+                                                @foreach($qpFiles[$rfq->id][$si] as $fi => $up)
+                                                    <span wire:key="qpf-{{ $rfq->id }}-{{ $si }}-{{ $fi }}" class="chip chip-neutral text-[11px] max-w-[260px]">
+                                                        <span class="truncate">📎 {{ $up->getClientOriginalName() }}</span>
+                                                        <button type="button" wire:click="removeQuotePartsFile({{ $rfq->id }}, {{ $si }}, {{ $fi }})" class="ml-1 text-fg-4 hover:text-red-700" title="Убрать">✕</button>
+                                                    </span>
+                                                @endforeach
+                                            </div>
+                                        @endif
+                                        @error("qpFiles.$rfq->id.$si.*")<div class="text-[11px] text-red-700">{{ $message }}</div>@enderror
+                                        <div class="flex flex-wrap items-center gap-2">
                                             <button type="button" wire:click="answerQuotePartsSupplier({{ $rfq->id }}, {{ $si }})" wire:loading.attr="disabled" wire:target="answerQuotePartsSupplier"
                                                     class="btn btn-sm btn-primary">Отправить поставщику</button>
-                                            <span class="text-[11px] text-fg-4">уйдёт письмом от MyZip в переписку поставщика; позиции «вопрос к нам» снова ждут цен</span>
+                                            <label class="btn btn-sm cursor-pointer" title="До 25 МБ на файл, всего — в пределах лимита QuoteParts">📎 Файлы
+                                                <input type="file" multiple wire:model="qpFiles.{{ $rfq->id }}.{{ $si }}" class="hidden" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx,.zip">
+                                            </label>
+                                            <span wire:loading wire:target="qpFiles.{{ $rfq->id }}.{{ $si }}" class="text-[11px] text-fg-4">загружаем…</span>
+                                            @if($supLang !== 'ru')
+                                                <button type="button" wire:click="translateQuotePartsAnswer({{ $rfq->id }}, {{ $si }})" wire:loading.attr="disabled" wire:target="translateQuotePartsAnswer"
+                                                        class="btn btn-sm" title="Напишите по-русски и переведите — перевод встанет в поле, его можно поправить">🌐 Перевести на английский</button>
+                                            @endif
+                                            <label class="inline-flex items-center gap-1.5 text-[11.5px] text-fg-2 cursor-pointer">
+                                                <input type="checkbox" wire:model="qpNoSign.{{ $rfq->id }}.{{ $si }}" class="w-3.5 h-3.5 accent-sky-600"> без подписи
+                                            </label>
+                                            <span class="text-[11px] text-fg-4">уйдёт письмом от MyZip в переписку поставщика: «Re:» к его письму, с цитатой и вашей подписью; позиции «вопрос к нам» снова ждут цен</span>
                                         </div>
                                     @endif
                                 </div>

@@ -13,10 +13,10 @@ use Throwable;
  */
 class RfqFileController extends Controller
 {
-    public function __invoke(int $rfq, int $message, int $index, QuotePartsClient $client): Response
+    public function __invoke(\Illuminate\Http\Request $request, int $rfq, int $message, int $index, QuotePartsClient $client): Response
     {
         try {
-            [$body, $name, $type] = $client->rfqFile($rfq, $message, $index);
+            [$body, $name, $type] = $client->rfqFile($rfq, $message, $index, $request->boolean('relay'));
         } catch (Throwable) {
             abort(404);
         }
