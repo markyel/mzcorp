@@ -456,8 +456,10 @@ class IqotPosition extends Model
     }
 
     /**
-     * Свежий отчёт = есть отчёт и analyzed_at в окне актуальности
-     * (iqot.report_fresh_days). По умолчанию 90 дней.
+     * Свежий отчёт = есть отчёт и запрос ушёл в IQOT в окне актуальности
+     * (iqot.report_fresh_days). Дата — last_enqueued_at (отправка): analyzed_at опрос
+     * IQOT ставит в now() при каждом обновлении отчёта, и по нему «свежими» были
+     * позиции, отправленные ещё в июне (19.10: 2000 «свежих» из 2000 с отчётом).
      */
     public function hasFreshReport(?int $freshDays = null): bool
     {
@@ -466,7 +468,7 @@ class IqotPosition extends Model
         }
         $freshDays ??= (int) app_setting('iqot.report_fresh_days', config('services.iqot.report_fresh_days', 90));
 
-        return $this->analyzed_at->gte(now()->subDays(max(1, $freshDays)));
+        return ($this->last_enqueued_at ?? $this->analyzed_at)->gte(now()->subDays(max(1, $freshDays)));
     }
 
     /**
@@ -491,6 +493,6 @@ class IqotPosition extends Model
     public function scopeWithFreshReport(Builder $q, int $freshDays): Builder
     {
         return $q->whereNotNull('analyzed_at')
-            ->where('analyzed_at', '>=', now()->subDays(max(1, $freshDays)));
+            ->whereRaw('COALESCE(last_enqueued_at, analyzed_at) >= ?', [now()->subDays(max(1, $freshDays))]);
     }
 }

@@ -35,4 +35,11 @@ class IqotRecentOffersTest extends TestCase
     {
         $this->assertFalse(self::position(5, '120 days')->hasRecentOffers(90));
     }
+
+    public function test_report_freshness_counts_from_the_request_not_the_poll(): void
+    {
+        $this->assertFalse(self::position(5, '120 days')->hasFreshReport(90));
+        $this->assertTrue(self::position(0, '10 days')->hasFreshReport(90));
+        $this->assertTrue(self::position(2, null)->hasFreshReport(90));
+    }
 }
