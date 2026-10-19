@@ -79,6 +79,9 @@ class QuotePartsRfqService
             'reply_by' => $replyBy,
             'message' => $message ?: null,
             'external_ref' => $request?->internal_code,
+            // В теме письма, как у прямого запроса из mzCorp: «[M-2026-19835] / [370918] [QP-…]» —
+            // поставщик и менеджер находят переписку по номеру заявки и запроса 1С.
+            'subject_refs' => self::subjectRefs($request?->internal_code, $request?->onec_number),
             // Дублирование переписки — настройка сотрудника (раздел QuoteParts → «Пилот»):
             // ответы поставщиков — копией автору, ответ на копию уходит поставщику.
             'mirror' => $by->quoteparts_mirror ? ['email' => $this->mirrorAddress($by), 'name' => $by->name] : null,
@@ -314,5 +317,25 @@ class QuotePartsRfqService
         }
 
         return $n;
+    }
+
+    /**
+     * Номера в тему письма QuoteParts: код заявки и номер запроса 1С. QuoteParts принимает
+     * до 32 символов из букв, цифр и «.-/_ #№» — номер 1С с мусором («365543)»,
+     * «order@liftway.store») или повтор M-кода в тему не идёт, запрос из-за него не падает.
+     *
+     * @return list<string>
+     */
+    public static function subjectRefs(?string $code, ?string $onecNumber): array
+    {
+        $refs = [];
+        foreach ([$code, $onecNumber] as $ref) {
+            $ref = trim((string) $ref);
+            if ($ref !== '' && mb_strlen($ref) <= 32 && preg_match('/^[\pL\pN.\-\/_ #№]+$/u', $ref) === 1 && ! in_array($ref, $refs, true)) {
+                $refs[] = $ref;
+            }
+        }
+
+        return $refs;
     }
 }

@@ -193,7 +193,7 @@ class QuotePartsClient
     }
 
     /**
-     * @param  array{items: list<array{code:string, quantity:float, note:?string}>, suppliers: list<string>, reply_by:?string, message:?string, external_ref:?string}  $payload
+     * @param  array{items: list<array{code:string, quantity:float, note:?string}>, suppliers: list<string>, reply_by:?string, message:?string, external_ref:?string, subject_refs?:list<string>}  $payload
      * @return array<string, mixed>
      */
     public function createRfq(array $payload): array
