@@ -55,6 +55,14 @@
                     <td class="px-3 py-1.5 whitespace-nowrap text-fg-3">
                         {{ $r['at']?->timezone(config('app.timezone'))->format('d.m H:i') }}
                         <div class="text-[11px] text-fg-4">{{ $sources[$r['source']] ?? $r['source'] }}</div>
+                        {{-- Переписка с поставщиком по этому предложению — та же панель, что «Уточнить»: письмо запроса, ответы, уточнения. --}}
+                        @if($r['key'])
+                            @php $nLetters = $this->threadCounts[$r['id']] ?? null; @endphp
+                            <button type="button" wire:click="openDialog({{ $r['id'] }})" class="mt-0.5 text-[11px] {{ $dialog === $r['id'] ? 'text-fg-1 font-medium' : 'text-sky-700' }} hover:underline"
+                                    title="{{ $r['rfq_remote_id'] ? 'Переписка с поставщиком по запросу '.$r['rfq_tag'] : 'Обращения к поставщику через QuoteParts' }}">
+                                {{ $dialog === $r['id'] ? '▾' : '▸' }} {{ $r['rfq_remote_id'] ? 'переписка'.($nLetters ? ' ('.$nLetters.')' : '') : 'обращения' }}
+                            </button>
+                        @endif
                     </td>
                     @if($showItem)
                         <td class="px-3 py-1.5">

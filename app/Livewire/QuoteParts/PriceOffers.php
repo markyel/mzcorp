@@ -172,6 +172,29 @@ class PriceOffers extends Component
         }
     }
 
+    /**
+     * Сколько писем в ветке запроса с поставщиком предложения (наш запрос, его ответы, наши
+     * уточнения) — для кнопки «переписка» в строке.
+     *
+     * @return array<int, int> id предложения => писем
+     */
+    #[Computed]
+    public function threadCounts(): array
+    {
+        $rows = $this->rows->merge($this->readyRows)->unique('id');
+        $snapshots = QuotePartsRfq::query()->whereIn('remote_id', $rows->pluck('rfq_remote_id')->filter()->unique()->values())
+            ->get(['remote_id', 'snapshot'])->keyBy('remote_id');
+        $out = [];
+        foreach ($rows as $r) {
+            $s = $r['rfq_remote_id'] ? collect($snapshots->get($r['rfq_remote_id'])?->snapshot['suppliers'] ?? [])->firstWhere('external_id', $r['key']) : null;
+            if ($s !== null) {
+                $out[$r['id']] = count($s['letters'] ?? []) + count($s['thread'] ?? []);
+            }
+        }
+
+        return $out;
+    }
+
     /** «Решить без ответа»: снять ожидание уточнения — решение по предложению можно принимать. */
     public function clearClarification(int $offerId): void
     {
