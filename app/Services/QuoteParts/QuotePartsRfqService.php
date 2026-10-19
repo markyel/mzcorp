@@ -360,7 +360,8 @@ class QuotePartsRfqService
     /** Подпись автора — та же, что у писем из mzCorp, текстом. */
     private function signature(User $by): ?string
     {
-        $plain = trim((string) (app(\App\Services\Mail\EmailSignatureService::class)->render($by)['plain'] ?? ''));
+        // Разделитель «-- » ставит QuoteParts — свой с начала подписи убираем.
+        $plain = trim((string) preg_replace('/^\s*--\s*\R/u', '', (string) (app(\App\Services\Mail\EmailSignatureService::class)->render($by)['plain'] ?? '')));
 
         return $plain !== '' ? mb_substr($plain, 0, 2000) : null;
     }
