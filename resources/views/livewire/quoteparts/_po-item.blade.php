@@ -6,8 +6,8 @@
     $bestDelta = $best && $it['purchase'] ? ($best['rub'] - $it['purchase']) / $it['purchase'] * 100 : null;
 @endphp
 <div wire:key="poi-{{ $ready ? 'r' : 'w' }}-{{ $it['sku'] }}" class="border-t border-border-subtle first:border-t-0">
-    <div class="flex flex-wrap items-start gap-x-6 gap-y-1 px-4 py-2.5 {{ $ready ? 'bg-emerald-50/50' : '' }}">
-        <div class="min-w-[260px] flex-1">
+    <div class="grid grid-cols-[minmax(260px,1fr)_200px_150px_200px] items-start gap-x-6 gap-y-1 px-4 py-2.5 {{ $ready ? 'bg-emerald-50/50' : '' }}">
+        <div class="min-w-0">
             @if($it['cid'])
                 <button type="button" wire:click="toggleItem({{ $it['cid'] }})" class="text-left group" title="Карточка позиции">
                     <span class="mono font-semibold text-sky-700 group-hover:underline">{{ $it['sku'] }}</span>
@@ -18,7 +18,7 @@
             @endif
             @if($it['name'])<div class="text-[12.5px] text-fg-2">{{ $it['name'] }}</div>@endif
         </div>
-        <div class="text-[12px] text-fg-3 whitespace-nowrap">
+        <div class="text-[12px] text-fg-3">
             @if($it['asked'] !== null)
                 <div><span class="{{ $it['offered'] * 2 > $it['asked'] ? 'text-emerald-700 font-semibold' : 'text-fg-1' }}">ответили {{ $it['offered'] }} из {{ $it['asked'] }}</span>@if($it['declined'])<span class="text-fg-4"> · отказ {{ $it['declined'] }}</span>@endif</div>
                 <div class="text-[11px]">запрос {{ $it['requested_at']->timezone(config('app.timezone'))->format('d.m H:i') }}
@@ -30,9 +30,9 @@
             @endif
         </div>
         <div class="text-right text-[12px] whitespace-nowrap">
-            <div class="text-fg-3">лучшее</div>
+            <div class="text-fg-3">лучшая цена</div>
             <div class="mono font-semibold text-fg-1">{{ $best ? $money($best['rub']).' ₽' : '—' }}</div>
-            @if($bestDelta !== null)<div class="text-[11px] {{ $bestDelta > 0 ? 'text-red-700' : 'text-emerald-700' }}">{{ $bestDelta > 0 ? '+' : '' }}{{ number_format($bestDelta, 0, ',', ' ') }}% к закупке</div>@endif
+            @if($bestDelta !== null)<div class="text-[11px] {{ $bestDelta > 0 ? 'text-red-700' : 'text-emerald-700' }}" title="Лучшая цена поставщика в ₽ к закупочной цене из каталога">{{ $bestDelta > 0 ? '+' : '−' }}{{ number_format(abs($bestDelta), 0, ',', ' ') }}% к закупке</div>@endif
         </div>
         <div class="text-right text-[12px] whitespace-nowrap">
             <div class="text-fg-3">закупка · продажа</div>
