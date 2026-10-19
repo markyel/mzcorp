@@ -266,10 +266,12 @@ class SupplierInquiryService
                         $requestId = $byCode;
                     }
                 }
-                if ($latest !== null && $latest->related_request_id !== null && ! self::looksLikeReplyTo($latest, $message)) {
+                if ($latest !== null && self::isPriceRequest($latest) && ! self::looksLikeReplyTo($latest, $message)) {
                     $latest = null;
                 }
-                $inquiry = $latest;
+                // Не ответ на запрос — продолжение своей переписки (заказ, PI, отгрузка):
+                // ветка с той же темой, если она уже есть, а не новая на каждое письмо.
+                $inquiry = $latest ?? ($requestId === null ? $this->threadBySubject($email, $message) : null);
             }
             if ($inquiry === null) {
                 $inquiry = SupplierInquiry::create([
@@ -798,6 +800,37 @@ class SupplierInquiryService
         $text = $subject.' '.mb_substr((string) $message->body_plain, 0, 1500);
 
         return preg_match('/\b(price|prices|quotation|quote|offer|lead\s*time|availability|in stock)\b|\bкп\b|коммерческ|предложени|\bцен[аыеу]\b|стоимост|расценк|в наличии|срок\w* поставки/iu', $text) === 1;
+    }
+
+    /**
+     * Запрос цены (по заявке или из «Снабжения» с токеном RFQ), а не общая ветка
+     * переписки с поставщиком. Только к запросу цены фолбэк по адресу цепляет письмо
+     * с проверкой looksLikeReplyTo. Раньше проверяли только запросы по заявке, и в RFQ
+     * без заявки ложилась вся текущая переписка поставщика: inquiry 7400 (13.10) —
+     * «Re: Fwd: Order EVE … PIC25 260828-53» с фото отгрузки и обновлённый PI, из
+     * которого парсер вынул 0,20 USD за звено цепи на позицию «направляющая ступеней».
+     */
+    public static function isPriceRequest(SupplierInquiry $inquiry): bool
+    {
+        return $inquiry->related_request_id !== null || $inquiry->rfq_token !== null;
+    }
+
+    /** Ветка общей переписки этого поставщика с той же темой (без Re:/Fwd:). */
+    private function threadBySubject(string $email, EmailMessage $message): ?SupplierInquiry
+    {
+        $own = self::baseSubject((string) $message->subject);
+        if (mb_strlen($own) < 6 || $email === '') {
+            return null;
+        }
+
+        return SupplierInquiry::query()
+            ->whereRaw('lower(supplier_email) = ?', [$email])
+            ->whereNull('related_request_id')
+            ->whereNull('rfq_token')
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get()
+            ->first(fn (SupplierInquiry $i) => self::baseSubject((string) $i->subject) === $own);
     }
 
     /** Тема без префиксов Re:/Fw:/Fwd:/AW:/Ответ: (в любом количестве), в нижнем регистре. */

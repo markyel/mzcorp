@@ -45,6 +45,9 @@ class SupplierReplyFitTest extends TestCase
             'номер КП из темы запроса' => ['Price request — [M-2026-17717] / [368974]', 'Re: question abt M03656 (368974)', '2026-09-25 10:00:00', 'see below', true],
             'цена, но через два месяца' => [$rfq, 'Price list', '2026-10-20 10:00:00', 'new prices attached', false],
             'короткая тема «Test»' => ['Price request — [M-2026-18402] / [369616]', 'Test', '2026-09-30 10:00:00', 'test', false],
+            'фото по заказу EVE в RFQ без заявки' => ['Price request [RFQ-ZR0HWSW]', 'Re: Fwd: Order EVE 27.08.2026 PIC25 260828-53', '2026-10-13 17:26:53', 'Dear Marina , Please check the attached photos for this order .', false],
+            'обновлённый PI по заказу EVE' => ['Price request [RFQ-ZR0HWSW]', 'Re: Fwd: Order EVE 09.10.2026 PIC25 261013-63', '2026-10-13 17:08:09', 'The attached is the update PI . We recently agreed on a price of $8 per unit', false],
+            'ответ EVE на сам запрос' => ['Price request [RFQ-ZR0HWSW]', 'Re: Price request [RFQ-ZR0HWSW]', '2026-10-19 11:15:00', 'Sorry , i missed this mail . 13.9usd/pcs', true],
         ];
     }
 
@@ -54,5 +57,12 @@ class SupplierReplyFitTest extends TestCase
         $created = $inquirySubject === 'Price request — [M-2026-10852]' ? '2026-08-12 11:40:10' : '2026-09-20 10:00:00';
 
         $this->assertSame($expected, SupplierInquiryService::looksLikeReplyTo(self::inquiry($inquirySubject, $created), self::letter($subject, $sent, $body)));
+    }
+
+    public function test_rfq_without_request_is_a_price_request(): void
+    {
+        $this->assertTrue(SupplierInquiryService::isPriceRequest(new SupplierInquiry(['rfq_token' => 'ZR0HWSW'])));
+        $this->assertTrue(SupplierInquiryService::isPriceRequest(new SupplierInquiry(['related_request_id' => 19857])));
+        $this->assertFalse(SupplierInquiryService::isPriceRequest(new SupplierInquiry(['subject' => 'Re: Order EVE 03.07.2026'])));
     }
 }
