@@ -24,11 +24,16 @@ trait AnswersQuotePartsSuppliers
     /**
      * Отвечать поставщикам по запросу QuoteParts: участники пилота, снабжение и руководство —
      * как обращения к поставщикам (QuotePartsPilot::canConverse). Раньше — только пилот, и
-     * админ не видел, как ответить UniSystem на вопрос по M-2026-19719.
+     * админ не видел, как ответить UniSystem на вопрос по M-2026-19719. Общий рубильник пилота
+     * не нужен: он про новые запросы через QuoteParts, а на уже отправленные отвечать надо всегда.
      */
     public function canAnswerQuoteParts(): bool
     {
-        return QuotePartsPilot::canConverse(auth()->user());
+        $user = auth()->user();
+
+        return $user !== null
+            && app(\App\Services\QuoteParts\QuotePartsClient::class)->isConfigured()
+            && ((bool) $user->quoteparts_pilot || $user->hasAnyRole(['procurement', 'head_of_sales', 'director', 'admin']));
     }
 
     /** Язык, на котором работает поставщик (ru / en): ответ ему пишут только на нём. */
