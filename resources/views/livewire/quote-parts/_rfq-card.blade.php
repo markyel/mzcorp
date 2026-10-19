@@ -70,6 +70,14 @@
                                 <td class="px-3 py-1.5 font-medium" rowspan="{{ count($s['lines']) }}">
                                     {{ $supplierNames[$s['external_id']] ?? $s['external_id'] }}
                                     @if(! empty($s['send_error']))<div class="text-[11px] text-red-700">{{ $s['send_error'] }}</div>@endif
+                                    {{-- Ход ответа: отправлено → открыл форму → напоминания → ответил. --}}
+                                    @php $at = fn ($v) => $v ? \Illuminate\Support\Carbon::parse($v)->timezone(config('app.timezone'))->format('d.m H:i') : null; @endphp
+                                    <div class="mt-0.5 space-y-px text-[11px] font-normal text-fg-3">
+                                        @if(! empty($s['sent_at']))<div>✉ отправлено {{ $at($s['sent_at']) }}</div>@endif
+                                        @if(! empty($s['opened_at']))<div class="text-sky-700">👁 открыл форму {{ $at($s['opened_at']) }}</div>@elseif(! empty($s['sent_at']))<div class="text-fg-4">форму не открывал</div>@endif
+                                        @if(! empty($s['reminders_sent']))<div>🔔 напоминаний {{ $s['reminders_sent'] }}, последнее {{ $at($s['last_reminder_at']) }}</div>@endif
+                                        @if(! empty($s['last_reply_at']))<div class="text-emerald-700">↩ ответил {{ $at($s['last_reply_at']) }}</div>@endif
+                                    </div>
                                 </td>
                             @endif
                             <td class="px-3 py-1.5">
@@ -117,7 +125,16 @@
                         </tr>
                     @endforeach
                     {{-- Вопросы поставщика, переписка и ответ ему (письмом от MyZip в его переписку). --}}
-                    @php $questions = collect($s['questions'] ?? [])->whereNull('group_id')->values()->all(); $thread = $s['thread'] ?? []; @endphp
+                    @php
+                        $questions = collect($s['questions'] ?? [])->whereNull('group_id')->values()->all();
+                        // Лента как у прямого запроса из mzCorp: что ушло поставщику (письмо запроса, напоминания) и что он ответил.
+                        $thread = collect($s['letters'] ?? [])->map(fn ($l) => ['direction' => 'out', 'kind' => 'letter', 'at' => $l['at'], 'who' => $l['to'] ? 'кому: '.$l['to'] : null, 'subject' => $l['subject'], 'text' => $l['text'], 'restored' => $l['restored'] ?? false, 'error' => $l['error'] ?? null, 'files' => []])
+                            ->concat($s['thread'] ?? [])
+                            ->when(! empty($s['reminders_sent']), fn ($c) => $c->push(['direction' => 'event', 'at' => $s['last_reminder_at'], 'text' => 'QuoteParts отправил напоминание'.($s['reminders_sent'] > 1 ? ' (всего '.$s['reminders_sent'].')' : '').' по позициям без ответа']))
+                            ->when(! empty($s['opened_at']), fn ($c) => $c->push(['direction' => 'event', 'at' => $s['opened_at'], 'text' => 'Поставщик открыл форму запроса']))
+                            ->sortBy(fn ($m) => $m['at'] ?? '')->values()->all();
+                        $letterCount = collect($thread)->where('direction', '!=', 'event')->count();
+                    @endphp
                     @if($questions !== [] || $thread !== [] || $canAnswer)
                         <tr class="border-b border-border-subtle">
                             <td colspan="3" class="px-3 py-2" x-data="{ open: {{ $questions !== [] ? 'true' : 'false' }} }">
@@ -129,18 +146,33 @@
                                 @endif
                                 <button type="button" @click="open = !open" class="text-[12px] text-sky-700 hover:underline">
                                     <span x-text="open ? '▾' : '▸'"></span>
-                                    {{ $thread !== [] ? 'Переписка ('.count($thread).')' : 'Написать поставщику' }}{{ $canAnswer && $thread !== [] ? ' и ответ' : '' }}
+                                    {{ $thread !== [] ? 'Переписка ('.$letterCount.')' : 'Написать поставщику' }}{{ $canAnswer && $thread !== [] ? ' и ответ' : '' }}
                                 </button>
                                 <div x-show="open" x-cloak class="mt-1.5 space-y-1.5">
                                     @foreach($thread as $m)
+                                        @if($m['direction'] === 'event')
+                                            <div wire:key="qpt-{{ $rfq->id }}-{{ $si }}-{{ $loop->index }}" class="text-center text-[11px] text-fg-4">· {{ $m['text'] }} · {{ $m['at'] ? \Illuminate\Support\Carbon::parse($m['at'])->timezone(config('app.timezone'))->format('d.m.Y H:i') : '' }} ·</div>
+                                            @continue
+                                        @endif
                                         <div wire:key="qpt-{{ $rfq->id }}-{{ $si }}-{{ $loop->index }}"
                                              class="rounded-md px-2.5 py-1.5 text-[12.5px] {{ $m['direction'] === 'out' ? 'bg-sky-50 border border-sky-200 ml-8' : 'bg-surface-2 border border-border-subtle mr-8' }}">
                                             <div class="text-[11px] text-fg-3 mb-0.5">
                                                 {{ $m['direction'] === 'out' ? 'Мы' : 'Поставщик' }}{{ $m['who'] ? ' · '.$m['who'] : '' }}
                                                 · {{ $m['at'] ? \Illuminate\Support\Carbon::parse($m['at'])->timezone(config('app.timezone'))->format('d.m.Y H:i') : '' }}
                                                 {{ ! empty($m['auto']) ? '· автоответ' : '' }}
+                                                {{ ! empty($m['restored']) ? '· текст восстановлен по запросу' : '' }}
                                             </div>
-                                            <div class="whitespace-pre-wrap">{{ \Illuminate\Support\Str::limit($m['text'], 1500) }}</div>
+                                            @if(! empty($m['subject']))<div class="font-medium text-fg-1 mb-0.5">{{ $m['subject'] }}</div>@endif
+                                            @if(! empty($m['error']))<div class="text-[11px] text-red-700">не отправлено: {{ $m['error'] }}</div>@endif
+                                            @if(($m['kind'] ?? null) === 'letter')
+                                                <div x-data="{ full: false }">
+                                                    <div class="whitespace-pre-wrap" x-show="! full">{{ \Illuminate\Support\Str::limit($m['text'], 400) }}</div>
+                                                    <div class="whitespace-pre-wrap" x-show="full" x-cloak>{{ $m['text'] }}</div>
+                                                    @if(mb_strlen((string) $m['text']) > 400)<button type="button" @click="full = ! full" class="text-[11px] text-sky-700 hover:underline" x-text="full ? 'свернуть' : 'весь текст'"></button>@endif
+                                                </div>
+                                            @else
+                                                <div class="whitespace-pre-wrap">{{ \Illuminate\Support\Str::limit($m['text'], 1500) }}</div>
+                                            @endif
                                             @if(! empty($m['files']))
                                                 @php
                                                     // Фото письма — галерея в просмотрщике (partials.image-lightbox), прочие файлы — ссылкой.
