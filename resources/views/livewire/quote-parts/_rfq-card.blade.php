@@ -74,6 +74,8 @@
             <tbody>
                 @php $canAnswer = $this->canAnswerQuoteParts(); @endphp
                 @foreach($snap['suppliers'] ?? [] as $si => $s)
+                    {{-- Диалог по одному поставщику (вкладка «Актуализация цен») — только он; индекс $si прежний. --}}
+                    @continue(! empty($onlySupplier) && ($s['external_id'] ?? null) !== $onlySupplier)
                     @foreach($s['lines'] ?? [] as $line)
                         <tr class="border-b border-border-subtle align-top">
                             @if($loop->first)
@@ -147,7 +149,7 @@
                     @endphp
                     @if($questions !== [] || $thread !== [] || $canAnswer)
                         <tr class="border-b border-border-subtle">
-                            <td colspan="3" class="px-3 py-2" x-data="{ open: {{ $questions !== [] ? 'true' : 'false' }} }">
+                            <td colspan="3" class="px-3 py-2" x-data="{ open: {{ $questions !== [] || ! empty($onlySupplier) ? 'true' : 'false' }} }">
                                 @if($questions !== [])
                                     <div class="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 mb-1.5 text-[12.5px] text-amber-900">
                                         <span class="font-medium">Поставщик спрашивает:</span>

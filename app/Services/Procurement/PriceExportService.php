@@ -71,6 +71,15 @@ class PriceExportService
             $choice = $choices->get($bySupplier->first()['cid']);
             $line[] = $choice ? ($names[$choice->supplier_key] ?? $choice->supplier_name) : null;
             $sheet->fromArray($line, null, 'A'.$r, true);
+            // Принятое к закупке отклонение (аналог, замена…) — примечанием к ячейке цены.
+            foreach ($columns as $i => $name) {
+                $note = $bySupplier->get($name)['note'] ?? null;
+                if ($note !== null) {
+                    $cell = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(2 + $i * 3).$r;
+                    $sheet->getComment($cell)->getText()->createTextRun($note);
+                    $sheet->getComment($cell)->setWidth('320pt');
+                }
+            }
             $r++;
         }
         // Даты — датами, ширина колонок.
@@ -88,7 +97,7 @@ class PriceExportService
             ['Период', $from->format('d.m.Y H:i').' – '.$to->format('d.m.Y H:i').' (по дате письма / предложения поставщика)'],
             ['Сформировано', now()->format('d.m.Y H:i').($by ? ' · '.$by->name : '')],
             ['', ''],
-            ['Строки', 'M-артикул. Принятые к закупке аналог / восстановленное и т. п. — как цена самой позиции.'],
+            ['Строки', 'M-артикул. Принятые к закупке аналог / восстановленное и т. п. — как цена самой позиции, с примечанием к ячейке цены: что предложено (вид, бренд, артикул, комментарий поставщика).'],
             ['Колонки', 'Все поставщики, приславшие цену: сначала поставщики шаблона в его порядке, затем остальные по числу артикулов. Названия — как в 1С (по закупкам), иначе как в справочнике.'],
             ['Цена', 'Последняя цена поставщика по позиции за период; цена за единицу, в валюте поставщика.'],
             ['Выбранный поставщик', 'У кого закупаем позицию — выбор снабжения в «Снабжении».'],
@@ -167,10 +176,20 @@ class PriceExportService
                 'key' => $o->supplier_key, 'fallback' => (string) ($o->supplier_name ?: $o->supplier_key),
                 'price' => (float) $o->price, 'currency' => $o->currency,
                 'date' => Carbon::parse($at),
+                'note' => ($o->kind ?? 'original') !== 'original' ? self::deviationNote($o) : null,
             ]);
         }
 
         return [$out, $skipped];
+    }
+
+    /** «Аналог: Fermator FR-60 — комментарий поставщика» — что вместо оригинала. */
+    public static function deviationNote(QuotePartsOffer $o): string
+    {
+        $what = trim(($o->brand ?? '').' '.($o->part_number ?? ''));
+
+        return mb_substr(QuotePartsOffer::kindLabel($o->kind).' (не оригинал)'.($what !== '' ? ': '.$what : '')
+            .($o->product_name ? ', '.$o->product_name : '').($o->note ? ' — '.$o->note : ''), 0, 500);
     }
 
     /**

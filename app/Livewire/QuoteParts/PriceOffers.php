@@ -2,14 +2,21 @@
 
 namespace App\Livewire\QuoteParts;
 
+use App\Livewire\Concerns\AnswersQuotePartsSuppliers;
 use App\Models\CatalogItem;
 use App\Models\QuotePartsOffer;
+use App\Models\QuotePartsRfq;
 use App\Services\Iqot\IqotCurrencyConverter;
+use App\Services\Procurement\SupplierChoiceService;
 use App\Services\QuoteParts\PriceRefreshReadiness;
+use App\Services\QuoteParts\QuotePartsPriceService;
+use App\Services\QuoteParts\QuotePartsRfqService;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Url;
 use Livewire\Component;
+use Livewire\WithFileUploads;
+use Throwable;
 
 /**
  * Вкладка «Актуализация цен» раздела QuoteParts: свежие предложения поставщиков из QuoteParts
@@ -21,6 +28,9 @@ use Livewire\Component;
  */
 class PriceOffers extends Component
 {
+    use AnswersQuotePartsSuppliers;
+    use WithFileUploads;
+
     public const DAYS = [3, 7, 30, 90];
 
     public const VIEWS = ['request' => 'по заявкам', 'item' => 'по позициям', 'list' => 'списком'];
@@ -40,6 +50,142 @@ class PriceOffers extends Component
 
     /** @var list<int> раскрытые карточки позиций каталога */
     public array $openItems = [];
+
+    /** Предложение, по которому открыт диалог с поставщиком (уточнить цену). */
+    public ?int $dialog = null;
+
+    /** «Закупаем здесь»: это предложение — закупочное для позиции (выбор снабжения, идёт в выгрузку 1С). */
+    public function choose(int $offerId, SupplierChoiceService $choices): void
+    {
+        $o = QuotePartsOffer::query()->findOrFail($offerId);
+        if ($o->catalog_item_id === null || $o->supplier_key === null) {
+            $this->dispatch('toast', type: 'error', message: 'Предложение без позиции каталога или поставщика — выбрать нельзя.');
+
+            return;
+        }
+        if (! $o->countsAsItemPrice()) {
+            $this->dispatch('toast', type: 'error', message: QuotePartsOffer::kindLabel($o->kind).' — сначала отметьте «Учитывать».');
+
+            return;
+        }
+        $choices->choose((int) $o->catalog_item_id, $o->supplier_key, [
+            'supplier' => (string) ($o->supplier_name ?: $o->supplier_key), 'price' => $o->price !== null ? (float) $o->price : null,
+            'currency' => $o->currency, 'source' => 'quoteparts', 'ref' => $o->id,
+        ], auth()->user());
+        unset($this->choices);
+        $this->dispatch('toast', type: 'success', message: 'Закупаем '.$o->sku.' у: '.($o->supplier_name ?: $o->supplier_key).'.');
+    }
+
+    public function clearChoice(int $catalogItemId, SupplierChoiceService $choices): void
+    {
+        $choices->clear($catalogItemId);
+        unset($this->choices);
+    }
+
+    /** Отклонение от оригинала (аналог, замена…): учитывать как цену позиции (и в выгрузке) или нет. */
+    public function review(int $offerId, bool $accept, QuotePartsPriceService $prices): void
+    {
+        $prices->review(QuotePartsOffer::query()->findOrFail($offerId), $accept, auth()->user());
+        unset($this->rows, $this->readyItems, $this->items, $this->groups);
+        $this->dispatch('toast', type: 'success', message: $accept ? 'Учитываем: цена идёт как цена позиции, в выгрузке — с примечанием.' : 'Не учитываем это предложение.');
+    }
+
+    /** Диалог с поставщиком по предложению: переписка запроса QuoteParts или обращения. */
+    public function openDialog(int $offerId, QuotePartsRfqService $rfqs): void
+    {
+        $this->dialog = $this->dialog === $offerId ? null : $offerId;
+        if ($this->dialog !== null && ($rfq = $this->dialogRfq) !== null) {
+            try {
+                $rfqs->refresh($rfq);
+            } catch (Throwable) {
+                // Покажем последний снимок.
+            }
+            unset($this->dialogRfq);
+        }
+    }
+
+    #[Computed]
+    public function dialogOffer(): ?QuotePartsOffer
+    {
+        return $this->dialog ? QuotePartsOffer::query()->find($this->dialog) : null;
+    }
+
+    #[Computed]
+    public function dialogRfq(): ?QuotePartsRfq
+    {
+        $remote = $this->dialogOffer?->rfq_remote_id;
+
+        return $remote ? QuotePartsRfq::query()->where('remote_id', $remote)->first() : null;
+    }
+
+    /** Поставщик предложения без запроса — для обращений через QuoteParts. */
+    #[Computed]
+    public function dialogSupplier(): ?\App\Models\Supplier
+    {
+        $key = (string) ($this->dialogOffer?->supplier_key ?? '');
+        [$kind, $id] = array_pad(explode(':', $key, 2), 2, '');
+
+        return match ($kind) {
+            'org' => \App\Models\Supplier::query()->where('supplier_organization_id', (int) $id)->orderByRaw('quoteparts_link_id is null')->orderBy('id')->first(),
+            'sup' => \App\Models\Supplier::query()->find((int) $id),
+            default => null,
+        };
+    }
+
+    public function refreshQuotePartsRfq(int $id, QuotePartsRfqService $rfqs): void
+    {
+        try {
+            $rfqs->refresh(QuotePartsRfq::query()->findOrFail($id));
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: 'QuoteParts не ответил: '.mb_substr($e->getMessage(), 0, 200));
+        }
+        unset($this->dialogRfq);
+    }
+
+    protected function quotePartsRfqForAnswer(int $id): QuotePartsRfq
+    {
+        return QuotePartsRfq::query()->findOrFail($id);
+    }
+
+    protected function afterQuotePartsAnswer(): void
+    {
+        unset($this->dialogRfq);
+    }
+
+    /**
+     * Лучшее предложение каждой позиции на экране: самое дешёвое в рублях среди действующих и
+     * годных к закупке (оригинал или отклонение, которое решили учитывать).
+     *
+     * @return list<int>
+     */
+    #[Computed]
+    public function bestIds(): array
+    {
+        return $this->rows->merge($this->readyItems->flatMap(fn ($i) => $i['offers']))
+            ->filter(fn ($r) => $r['sku'] && $r['rub'] !== null && ! $r['stale'] && $r['counts'])
+            ->groupBy('sku')
+            ->map(fn ($g) => $g->sortBy('rub')->first()['id'])
+            ->values()->all();
+    }
+
+    /** Выбранные поставщики позиций на экране (catalog_item_id => выбор). */
+    #[Computed]
+    public function choices(): Collection
+    {
+        $ids = $this->rows->pluck('cid')->merge($this->readyItems->pluck('cid'))->filter()->unique()->values()->all();
+
+        return app(SupplierChoiceService::class)->forItems($ids);
+    }
+
+    /** Последняя закупка из 1С (цена, поставщик, дата) по позициям на экране. */
+    #[Computed]
+    public function lastPurchases(): Collection
+    {
+        $ids = $this->rows->pluck('cid')->merge($this->readyItems->pluck('cid'))->filter()->unique()->values()->all();
+
+        return $ids === [] ? collect() : \App\Models\CatalogSupplierPrice::query()->whereIn('catalog_item_id', $ids)->where('kind', 'last')
+            ->orderByDesc('priced_at')->get()->unique('catalog_item_id')->keyBy('catalog_item_id');
+    }
 
     public function toggleItem(int $catalogItemId): void
     {
@@ -136,7 +282,7 @@ class PriceOffers extends Component
                     'sale' => $first['sale'],
                     'actual' => $first['actual'],
                     'offers' => $sorted,
-                    'best' => $sorted->first(fn ($r) => $r['rub'] !== null && ! $r['stale']),
+                    'best' => $sorted->first(fn ($r) => $r['rub'] !== null && ! $r['stale'] && $r['counts']),
                     'asked' => $st ? count($st['asked']) : null,
                     'offered' => $st ? count($st['offered']) : null,
                     'declined' => $st ? count($st['declined']) : null,
@@ -204,6 +350,9 @@ class PriceOffers extends Component
             'sku' => $ci?->sku ?? $o->sku,
             'name' => $ci?->name,
             'supplier' => (string) ($o->supplier_name ?: $o->supplier_key),
+            'key' => $o->supplier_key,
+            'counts' => $o->countsAsItemPrice(),
+            'rfq_remote_id' => $o->rfq_remote_id,
             'source' => $o->source_type,
             'kind' => $o->kind ?? 'original',
             'product' => trim(($o->brand ?? '').' '.($o->part_number ?? '')),

@@ -1,42 +1,53 @@
-{{-- Таблица предложений вкладки «Актуализация цен». Ожидает $rows, $showRequest (колонка «Заявка»), $showItem (колонка «Позиция»). --}}
+{{-- Таблица предложений вкладки «Актуализация цен». Ожидает $rows, $showRequest (колонка «Заявка»), $showItem (колонки позиции).
+     Лучшее предложение позиции выделено; у каждого — «Закупаем здесь», у отклонений — учитывать или нет, «Уточнить» — диалог с поставщиком. --}}
 @php
     $sources = ['form' => 'форма запроса', 'email' => 'письмо', 'cabinet' => 'кабинет', 'price_list' => 'прайс', 'api' => 'API'];
     $money = fn ($v, $d = 2) => $v === null ? '—' : number_format((float) $v, $d, ',', ' ');
     $showItem = $showItem ?? true;
-    $cols = 5 + ($showItem ? 3 : 0) + ($showRequest ? 1 : 0);
+    $cols = 6 + ($showItem ? 3 : 0) + ($showRequest ? 1 : 0);
+    $bestIds = $this->bestIds;
+    $choices = $this->choices;
 @endphp
 {{-- Ширины колонок фиксированы и одинаковы во всех блоках: таблицы стоят друг под другом и не «пляшут». --}}
 <div class="overflow-x-auto">
-    <table class="w-full table-fixed text-[12.5px]" style="min-width:980px">
+    <table class="w-full table-fixed text-[12.5px]" style="min-width:1080px">
         <colgroup>
-            <col style="width:110px">
-            @if($showItem)<col>@endif
-            <col @if($showItem) style="width:230px" @endif>
-            <col style="width:130px">
             <col style="width:100px">
-            @if($showItem)<col style="width:100px"><col style="width:120px">@endif
+            @if($showItem)<col>@endif
+            <col @if($showItem) style="width:220px" @endif>
             <col style="width:120px">
-            @if($showRequest)<col style="width:140px">@endif
+            <col style="width:95px">
+            @if($showItem)<col style="width:95px"><col style="width:110px">@endif
+            <col style="width:110px">
+            @if($showRequest)<col style="width:130px">@endif
+            <col style="width:200px">
         </colgroup>
         <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
             <tr>
                 <th class="text-left px-3 py-2">Когда</th>
                 @if($showItem)<th class="text-left px-3 py-2">Позиция</th>@endif
-                <th class="text-left px-3 py-2">Поставщик</th>
+                <th class="text-left px-3 py-2">Поставщик · что предложил</th>
                 <th class="text-right px-3 py-2">Цена</th>
                 <th class="text-right px-3 py-2" title="Цена поставщика в рублях по курсу ЦБ">≈ ₽</th>
-
                 @if($showItem)
                     <th class="text-right px-3 py-2" title="Закупочная цена из каталога (1С) — с логистикой и таможней, с ценой поставщика напрямую не сравнивается">Закупка</th>
                     <th class="text-right px-3 py-2" title="Цена продажи в каталоге">Продажа</th>
                 @endif
                 <th class="text-left px-3 py-2">Срок · действует</th>
                 @if($showRequest)<th class="text-left px-3 py-2">Заявка</th>@endif
+                <th class="text-left px-3 py-2">Решение</th>
             </tr>
         </thead>
         <tbody>
             @foreach($rows as $r)
-                <tr wire:key="po-{{ $r['id'] }}" class="border-b border-border-subtle align-top {{ $r['stale'] ? 'opacity-60' : '' }}">
+                @php
+                    $isBest = in_array($r['id'], $bestIds, true);
+                    $choice = $r['cid'] ? $choices->get($r['cid']) : null;
+                    $chosenHere = $choice && $choice->source === 'quoteparts' && (int) $choice->offer_ref === $r['id'];
+                    $chosenSupplier = $choice && ! $chosenHere && $choice->supplier_key === $r['key'];
+                    $deviation = $r['kind'] !== 'original';
+                @endphp
+                <tr wire:key="po-{{ $r['id'] }}" class="border-b border-border-subtle align-top {{ $r['stale'] ? 'opacity-60' : '' }} {{ $chosenHere ? 'bg-sky-50' : ($isBest ? 'bg-emerald-50' : '') }}">
                     <td class="px-3 py-1.5 whitespace-nowrap text-fg-3">
                         {{ $r['at']?->timezone(config('app.timezone'))->format('d.m H:i') }}
                         <div class="text-[11px] text-fg-4">{{ $sources[$r['source']] ?? $r['source'] }}</div>
@@ -44,7 +55,7 @@
                     @if($showItem)
                         <td class="px-3 py-1.5">
                             @if($r['cid'])
-                                <button type="button" wire:click="toggleItem({{ $r['cid'] }})" class="text-left group" title="Карточка позиции">
+                                <button type="button" wire:click="toggleItem({{ $r['cid'] }})" class="text-left group w-full" title="Карточка позиции">
                                     <span class="mono text-sky-700 group-hover:underline">{{ $r['sku'] }}</span> <span class="text-fg-4 text-[10px]">{{ in_array($r['cid'], $openItems, true) ? '▾' : '▸' }}</span>
                                     @if($r['name'])<div class="text-[11.5px] text-fg-3 truncate" title="{{ $r['name'] }}">{{ $r['name'] }}</div>@endif
                                 </button>
@@ -54,15 +65,15 @@
                         </td>
                     @endif
                     <td class="px-3 py-1.5 break-words">
-                        {{ $r['supplier'] }}
-                        @if($r['kind'] !== 'original')
+                        <span class="font-medium text-fg-1">{{ $r['supplier'] }}</span>
+                        @if($isBest)<span class="chip chip-ok text-[10px] ml-1">лучшее</span>@endif
+                        @if($deviation)
                             <div class="mt-0.5">
-                                <span class="chip chip-sky text-[10.5px]">{{ \App\Models\QuotePartsOffer::kindLabel($r['kind']) }}</span>
-                                <span class="chip {{ $r['review'] === 'accepted' ? 'chip-ok' : ($r['review'] === 'rejected' ? 'chip-neutral' : 'chip-warn') }} text-[10px]" title="Отклонения разбирает снабжение: «Снабжение» → «Предложения поставщиков»">{{ ['accepted' => 'принято к закупке', 'rejected' => 'отклонено'][$r['review']] ?? 'на разборе' }}</span>
-                                @if($r['product'])<span class="mono text-[11px] text-fg-3">{{ $r['product'] }}</span>@endif
+                                <span class="chip chip-warn text-[10.5px] font-semibold" title="Не оригинал — учитывать или нет, решает снабжение">{{ mb_strtoupper(\App\Models\QuotePartsOffer::kindLabel($r['kind'])) }} · не оригинал</span>
+                                @if($r['product'])<span class="mono text-[11px] text-fg-2">{{ $r['product'] }}</span>@endif
                             </div>
                         @endif
-                        @if($r['note'])<div class="text-[11px] text-fg-3">«{{ \Illuminate\Support\Str::limit($r['note'], 120) }}»</div>@endif
+                        @if($r['note'])<div class="text-[11px] text-fg-3">«{{ \Illuminate\Support\Str::limit($r['note'], 160) }}»</div>@endif
                         @if($r['stale'])<div class="text-[10.5px] text-fg-4">устарело</div>@endif
                     </td>
                     <td class="px-3 py-1.5 text-right mono whitespace-nowrap">
@@ -90,7 +101,50 @@
                             @if($r['rfq_tag'])<div class="mono text-[11px] text-fg-4">{{ $r['rfq_tag'] }}</div>@endif
                         </td>
                     @endif
+                    <td class="px-3 py-1.5">
+                        <div class="flex flex-wrap items-center gap-1">
+                            @if($deviation && $r['review'] !== 'accepted')
+                                {{-- Отклонение: сначала решить, учитывать ли. --}}
+                                <button type="button" wire:click="review({{ $r['id'] }}, true)" class="btn btn-sm" title="Цена идёт как цена позиции; в выгрузке 1С — с примечанием, что предложено">Учитывать</button>
+                                @if($r['review'] === 'rejected')
+                                    <span class="text-[11px] text-fg-4">не учитываем</span>
+                                @else
+                                    <button type="button" wire:click="review({{ $r['id'] }}, false)" class="btn btn-sm">Не учитывать</button>
+                                @endif
+                            @else
+                                @if($chosenHere)
+                                    <span class="chip chip-info text-[10.5px]">✓ закупаем здесь</span>
+                                    <button type="button" wire:click="clearChoice({{ $r['cid'] }})" class="text-[11px] text-fg-4 hover:text-red-700">снять</button>
+                                @elseif($r['cid'] && $r['key'] && ! $r['stale'])
+                                    <button type="button" wire:click="choose({{ $r['id'] }})" class="btn btn-sm {{ $isBest && ! $choice ? 'btn-primary' : '' }}"
+                                            title="Это предложение — закупочное: покупаем у этого поставщика (идёт в выгрузку 1С как выбранный поставщик)">Закупаем здесь</button>
+                                    @if($chosenSupplier)<span class="text-[10.5px] text-sky-700">уже закупаем у него</span>@endif
+                                @endif
+                                @if($deviation)
+                                    <button type="button" wire:click="review({{ $r['id'] }}, false)" class="text-[11px] text-fg-4 hover:text-red-700" title="Сейчас учитываем это отклонение">не учитывать</button>
+                                @endif
+                            @endif
+                            @if($r['key'])
+                                <button type="button" wire:click="openDialog({{ $r['id'] }})" class="btn btn-sm {{ $dialog === $r['id'] ? 'btn-primary' : '' }}" title="Уточнить у поставщика — переписка по запросу или обращение">💬 Уточнить</button>
+                            @endif
+                        </div>
+                    </td>
                 </tr>
+                @if($dialog === $r['id'])
+                    <tr wire:key="po-dialog-{{ $r['id'] }}" class="border-b border-border-subtle bg-surface-2">
+                        <td colspan="{{ $cols }}" class="px-4 py-3">
+                            @if($rfq = $this->dialogRfq)
+                                <div class="text-[12px] text-fg-3 mb-1.5">Переписка с поставщиком по запросу <span class="mono">{{ $rfq->tag }}</span> — ответ уйдёт в его ветку письмом от MyZip.</div>
+                                @include('livewire.quote-parts._rfq-card', ['rfq' => $rfq, 'supplierNames' => app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames([$rfq]), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $r['key']])
+                            @elseif($sup = $this->dialogSupplier)
+                                <div class="text-[12px] text-fg-3 mb-1.5">Предложение не по запросу ({{ $sources[$r['source']] ?? $r['source'] }}) — уточнить можно обращением к поставщику через QuoteParts.</div>
+                                <livewire:suppliers.quote-parts-conversations :supplier="$sup" :key="'po-conv-'.$r['id']" />
+                            @else
+                                <div class="text-[12.5px] text-fg-3">Поставщик не найден в справочнике — написать ему из mzCorp нельзя.</div>
+                            @endif
+                        </td>
+                    </tr>
+                @endif
                 @if($showItem && $r['cid'] && ($card = $this->openCards[$r['cid']] ?? null))
                     <tr wire:key="po-card-{{ $r['id'] }}" class="border-b border-border-subtle bg-surface-2">
                         <td colspan="{{ $cols }}" class="px-4 py-2.5">

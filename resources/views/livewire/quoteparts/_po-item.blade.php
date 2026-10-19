@@ -1,50 +1,41 @@
-{{-- Позиция и все предложения на неё (вкладка «Актуализация цен», вид «по позициям»). Ожидает $it, $ready. --}}
+{{-- Позиция и все предложения на неё (вкладка «Актуализация цен», вид «по позициям»). Ожидает $it, $ready.
+     Шапка — одной строкой: позиция, сколько ответили, запрос, текущая закупка и поставщик; ниже — предложения. --}}
 @php
     $money = fn ($v, $d = 0) => $v === null ? '—' : number_format((float) $v, $d, ',', ' ');
     $card = $it['cid'] ? ($this->openCards[$it['cid']] ?? null) : null;
-    $best = $it['best'];
+    $last = $it['cid'] ? $this->lastPurchases->get($it['cid']) : null;
+    $choice = $it['cid'] ? $this->choices->get($it['cid']) : null;
+    $tz = config('app.timezone');
 @endphp
 <div wire:key="poi-{{ $ready ? 'r' : 'w' }}-{{ $it['sku'] }}" class="border-t border-border-subtle">
-    <div style="display:grid;grid-template-columns:minmax(260px,1fr) 190px 170px 220px;column-gap:24px;align-items:start" class="px-4 py-2 {{ $ready ? 'bg-emerald-50' : '' }}">
-        <div class="min-w-0">
-            @if($it['cid'])
-                <button type="button" wire:click="toggleItem({{ $it['cid'] }})" class="text-left group" title="Карточка позиции">
-                    <span class="mono font-semibold text-sky-700 group-hover:underline">{{ $it['sku'] }}</span>
-                    <span class="text-fg-4 text-[11px]">{{ $card ? '▾ свернуть' : '▸ карточка' }}</span>
-                </button>
-            @else
-                <span class="mono font-semibold">{{ $it['sku'] ?: '—' }}</span>
-            @endif
-            @if($it['name'])<div class="text-[12.5px] text-fg-2">{{ $it['name'] }}</div>@endif
-        </div>
-        <div class="text-[12px] text-fg-3">
-            @if($it['asked'] !== null)
-                <div><span class="{{ $it['offered'] * 2 > $it['asked'] ? 'text-emerald-700 font-semibold' : 'text-fg-1' }}">ответили {{ $it['offered'] }} из {{ $it['asked'] }}</span>@if($it['declined'])<span class="text-fg-4"> · отказ {{ $it['declined'] }}</span>@endif</div>
-                <div class="text-[11px]">запрос {{ $it['requested_at']->timezone(config('app.timezone'))->format('d.m H:i') }}
-                    @if(! $ready && $it['wait_until'])· ждём до {{ $it['wait_until']->timezone(config('app.timezone'))->format('d.m H:i') }}@endif
-                </div>
-                @if($it['rfqs'])<div class="mono text-[10.5px] text-fg-4">{{ implode(' ', $it['rfqs']) }}</div>@endif
-            @else
-                <div class="text-fg-4">без запроса: кабинет, прайс</div>
-            @endif
-        </div>
-        <div class="text-right text-[12px] whitespace-nowrap">
-            <div class="text-fg-3">лучшая цена</div>
-            <div class="mono font-semibold text-fg-1">{{ $best ? $money($best['rub']).' ₽' : '—' }}</div>
-            @if($best)<div class="text-[11px] text-fg-4">{{ $best['supplier'] }}</div>@endif
-        </div>
-        <div class="text-right text-[12px] whitespace-nowrap">
-            <div class="text-fg-3">закупка · продажа</div>
-            <div class="mono text-fg-2">{{ $it['purchase'] !== null ? $money($it['purchase']).' ₽' : '—' }} · {{ $it['sale'] !== null ? $money($it['sale']).' ₽' : '—' }}</div>
-            <div class="text-[11px] {{ $it['actual'] ? 'text-emerald-700' : 'text-amber-700' }}">{{ $it['actual'] ? 'цена актуальна' : 'к актуализации' }}</div>
-        </div>
+    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-4 py-2 text-[12.5px] {{ $ready ? 'bg-emerald-50' : 'bg-surface-2' }}">
+        @if($it['cid'])
+            <button type="button" wire:click="toggleItem({{ $it['cid'] }})" class="mono font-semibold text-sky-700 hover:underline" title="Карточка позиции">{{ $it['sku'] }} <span class="text-fg-4 text-[10.5px] font-normal">{{ $card ? '▾' : '▸' }}</span></button>
+        @else
+            <span class="mono font-semibold">{{ $it['sku'] ?: '—' }}</span>
+        @endif
+        @if($it['name'])<span class="text-fg-1 truncate max-w-[520px]" title="{{ $it['name'] }}">{{ $it['name'] }}</span>@endif
+        @if($it['asked'] !== null)
+            <span class="text-fg-4">·</span>
+            <span class="{{ $it['offered'] * 2 > $it['asked'] ? 'text-emerald-700 font-semibold' : 'text-fg-1' }}">ответили {{ $it['offered'] }} из {{ $it['asked'] }}</span>
+            @if($it['declined'])<span class="text-fg-3">· отказ {{ $it['declined'] }}</span>@endif
+            <span class="text-fg-3">· запрос {{ $it['requested_at']->timezone($tz)->format('d.m H:i') }}</span>
+            @if(! $ready && $it['wait_until'])<span class="text-fg-4">· ждём до {{ $it['wait_until']->timezone($tz)->format('d.m H:i') }}</span>@endif
+            @if($it['rfqs'])<span class="mono text-[11px] text-fg-4">{{ implode(' ', $it['rfqs']) }}</span>@endif
+        @else
+            <span class="text-fg-4">· без запроса: кабинет, прайс</span>
+        @endif
+        <span class="text-fg-4">·</span>
+        <span class="text-fg-3" title="Закупочная цена из каталога (1С) — с логистикой и таможней">закупка <span class="mono text-fg-1">{{ $it['purchase'] !== null ? $money($it['purchase']).' ₽' : '—' }}</span>@if($last)<span> · {{ $last->supplier_name_1c }}{{ $last->priced_at ? ', '.$last->priced_at->format('d.m.Y') : '' }}</span>@endif</span>
+        @if($choice)
+            <span class="text-fg-4">·</span>
+            <span class="text-sky-700" title="Выбор снабжения: у кого закупаем">закупаем у: <b>{{ $choice->supplier_name }}</b>{{ $choice->price !== null ? ' · '.number_format((float) $choice->price, 2, ',', ' ').' '.$choice->currency : '' }}</span>
+        @endif
     </div>
     @if($card)
         <div class="px-4 py-2.5 bg-surface-2 border-t border-border-subtle">
             @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'supplyHistoryOpen' => true])
         </div>
     @endif
-    <div class="pl-4">
-        @include('livewire.quoteparts._po-table', ['rows' => $it['offers'], 'showRequest' => true, 'showItem' => false])
-    </div>
+    @include('livewire.quoteparts._po-table', ['rows' => $it['offers'], 'showRequest' => true, 'showItem' => false])
 </div>
