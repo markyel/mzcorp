@@ -7,7 +7,7 @@
 @endphp
 {{-- Ширины колонок фиксированы и одинаковы во всех блоках: таблицы стоят друг под другом и не «пляшут». --}}
 <div class="overflow-x-auto">
-    <table class="w-full table-fixed text-[12.5px] min-w-[980px]">
+    <table class="w-full table-fixed text-[12.5px]" style="min-width:980px">
         <colgroup>
             <col style="width:110px">
             @if($showItem)<col>@endif

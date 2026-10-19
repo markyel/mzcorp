@@ -4,8 +4,8 @@
     $card = $it['cid'] ? ($this->openCards[$it['cid']] ?? null) : null;
     $best = $it['best'];
 @endphp
-<div wire:key="poi-{{ $ready ? 'r' : 'w' }}-{{ $it['sku'] }}" class="border-t border-border-subtle first:border-t-0">
-    <div class="grid grid-cols-[minmax(260px,1fr)_200px_150px_200px] items-start gap-x-6 gap-y-1 px-4 py-2.5 {{ $ready ? 'bg-emerald-50/50' : '' }}">
+<div wire:key="poi-{{ $ready ? 'r' : 'w' }}-{{ $it['sku'] }}" class="border-t border-border-subtle">
+    <div style="display:grid;grid-template-columns:minmax(260px,1fr) 190px 170px 220px;column-gap:24px;align-items:start" class="px-4 py-2 {{ $ready ? 'bg-emerald-50' : '' }}">
         <div class="min-w-0">
             @if($it['cid'])
                 <button type="button" wire:click="toggleItem({{ $it['cid'] }})" class="text-left group" title="Карточка позиции">
