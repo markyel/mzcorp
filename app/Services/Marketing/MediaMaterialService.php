@@ -62,6 +62,39 @@ class MediaMaterialService
     }
 
     /**
+     * Та же концовка, свёрстанная под площадку: отдельными строками со значками, в Telegram и MAX
+     * ссылки — словами (без длинных адресов), во ВКонтакте — адресами (разметки на стене нет).
+     */
+    public function orderFooterFor(string $kind, bool $html): string
+    {
+        $phone = trim((string) config('services.company.phone', ''));
+        $tg = $this->bots->publicUrl(\App\Enums\MessengerChannel::Telegram);
+        $max = $this->bots->publicUrl(\App\Enums\MessengerChannel::Max);
+        $site = rtrim((string) config('services.marketing.news.site_url', ''), '/');
+        $siteUrl = $site !== '' ? $site.'/?'.http_build_query(['utm_source' => $kind, 'utm_medium' => 'social', 'utm_campaign' => 'media_plan']) : '';
+        $siteName = preg_replace('~^https?://(www\.)?~i', '', $site);
+        $e = fn (string $s) => htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $a = fn (string $url, string $label) => $html ? '<a href="'.$e($url).'">'.$e($label).'</a>' : $label.': '.$url;
+        $what = 'цена по M-артикулу, заявка текстом, фото или файлом';
+
+        $lines = [$html ? '🛒 <b>Как заказать</b>' : '🛒 Как заказать'];
+        if ($phone !== '') {
+            $lines[] = '📞 '.($html ? $e($phone) : $phone);
+        }
+        $bots = array_values(array_filter([$tg ? $a($tg, 'Telegram') : null, $max ? $a($max, 'MAX') : null]));
+        if ($bots !== []) {
+            $lines[] = $html
+                ? '🤖 Бот заявок: '.implode(' · ', $bots).' — '.$what
+                : '🤖 Бот заявок — '.$what.":\n".implode("\n", $bots);
+        }
+        if ($site !== '') {
+            $lines[] = '🌐 '.($html ? $a($siteUrl, (string) $siteName) : $site);
+        }
+
+        return implode("\n", $lines);
+    }
+
+    /**
      * @return array{ok: bool, publication: ?MediaPublication, message: string}
      */
     public function draft(MediaTopic $topic, MediaChannel $channel, ?User $author, ?string $note = null, bool $coverNow = true): array

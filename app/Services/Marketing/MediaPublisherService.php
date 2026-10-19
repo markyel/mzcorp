@@ -198,6 +198,13 @@ class MediaPublisherService
         // Артикулы в тексте превращаем в ссылки на карточки товара: читателю
         // из ленты идти больше некуда, а по артикулу он искать не станет.
         $text = $this->text($publication);
+        // Концовка «как заказать» — метка на её месте: ниже вставим версию, свёрстанную под площадку.
+        $materials = app(MediaMaterialService::class);
+        $footer = $materials->orderFooter();
+        $hasFooter = $footer !== '' && str_contains($text, $footer);
+        if ($hasFooter) {
+            $text = str_replace($footer, self::FOOTER_MARK, $text);
+        }
         // Хэштеги темы — в конец поста (кликабельны и в Telegram, и во ВКонтакте, и в MAX).
         $tags = $publication->topic?->hashtagList() ?? [];
         if ($tags !== [] && ! str_contains($text, $tags[0])) {
@@ -207,6 +214,11 @@ class MediaPublisherService
             ->linkify($text, (string) $channel->kind);
         // Заголовки выделяем: жирным там, где есть разметка, маркером — во ВКонтакте.
         ['text' => $text, 'html' => $html] = self::formatHeadings($text, (string) $channel->kind, $html);
+        // Позиции — блоками «название / └ арт. · цена», между позициями пустая строка.
+        $text = self::layoutItems($text, (string) $channel->kind, $html);
+        if ($hasFooter) {
+            $text = str_replace(self::FOOTER_MARK, $materials->orderFooterFor((string) $channel->kind, $html), $text);
+        }
 
         $images = $this->usableImages($publication->images());
 
@@ -700,6 +712,68 @@ class MediaPublisherService
 
     /** Маркер раздела во ВКонтакте: разметки на стене нет, жирным не выделить. */
     public const VK_HEADING_MARK = '▪️ ';
+
+    /** Место концовки «как заказать» в тексте до вёрстки (переживает экранирование HTML). */
+    private const FOOTER_MARK = '{{ORDER_FOOTER}}';
+
+    /**
+     * Позиции подборок (новинки, поступления, снижение цен) — модель пишет их строго
+     * «• Короткое название · арт. M12345» и, у снижения цен, следующей строкой «8 461 → 1 196 ₽ (−86%)».
+     * Свёрстываем блоками:
+     *   🔹 Короткое название
+     *   └ арт. M12345 · <s>8 461</s> → <b>1 196 ₽</b> (−86%)
+     * с пустой строкой между позициями — длинная строка «название · арт.» переносилась посередине и
+     * читалась кашей. Во ВКонтакте — без разметки; адрес карточки (его вставляет linkify) остаётся под артикулом.
+     */
+    public static function layoutItems(string $text, string $kind, bool $html): string
+    {
+        $lines = explode("\n", $text);
+        $out = [];
+        $priceRe = '/^\s*([\d\s\x{00A0}\x{202F}.,]+)\s*→\s*([\d\s\x{00A0}\x{202F}.,]+\s*₽)\s*(\(\s*[−-]?\d+\s*%\s*\))?\s*$/u';
+        for ($i = 0, $n = count($lines); $i < $n; $i++) {
+            if (preg_match('/^\s*•\s*(.+?)\s*·\s*арт\.?\s*(.+?)\s*$/u', $lines[$i], $m) !== 1) {
+                $out[] = $lines[$i];
+
+                continue;
+            }
+            // Строка-цена — сразу за позицией или за адресом карточки (ВКонтакте).
+            $priceAt = null;
+            foreach ([$i + 1, $i + 2] as $j) {
+                if (isset($lines[$j]) && preg_match($priceRe, strip_tags($lines[$j]), $pm) === 1) {
+                    $priceAt = $j;
+                    break;
+                }
+                if (! isset($lines[$j]) || ! preg_match('~^\s*https?://\S+\s*$~u', $lines[$j])) {
+                    break;
+                }
+            }
+            $price = '';
+            if ($priceAt !== null) {
+                $old = trim($pm[1]);
+                $new = trim($pm[2]);
+                $pct = isset($pm[3]) ? ' '.trim($pm[3]) : '';
+                $price = $html ? ' · <s>'.$old.'</s> → <b>'.$new.'</b>'.$pct : ' · '.$old.' → '.$new.$pct;
+            }
+            if ($out !== [] && trim((string) end($out)) !== '') {
+                $out[] = '';
+            }
+            $out[] = '🔹 '.$m[1];
+            $out[] = '└ арт. '.$m[2].$price;
+            // Адрес карточки (ВКонтакте) — под позицией; строку цены уже влили.
+            for ($j = $i + 1; $j <= ($priceAt ?? $i); $j++) {
+                if ($j !== $priceAt && preg_match('~^\s*https?://\S+\s*$~u', $lines[$j])) {
+                    $out[] = trim($lines[$j]);
+                }
+            }
+            if ($priceAt !== null) {
+                $i = $priceAt;
+            } elseif (isset($lines[$i + 1]) && preg_match('~^\s*https?://\S+\s*$~u', $lines[$i + 1])) {
+                $out[] = trim($lines[++$i]);
+            }
+        }
+
+        return implode("\n", $out);
+    }
 
     /**
      * Заголовки в посте: первая строка (название материала) и строки разделов — короткая строка,
