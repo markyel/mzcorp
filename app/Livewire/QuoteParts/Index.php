@@ -45,7 +45,7 @@ class Index extends Component
 
     public function setTab(string $tab): void
     {
-        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
+        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'questions', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
         $this->perPage = self::PER_PAGE;
     }
 
@@ -119,6 +119,13 @@ class Index extends Component
         return \App\Models\QuotePartsOffer::query()->where('superseded', false)->whereIn('status', ['active', 'expiring'])
             ->where(fn ($q) => $q->where('remote_updated_at', '>=', now()->subDays(7))->orWhere('created_at', '>=', now()->subDays(7)))
             ->count();
+    }
+
+    /** Позиции с открытыми вопросами поставщиков — счётчик вкладки «Вопросы поставщиков». */
+    #[Computed]
+    public function openQuestionsCount(): int
+    {
+        return app(\App\Livewire\QuoteParts\SupplierQuestions::class)->items()->where('open', '>', 0)->count();
     }
 
     /** Поставщики, приглашённые в QuoteParts (приглашают из карточки поставщика). */
