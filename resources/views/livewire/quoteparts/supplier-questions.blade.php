@@ -37,7 +37,7 @@
                 </div>
             @endif
             @foreach($it['questions'] as $qi => $q)
-                @php $dkey = $q['rfq']->id.'|'.$q['supplier_key']; @endphp
+                @php $dkey = $q['rfq']->id.'|'.$q['supplier_key'].'|'.($q['group_id'] ?? 0); @endphp
                 <div wire:key="sq-{{ $it['key'] }}-{{ $qi }}" class="border-t border-border-subtle px-4 py-2 text-[12.5px] {{ $q['open'] ? '' : 'opacity-60' }}">
                     <div class="flex flex-wrap items-baseline gap-x-2">
                         <span class="font-medium text-fg-1">{{ $q['supplier'] }}</span>
@@ -51,7 +51,7 @@
                             <span class="text-[11px] text-fg-4">снабжение</span>
                         @endif
                         @if(! $q['open'])<span class="text-[11px] text-emerald-700">отвечено</span>@endif
-                        <button type="button" wire:click="openDialog({{ $q['rfq']->id }}, '{{ $q['supplier_key'] }}')" class="ml-auto btn btn-sm {{ $dialog === $dkey ? 'btn-primary' : '' }}">💬 {{ $q['open'] ? 'Переписка и ответ' : 'Переписка' }}</button>
+                        <button type="button" wire:click="openDialog({{ $q['rfq']->id }}, '{{ $q['supplier_key'] }}', {{ (int) ($q['group_id'] ?? 0) }})" class="ml-auto btn btn-sm {{ $dialog === $dkey ? 'btn-primary' : '' }}">💬 {{ $q['open'] ? 'Переписка и ответ' : 'Переписка' }}</button>
                         @if($q['open'])
                             <button type="button" wire:click="closeQuotePartsQuestions({{ $q['rfq']->id }}, {{ $q['group_id'] ?? 'null' }}, '{{ $q['supplier_key'] }}')"
                                     wire:confirm="Закрыть вопрос без ответа? Поставщику ничего не уйдёт, вопрос перейдёт в отвеченные{{ $q['group_id'] ? ' (у всех, кто спросил то же самое)' : '' }}."
@@ -62,7 +62,7 @@
                     @if($q['original'])<div class="text-[11.5px] text-fg-4">«{{ $q['original'] }}»</div>@endif
                     @if($dialog === $dkey)
                         <div class="mt-2">
-                            @include('livewire.quote-parts._rfq-card', ['rfq' => $q['rfq'], 'supplierNames' => app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames([$q['rfq']]), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $q['supplier_key']])
+                            @include('livewire.quote-parts._rfq-card', ['rfq' => $q['rfq'], 'supplierNames' => app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames([$q['rfq']]), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $q['supplier_key'], 'onlyGroup' => $q['group_id'] ?? null])
                         </div>
                     @endif
                 </div>

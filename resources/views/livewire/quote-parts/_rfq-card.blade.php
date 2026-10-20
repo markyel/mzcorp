@@ -16,7 +16,11 @@
         <a href="{{ rtrim(config('services.quoteparts.url'), '/') }}/rfqs/{{ $rfq->remote_id }}" target="_blank" rel="noopener" class="btn btn-xs">В QuoteParts ↗</a>
     </div>
     {{-- Вопросы поставщиков: одинаковые по смыслу собраны в группы; ответ — всем спросившим разом. --}}
-    @php $qGroups = collect($snap['question_groups'] ?? []); $openGroups = $qGroups->where('status', 'open'); @endphp
+    @php
+        // $onlyGroup — показать один вопрос (вкладка «Вопросы поставщиков»: ответ на тот, что нажали).
+        $qGroups = collect($snap['question_groups'] ?? [])->when(! empty($onlyGroup), fn ($c) => $c->where('id', (int) $onlyGroup))->values();
+        $openGroups = $qGroups->where('status', 'open');
+    @endphp
     @if($qGroups->isNotEmpty())
         <div class="px-3 py-2 border-b border-border-subtle space-y-2 {{ $openGroups->isNotEmpty() ? 'bg-amber-50/60' : '' }}">
             <div class="flex items-center gap-2 text-[12.5px]">

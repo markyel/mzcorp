@@ -31,15 +31,16 @@ class SupplierQuestions extends Component
     #[Url(as: 'qa', except: false)]
     public bool $withAnswered = false;
 
-    /** Открытая переписка: «{id запроса}|{ключ поставщика}». */
+    /** Открытая переписка: «{id запроса}|{ключ поставщика}|{группа вопроса или 0}» — под одним вопросом. */
     public ?string $dialog = null;
 
     /** @var list<int> раскрытые карточки позиций каталога */
     public array $openItems = [];
 
-    public function openDialog(int $rfqId, string $supplierKey, QuotePartsRfqService $rfqs): void
+    public function openDialog(int $rfqId, string $supplierKey, int $groupId, QuotePartsRfqService $rfqs): void
     {
-        $key = $rfqId.'|'.$supplierKey;
+        // Под тем вопросом, который нажали: у поставщика бывает несколько вопросов в одном запросе.
+        $key = $rfqId.'|'.$supplierKey.'|'.$groupId;
         $this->dialog = $this->dialog === $key ? null : $key;
         if ($this->dialog !== null) {
             try {
