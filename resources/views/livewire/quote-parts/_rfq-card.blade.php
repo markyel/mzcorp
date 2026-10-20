@@ -42,7 +42,7 @@
                     </div>
                     <ul class="mt-0.5 text-fg-2">
                         @foreach($g['questions'] ?? [] as $q)
-                            <li>{{ $supplierNames[$q['supplier']] ?? $q['supplier'] }}: {{ $q['text_ru'] ?: $q['text'] }}@if($q['text_ru'] && $q['text_ru'] !== $q['text']) <span class="text-fg-4">(«{{ $q['text'] }}»)</span>@endif</li>
+                            <li>{{ $supplierNames[$q['supplier']] ?? $q['supplier'] }}@if(! empty($q['at']))<span class="text-fg-4 text-[11.5px]"> · {{ \Illuminate\Support\Carbon::parse($q['at'])->timezone(config('app.timezone'))->format('d.m.Y H:i') }}</span>@endif: {{ $q['text_ru'] ?: $q['text'] }}@if($q['text_ru'] && $q['text_ru'] !== $q['text']) <span class="text-fg-4">(«{{ $q['text'] }}»)</span>@endif</li>
                         @endforeach
                     </ul>
                     @if($g['status'] === 'open' && $this->canAnswerQuoteParts())

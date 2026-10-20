@@ -38,9 +38,10 @@
     @endif
 
     {{-- 0. Уже отправленные запросы (кому + сколько позиций) --}}
-    @if($this->sentInquiries->isNotEmpty())
+    @php $qpSent = $this->quotePartsSent; @endphp
+    @if($this->sentInquiries->isNotEmpty() || $qpSent->isNotEmpty())
         <div class="ds-card">
-            <div class="ds-card-header"><h3>Запросы отправлены</h3><span class="text-[12px] text-fg-3 ml-2">{{ $this->sentInquiries->count() }} поставщ.</span></div>
+            <div class="ds-card-header"><h3>Запросы отправлены</h3><span class="text-[12px] text-fg-3 ml-2">{{ $this->sentInquiries->count() + $qpSent->count() }} поставщ.</span></div>
             <div class="ds-card-body overflow-x-auto">
                 <table class="w-full text-[12.5px]">
                     <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
@@ -62,6 +63,24 @@
                                 <td class="px-3 py-1.5"><span class="chip {{ $si->status === 'closed' ? 'chip-neutral' : 'chip-sky' }} text-[10.5px]">{{ $si->status === 'closed' ? 'закрыт' : 'открыт' }}</span></td>
                                 <td class="px-3 py-1.5 text-fg-3 whitespace-nowrap">{{ $si->createdBy?->name ?? '—' }}</td>
                                 <td class="px-3 py-1.5 text-fg-3 mono whitespace-nowrap">{{ $si->created_at?->format('d.m.Y H:i') }}</td>
+                            </tr>
+                        @endforeach
+                        {{-- Через QuoteParts: переписка и ответ — в блоке «QuoteParts» заявки. --}}
+                        @foreach($qpSent as $q)
+                            <tr wire:key="sent-qp-{{ $q['key'] }}" class="border-b border-border-subtle hover:bg-hover">
+                                <td class="px-3 py-1.5">
+                                    <span class="text-fg-1">{{ $q['supplier'] }}</span>
+                                    <span class="chip chip-info text-[10px] ml-1" title="Запрос через QuoteParts {{ $q['tag'] }} — переписка и ответ в блоке «QuoteParts» заявки">QuoteParts</span>
+                                </td>
+                                <td class="px-3 py-1.5 text-right mono text-fg-1 font-medium">{{ $q['items'] }}</td>
+                                <td class="px-3 py-1.5 text-right mono text-fg-2">{{ $q['letters'] }}</td>
+                                <td class="px-3 py-1.5">
+                                    @php $st = ['closed' => ['закрыт', 'chip-neutral'], 'answered' => ['ответил', 'chip-ok'], 'partial' => ['ответил частично', 'chip-warn']][$q['status']] ?? ['ждём ответа', 'chip-info']; @endphp
+                                    <span class="chip {{ $st[1] }} text-[10.5px]">{{ $st[0] }}</span>
+                                    @if($q['asked'])<span class="chip chip-warn text-[10.5px]" title="Поставщик задал вопрос — ждёт нашего ответа">вопрос к нам</span>@endif
+                                </td>
+                                <td class="px-3 py-1.5 text-fg-3 whitespace-nowrap">{{ $q['by'] ?? '—' }}</td>
+                                <td class="px-3 py-1.5 text-fg-3 mono whitespace-nowrap">{{ $q['at']?->timezone(config('app.timezone'))->format('d.m.Y H:i') }}</td>
                             </tr>
                         @endforeach
                     </tbody>

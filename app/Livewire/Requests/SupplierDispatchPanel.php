@@ -291,6 +291,32 @@ class SupplierDispatchPanel extends Component
      * @return \Illuminate\Support\Collection<int, \App\Models\SupplierInquiry>
      */
     #[Computed]
+    /**
+     * Поставщики, которым по заявке ушёл запрос через QuoteParts: строкой на поставщика, как
+     * запросы рассылки в «Запросы отправлены».
+     *
+     * @return \Illuminate\Support\Collection<int, array{key:string, rfq_id:int, tag:?string, supplier:string, items:int, letters:int, status:string, by:?string, at:mixed}>
+     */
+    #[Computed]
+    public function quotePartsSent(): \Illuminate\Support\Collection
+    {
+        $rfqs = \App\Models\QuotePartsRfq::query()->where('request_id', $this->requestId)->with('createdBy:id,name')->latest('id')->get();
+        $names = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames($rfqs);
+
+        return $rfqs->flatMap(fn ($rfq) => collect($rfq->snapshot['suppliers'] ?? [])->map(fn ($s) => [
+            'key' => $rfq->id.'-'.($s['external_id'] ?? ''),
+            'rfq_id' => $rfq->id,
+            'tag' => $rfq->tag,
+            'supplier' => (string) ($names[$s['external_id'] ?? ''] ?? ($s['external_id'] ?? '—')),
+            'items' => count($s['lines'] ?? []),
+            'letters' => count($s['letters'] ?? []) + count($s['thread'] ?? []),
+            'status' => ($rfq->snapshot['status'] ?? $rfq->status) === 'closed' ? 'closed' : (string) ($s['status'] ?? 'pending'),
+            'asked' => collect($s['lines'] ?? [])->contains('status', 'question'),
+            'by' => $rfq->createdBy?->name,
+            'at' => ! empty($s['sent_at']) ? \Illuminate\Support\Carbon::parse($s['sent_at']) : $rfq->created_at,
+        ]))->values();
+    }
+
     public function sentInquiries()
     {
         return \App\Models\SupplierInquiry::query()
