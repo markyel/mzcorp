@@ -257,6 +257,19 @@ class QuotePartsClient
      * @param  list<array{supplier:string, text:string}>  $answers
      * @return array<string, mixed> обновлённый снимок запроса
      */
+    /** Закрыть вопросы без ответа (поставщику ничего не уходит): группу или вопросы одного поставщика. */
+    public function closeQuestions(int $remoteId, ?int $groupId, ?string $supplier, ?string $authorName): array
+    {
+        $response = $this->http()->post('/api/v1/rfqs/'.$remoteId.'/questions/close', array_filter([
+            'group_id' => $groupId, 'supplier' => $supplier, 'author_name' => $authorName,
+        ], fn ($v) => $v !== null));
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts close questions: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
     /** @param  array{files?: list<array{name:string, mime:string, content:string}>, signature?: ?string}  $extra */
     public function answerQuestionGroup(int $remoteId, int $groupId, array $answers, ?string $memory, ?string $authorName, array $extra = []): array
     {

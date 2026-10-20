@@ -229,6 +229,23 @@ class QuotePartsRfqService
      * английский (перевод, поправленный менеджером) — англоязычным. В карточку позиции
      * QuoteParts запоминает английский вариант, если он есть.
      */
+    /**
+     * Закрыть вопросы без ответа: поставщику ничего не уходит, вопрос — в отвеченных, позиции снова
+     * ждут цен. Для вопросов, на которые отвечать нечего («зачем вы спрашиваете у нас Montanari?»).
+     *
+     * @return int закрыто вопросов
+     */
+    public function closeQuestions(QuotePartsRfq $rfq, ?int $groupId, ?string $supplierKey, User $by): int
+    {
+        if (! QuotePartsPilot::canAnswer($by)) {
+            throw new RuntimeException('Закрывать вопросы поставщиков могут снабжение, руководство и участники пилота.');
+        }
+        $snapshot = $this->client->closeQuestions($rfq->remote_id, $groupId, $supplierKey, $by->name);
+        $rfq->forceFill(['snapshot' => collect($snapshot)->except('closed')->all(), 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
+
+        return (int) ($snapshot['closed'] ?? 0);
+    }
+
     /** @param  list<\Illuminate\Http\UploadedFile>  $files */
     public function answerGroup(QuotePartsRfq $rfq, int $groupId, string $ru, ?string $en, User $by, array $files = [], bool $withSignature = true): QuotePartsRfq
     {

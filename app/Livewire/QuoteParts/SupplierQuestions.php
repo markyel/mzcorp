@@ -104,8 +104,8 @@ class SupplierQuestions extends Component
             // Вопросы, собранные в группы (одинаковые по смыслу): по позиции группы.
             foreach ((array) ($snap['question_groups'] ?? []) as $g) {
                 foreach ((array) ($g['questions'] ?? []) as $q) {
-                    $rows->push($this->row($rfq, (string) ($q['supplier'] ?? ''), $g['item_code'] ?? $lineCode((string) ($q['supplier'] ?? '')) ?? $soleCode,
-                        (string) ($q['text_ru'] ?: $q['text']), (string) $q['text'], $q['at'] ?? null, ($q['status'] ?? 'open') === 'open', $names));
+                    $rows->push(array_merge($this->row($rfq, (string) ($q['supplier'] ?? ''), $g['item_code'] ?? $lineCode((string) ($q['supplier'] ?? '')) ?? $soleCode,
+                        (string) ($q['text_ru'] ?: $q['text']), (string) $q['text'], $q['at'] ?? null, ($q['status'] ?? 'open') === 'open', $names), ['group_id' => (int) $g['id']]));
                 }
             }
             // Вопросы без группы (письмом до группировки).
@@ -150,6 +150,7 @@ class SupplierQuestions extends Component
             'original' => $original !== $text ? $original : null,
             'at' => $at ? Carbon::parse($at) : null,
             'open' => $open,
+            'group_id' => null,
         ];
     }
 

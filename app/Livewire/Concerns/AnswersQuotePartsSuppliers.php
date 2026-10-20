@@ -147,6 +147,22 @@ trait AnswersQuotePartsSuppliers
         $this->dispatch('toast', type: 'success', message: 'Ответ отправлен всем, кто спросил.');
     }
 
+    /** «Закрыть без ответа»: вопросы группы или одного поставщика — в отвеченные, поставщику ничего не уходит. */
+    public function closeQuotePartsQuestions(int $rfqId, ?int $groupId = null, ?string $supplierKey = null, ?QuotePartsRfqService $service = null): void
+    {
+        abort_unless($this->canAnswerQuoteParts(), 403);
+        $service ??= app(QuotePartsRfqService::class);
+        try {
+            $n = $service->closeQuestions($this->quotePartsRfqForAnswer($rfqId), $groupId, $groupId === null ? $supplierKey : null, auth()->user());
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
+
+            return;
+        }
+        $this->afterQuotePartsAnswer();
+        $this->dispatch('toast', type: 'success', message: $n > 0 ? 'Вопрос закрыт без ответа — поставщику ничего не отправлено.' : 'Открытых вопросов уже нет.');
+    }
+
     /** Сбросить кэш списка запросов компонента после ответа. */
     protected function afterQuotePartsAnswer(): void {}
 }

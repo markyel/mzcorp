@@ -64,6 +64,8 @@
                                 <span wire:loading wire:target="qpGroupFiles.{{ $rfq->id }}.{{ $g['id'] }}" class="text-[11px] text-fg-4">загружаем…</span>
                                 <button type="button" wire:click="answerQuotePartsGroup({{ $rfq->id }}, {{ $g['id'] }})" wire:loading.attr="disabled" wire:target="answerQuotePartsGroup"
                                         class="btn btn-sm btn-primary">Ответить всем ({{ $askers }})</button>
+                                <button type="button" wire:click="closeQuotePartsQuestions({{ $rfq->id }}, {{ $g['id'] }})" wire:confirm="Закрыть вопрос без ответа? Поставщикам ничего не уйдёт, вопрос перейдёт в отвеченные."
+                                        class="btn btn-sm" title="Ответ не нужен — закрыть вопрос, поставщику ничего не отправлять">Закрыть без ответа</button>
                                 <span class="text-[11px] text-fg-4">с вашей подписью и цитатой письма каждого поставщика</span>
                             </div>
                         </div>

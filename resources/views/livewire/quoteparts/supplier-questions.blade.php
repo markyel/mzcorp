@@ -52,6 +52,11 @@
                         @endif
                         @if(! $q['open'])<span class="text-[11px] text-emerald-700">отвечено</span>@endif
                         <button type="button" wire:click="openDialog({{ $q['rfq']->id }}, '{{ $q['supplier_key'] }}')" class="ml-auto btn btn-sm {{ $dialog === $dkey ? 'btn-primary' : '' }}">💬 {{ $q['open'] ? 'Переписка и ответ' : 'Переписка' }}</button>
+                        @if($q['open'])
+                            <button type="button" wire:click="closeQuotePartsQuestions({{ $q['rfq']->id }}, {{ $q['group_id'] ?? 'null' }}, '{{ $q['supplier_key'] }}')"
+                                    wire:confirm="Закрыть вопрос без ответа? Поставщику ничего не уйдёт, вопрос перейдёт в отвеченные{{ $q['group_id'] ? ' (у всех, кто спросил то же самое)' : '' }}."
+                                    class="btn btn-sm" title="Ответ не нужен — закрыть вопрос, поставщику ничего не отправлять">Закрыть без ответа</button>
+                        @endif
                     </div>
                     <div class="mt-0.5 text-fg-1 whitespace-pre-line">{{ $q['text'] }}</div>
                     @if($q['original'])<div class="text-[11.5px] text-fg-4">«{{ $q['original'] }}»</div>@endif
