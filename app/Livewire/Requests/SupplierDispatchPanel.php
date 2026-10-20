@@ -1151,18 +1151,26 @@ class SupplierDispatchPanel extends Component
     {
         $quantities = [];
         $drafts = [];
-        foreach (RequestItem::query()->whereIn('id', $itemIds)->get(['id', 'catalog_item_id', 'parsed_qty']) as $it) {
-            $raw = trim((string) ($this->editedQty[$it->id] ?? ''));
-            $q = $raw !== '' && preg_match('/\d+(?:[.,]\d+)?/', $raw, $m) ? (float) str_replace(',', '.', $m[0]) : (float) ($it->parsed_qty ?: 1);
-            $q = $q > 0 ? $q : 1.0;
+        $notes = [];
+        foreach (RequestItem::query()->whereIn('id', $itemIds)->get(['id', 'catalog_item_id', 'parsed_qty', 'parsed_length', 'parsed_length_unit']) as $it) {
+            // Кол-во — свободный текст, как в письме по старому алгоритму («21,710 mm»): поставщикам
+            // QuoteParts он уходит примечанием к позиции. Английское поле — первым (они иностранцы).
+            $typed = trim((string) ($this->editedQtyEn[$it->id] ?? '')) ?: trim((string) ($this->editedQty[$it->id] ?? ''));
+            $line = \App\Services\QuoteParts\QuotePartsRfqService::quantityAndNote(
+                $typed, (float) ($it->parsed_qty ?: 1), $it->parsed_length !== null ? (float) $it->parsed_length : null, $it->parsed_length_unit,
+            );
+            $key = $it->catalog_item_id === null ? 'd:'.$it->id : 'c:'.$it->catalog_item_id;
+            if ($line['note'] !== null) {
+                $notes[$key] = isset($notes[$key]) ? $notes[$key].'; '.$line['note'] : $line['note'];
+            }
             if ($it->catalog_item_id === null) {
-                $drafts[(int) $it->id] = $q;
+                $drafts[(int) $it->id] = $line['quantity'];
             } else {
-                $quantities[(int) $it->catalog_item_id] = ($quantities[(int) $it->catalog_item_id] ?? 0) + $q;
+                $quantities[(int) $it->catalog_item_id] = ($quantities[(int) $it->catalog_item_id] ?? 0) + $line['quantity'];
             }
         }
         try {
-            $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true, files: $files);
+            $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true, files: $files, notes: $notes);
         } catch (\Throwable $e) {
             return 'QuoteParts не принял запрос ('.mb_substr($e->getMessage(), 0, 200).') — этим поставщикам не отправлено.';
         }

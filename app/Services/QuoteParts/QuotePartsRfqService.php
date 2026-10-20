@@ -35,8 +35,10 @@ class QuotePartsRfqService
      *                                               M-артикула уходят предварительными позициями
      * @param  array<int, array{path:string, name:string, mime:string, size?:int, disk?:string}>  $files  вложения запроса
      *                                                                                                 (фото позиций, файлы) — в письмо и в кабинет поставщика
+     * @param  array<string, string>  $notes  примечание к позиции для поставщика («c:{catalog_item_id}» или
+     *                                        «d:{request_item_id}»): длина, количество текстом — в письме и форме
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = []): QuotePartsRfq
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = []): QuotePartsRfq
     {
         // routed — поставщики, принявшие приглашение, из обычной рассылки (QuotePartsRouting): у любого сотрудника.
         if ($routed ? ! QuotePartsRouting::enabled() : ! QuotePartsPilot::enabledFor($by)) {
@@ -64,12 +66,12 @@ class QuotePartsRfqService
                 throw new RuntimeException('Позиции не в работе в QuoteParts (на паузе или не переданы): '.$notReady->pluck('sku')->implode(', ').'.');
             }
             foreach ($catalog as $c) {
-                $items[] = ['code' => $c->sku, 'quantity' => max(0.001, (float) $quantities[$c->id]), 'note' => null];
+                $items[] = ['code' => $c->sku, 'quantity' => max(0.001, (float) $quantities[$c->id]), 'note' => self::note($notes['c:'.$c->id] ?? null)];
             }
         }
         if ($draftQuantities !== []) {
             foreach ($this->drafts->ensureDrafts(array_keys($draftQuantities)) as $requestItemId => $code) {
-                $items[] = ['code' => $code, 'quantity' => max(0.001, (float) $draftQuantities[$requestItemId]), 'note' => null];
+                $items[] = ['code' => $code, 'quantity' => max(0.001, (float) $draftQuantities[$requestItemId]), 'note' => self::note($notes['d:'.$requestItemId] ?? null)];
             }
         }
 
@@ -151,6 +153,48 @@ class QuotePartsRfqService
      * @param  iterable<QuotePartsRfq>  $rfqs
      * @return \Illuminate\Support\Collection<string, string>
      */
+    private static function note(?string $note): ?string
+    {
+        $note = trim((string) $note);
+
+        return $note === '' ? null : mb_substr($note, 0, 500);
+    }
+
+    /** Единицы длины из заявки — латиницей: примечание читает иностранный поставщик. */
+    private const LENGTH_UNITS = ['м' => 'm', 'мм' => 'mm', 'см' => 'cm', 'м.' => 'm', 'п.м' => 'm', 'пм' => 'm'];
+
+    /**
+     * Количество и примечание позиции для запроса QuoteParts. В рассылке поле «Кол-во» — свободный
+     * текст (в письмо по старому алгоритму он уходит как есть, например «21,710 mm»): число —
+     * количеством; иное — количество из заявки, а текст примечанием. Длина из заявки (мерная
+     * позиция: поручень, канат) уходит примечанием всегда, если менеджер её сам не вписал.
+     *
+     * @return array{quantity: float, note: ?string}
+     */
+    public static function quantityAndNote(?string $typed, float $parsedQty, ?float $length = null, ?string $lengthUnit = null): array
+    {
+        $typed = trim((string) $typed);
+        $quantity = $parsedQty > 0 ? $parsedQty : 1.0;
+        $note = null;
+
+        if ($typed !== '') {
+            if (preg_match('/^(\d+(?:[.,]\d+)?)\s*(шт\.?|pcs?\.?|units?|ед\.?)?$/iu', $typed, $m)) {
+                $q = (float) str_replace(',', '.', $m[1]);
+                $quantity = $q > 0 ? $q : $quantity;
+            } else {
+                $note = 'Qty: '.$typed;
+            }
+        }
+
+        if ($note === null && $length !== null && $length > 0) {
+            $unit = trim((string) $lengthUnit);
+            $unit = self::LENGTH_UNITS[mb_strtolower($unit)] ?? $unit;
+            $note = 'Length: '.rtrim(rtrim(number_format($length, 3, '.', ''), '0'), '.').($unit !== '' ? ' '.$unit : '');
+        }
+
+        return ['quantity' => $quantity, 'note' => $note];
+    }
+
     public function supplierNames(iterable $rfqs): \Illuminate\Support\Collection
     {
         $keys = collect($rfqs)->flatMap(fn ($r) => collect($r->snapshot['suppliers'] ?? [])->pluck('external_id'))->filter()->unique();
