@@ -8,6 +8,7 @@ use App\Jobs\Mail\DeliverToManagerInboxJob;
 use App\Jobs\Mail\RouteMailToManagerJob;
 use App\Models\Request as RequestModel;
 use App\Models\RequestAssignment;
+use App\Models\RequestDelegation;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
@@ -46,7 +47,7 @@ class ReassignService
         // assigned_user_id, и после dispatch'а доступа к старому ID уже нет.
         $oldAssigneeId = $request->assigned_user_id;
 
-        $assignment = DB::transaction(function () use ($request, $newAssignee, $reason, $by): RequestAssignment {
+        $assignment = DB::transaction(function () use ($request, $newAssignee, $reason, $by, $oldAssigneeId): RequestAssignment {
             $request->assigned_user_id = $newAssignee->id;
             // Статус НЕ откатываем: заявка в «КП отправлено» / «ждёт счёт» /
             // «счёт выставлен» при переподчинении остаётся на своей стадии
@@ -59,6 +60,11 @@ class ReassignService
             }
             $request->assigned_at = now();
             $request->save();
+
+            // Делегирование было от прежнего менеджера — при смене ответственного снимаем.
+            if ($oldAssigneeId !== $newAssignee->id) {
+                RequestDelegation::endForRequest($request->id);
+            }
 
             // Reason prefix:
             //  - $by !== null → manual_reassign (триггер UI РОПа/директора);

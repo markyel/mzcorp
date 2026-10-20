@@ -52,4 +52,15 @@ class RequestDelegation extends Model
     {
         return $query->whereNull('ended_at');
     }
+
+    /**
+     * Заявку переподчинили: делегация была на время отсутствия прежнего менеджера, у нового
+     * ответственного она не действует — закрываем (иначе «↺ acting» и доступ остаются).
+     *
+     * @return int сколько закрыто
+     */
+    public static function endForRequest(int $requestId): int
+    {
+        return static::query()->where('request_id', $requestId)->whereNull('ended_at')->update(['ended_at' => now()]);
+    }
 }

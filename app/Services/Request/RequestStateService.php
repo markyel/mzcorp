@@ -479,9 +479,15 @@ class RequestStateService
      */
     private function reassignDuringReanimate(Request $request, User $newAssignee, string $reason): void
     {
+        $changed = (int) $request->assigned_user_id !== (int) $newAssignee->id;
         $request->assigned_user_id = $newAssignee->id;
         $request->assigned_at = now();
         $request->save();
+
+        // Делегирование было от прежнего менеджера — при смене ответственного снимаем.
+        if ($changed) {
+            \App\Models\RequestDelegation::endForRequest($request->id);
+        }
 
         RequestAssignment::create([
             'request_id' => $request->id,
