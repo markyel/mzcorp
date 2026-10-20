@@ -72,8 +72,11 @@ class SupplierOfferParser
         }
 
         $text = trim((string) $reply->body_plain);
-        if ($text === '') {
-            $text = trim(strip_tags((string) $reply->body_html));
+        // Пустая или обрубленная текстовая часть («Hello?» при HTML с вопросом «How many meters
+        // you need?», запрос #7937) — текст из HTML, как во всём конвейере почты.
+        $cleaner = app(\App\Services\Mail\EmailTextCleanerService::class);
+        if (($text === '' || $cleaner->bodyPlainLooksBroken($text)) && trim((string) $reply->body_html) !== '') {
+            $text = trim($cleaner->htmlToText((string) $reply->body_html)) ?: $text;
         }
         // Разбираем ТОЛЬКО новый текст ответа поставщика — цитату нашего же
         // письма (и предыдущей переписки) срезаем. Иначе LLM цепляется за

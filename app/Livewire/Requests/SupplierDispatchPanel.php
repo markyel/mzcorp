@@ -360,19 +360,25 @@ class SupplierDispatchPanel extends Component
             ->get();
 
         $internal = app(\App\Services\Mail\InternalSenderDetector::class);
+        $cleaner = app(\App\Services\Mail\EmailTextCleanerService::class);
 
         return $messages
             ->groupBy(fn ($m) => $m->message_id ? mb_strtolower((string) $m->message_id) : 'id'.$m->id)
             ->map(fn ($copies) => $copies->sortByDesc(fn ($m) => $m->supplier_inquiry_id !== null ? 1 : 0)->first())
             ->sortByDesc(fn ($m) => $m->sent_at?->getTimestamp() ?? 0)
             ->values()
-            ->map(function ($m) use ($internal) {
+            ->map(function ($m) use ($internal, $cleaner) {
                 $ours = $m->direction === \App\Enums\MailDirection::Outbound || $internal->detect($m) !== null;
                 $to = (array) (($m->to_recipients ?? [])[0] ?? []);
                 $who = $ours
                     ? trim((string) (($to['name'] ?? '') ?: ($to['email'] ?? '')))
                     : trim((string) ($m->from_name ?: $m->from_email));
+                // Текстовая часть письма бывает обрубком («Hello?» вместо «How many meters you need?» —
+                // Jiefeng, запрос #7937): тогда текст из HTML, как в карточке запроса поставщику.
                 $body = trim((string) $m->body_plain);
+                if ($cleaner->bodyPlainLooksBroken($body) && trim((string) $m->body_html) !== '') {
+                    $body = trim($cleaner->htmlToText((string) $m->body_html)) ?: $body;
+                }
 
                 return [
                     'id' => (int) $m->id,

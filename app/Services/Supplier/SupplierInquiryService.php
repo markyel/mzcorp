@@ -581,6 +581,42 @@ class SupplierInquiryService
     }
 
     /**
+     * Наше исходящее — ответ в уже идущей переписке с поставщиком (менеджер ответил из
+     * почтового клиента: «Dear Kid, 22.47m» на вопрос «сколько метров?», запрос #7937):
+     * токен [RFQ-…] запроса в теме или In-Reply-To на письмо этого запроса — и получатель
+     * тот же поставщик. Не новый запрос цены (его регистрирует классификатор), а продолжение
+     * треда: без этого ответ не виден ни в запросе, ни в заявке.
+     */
+    public function matchOutboundReply(EmailMessage $message): ?SupplierInquiry
+    {
+        if ($message->direction !== MailDirection::Outbound) {
+            return null;
+        }
+        $recipients = collect((array) ($message->to_recipients ?? []))
+            ->map(fn ($r) => is_array($r) ? ($r['email'] ?? null) : $r)->filter()->map(fn ($e) => (string) $e)->values();
+        if ($recipients->isEmpty()) {
+            return null;
+        }
+        $toInquiry = fn (?SupplierInquiry $inquiry) => $inquiry !== null
+            && $recipients->contains(fn ($e) => $this->sameParty((string) $inquiry->supplier_email, $e)) ? $inquiry : null;
+
+        if (($token = $this->extractRfqToken($message->subject)) !== null
+            && ($inquiry = $toInquiry(SupplierInquiry::query()->where('rfq_token', $token)->first())) !== null) {
+            return $inquiry;
+        }
+
+        $parent = trim((string) $message->in_reply_to, '<> ');
+        if ($parent !== '') {
+            $inquiryId = EmailMessage::query()->whereIn('message_id', [$parent, '<'.$parent.'>'])->whereNotNull('supplier_inquiry_id')->value('supplier_inquiry_id');
+            if ($inquiryId !== null && ($inquiry = $toInquiry(SupplierInquiry::query()->find($inquiryId))) !== null) {
+                return $inquiry;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Запрос-владелец токена [RFQ-…] из темы, если письмо пришло НЕ от него
      * (переслали чужое письмо). Нужен, чтобы по заявке владельца найти тред
      * самого отправителя, а если его нет — завести новый уже с этой заявкой,

@@ -99,7 +99,17 @@ final class OutboundHandler implements InboundRoutingHandler
                     && $linkedRequest !== null
                     && filled($linkedRequest->client_email)
                     && mb_strtolower(trim((string) $toSupplier)) === mb_strtolower(trim((string) $linkedRequest->client_email));
-                if ($toSupplier !== null && ! $recipientIsClient) {
+                // Ответ в уже идущей переписке с поставщиком (токен [RFQ-…] или In-Reply-To
+                // на письмо запроса) — в тред этого запроса, классификатор «новый RFQ» не нужен.
+                $thread = $toSupplier !== null && ! $recipientIsClient ? $this->supplierInquiries->matchOutboundReply($message) : null;
+                if ($thread !== null) {
+                    $this->supplierInquiries->attachMessage($thread, $message);
+                    $isSupplierRfq = true;
+                    Log::info('MailRouter: outbound reply in a supplier thread', [
+                        'email_message_id' => $message->id,
+                        'supplier_inquiry_id' => $thread->id,
+                    ]);
+                } elseif ($toSupplier !== null && ! $recipientIsClient) {
                     $rfq = $this->supplierRfqClassifier->classify($message);
                     if ($rfq['is_rfq']) {
                         $inquiry = $this->supplierInquiries->createFromOutbound(
