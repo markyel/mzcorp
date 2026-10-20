@@ -286,12 +286,6 @@ class SupplierDispatchPanel extends Component
     /* ----------------------- Уже отправленные запросы --------------------- */
 
     /**
-     * Запросы расценки по этой заявке (кому уже отправлено + сколько позиций).
-     *
-     * @return \Illuminate\Support\Collection<int, \App\Models\SupplierInquiry>
-     */
-    #[Computed]
-    /**
      * Поставщики, которым по заявке ушёл запрос через QuoteParts: строкой на поставщика, как
      * запросы рассылки в «Запросы отправлены».
      *
@@ -317,6 +311,12 @@ class SupplierDispatchPanel extends Component
         ]))->values();
     }
 
+    /**
+     * Запросы расценки по этой заявке (кому уже отправлено + сколько позиций).
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\SupplierInquiry>
+     */
+    #[Computed]
     public function sentInquiries()
     {
         return \App\Models\SupplierInquiry::query()
