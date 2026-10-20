@@ -9,11 +9,15 @@ use Livewire\Component;
 use Throwable;
 
 /**
- * Вкладка «Выгрузки цен» в «Снабжении»: Excel с новыми ценами поставщиков под загрузку в 1С.
- * По умолчанию — с конца прошлой выгрузки до сейчас; период можно задать руками.
+ * Вкладка «Выгрузки цен» в «Снабжении» (и блок на вкладке «Актуализация цен» QuoteParts):
+ * Excel с новыми ценами поставщиков под загрузку в 1С. Два режима: «новое» — с конца прошлой
+ * выгрузки до сейчас (история выгрузок общая, цены не повторяются и не теряются), и за период.
  */
 class PriceExports extends Component
 {
+    /** Компактный блок (вкладка QuoteParts): кнопки и последние выгрузки. */
+    public bool $compact = false;
+
     public string $from = '';
 
     public string $to = '';
@@ -25,6 +29,22 @@ class PriceExports extends Component
         $last = PriceExport::query()->latest('to_at')->value('to_at');
         $this->from = ($last ? Carbon::parse($last) : now()->subDays(7)->startOfDay())->format('Y-m-d\TH:i');
         $this->to = now()->format('Y-m-d\TH:i');
+    }
+
+    /** Конец прошлой выгрузки — начало «нового» (первая выгрузка — за неделю). */
+    public function lastExportEnd(): Carbon
+    {
+        $last = PriceExport::query()->latest('to_at')->value('to_at');
+
+        return $last ? Carbon::parse($last) : now()->subDays(7)->startOfDay();
+    }
+
+    /** «Выгрузить новое»: всё, что пришло после прошлой выгрузки, до сейчас. */
+    public function exportNew(PriceExportService $service): void
+    {
+        $this->from = $this->lastExportEnd()->format('Y-m-d\TH:i');
+        $this->to = now()->format('Y-m-d\TH:i');
+        $this->export($service);
     }
 
     public function export(PriceExportService $service): void
@@ -52,7 +72,8 @@ class PriceExports extends Component
     public function render()
     {
         return view('livewire.procurement.price-exports', [
-            'exports' => PriceExport::query()->with('createdBy:id,name')->latest('id')->limit(50)->get(),
+            'exports' => PriceExport::query()->with('createdBy:id,name')->latest('id')->limit($this->compact ? 5 : 50)->get(),
+            'lastEnd' => $this->lastExportEnd(),
         ]);
     }
 }

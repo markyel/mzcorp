@@ -198,6 +198,17 @@
     @endif
 
     @if($tab === 'offers')
+        {{-- Выгрузка полученных предложений в 1С (та же, что «Снабжение» → «Выгрузки цен», история общая). --}}
+        <details class="ds-card" x-data="{ open: false }" x-on:toggle="open = $el.open">
+            <summary class="ds-card-header cursor-pointer select-none list-none">
+                <h3>Выгрузка в 1С</h3>
+                <span class="text-[12px] text-fg-3 ml-2">новое — с конца прошлой выгрузки, или за период · Excel по шаблону 1С</span>
+                <span class="ml-auto text-[12px] text-sky-700" x-text="open ? '▾ свернуть' : '▸ открыть'"></span>
+            </summary>
+            <div class="px-4 pb-3">
+                <livewire:procurement.price-exports :compact="true" />
+            </div>
+        </details>
         <livewire:quote-parts.price-offers :search="$search" />
     @endif
 
