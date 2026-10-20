@@ -35,5 +35,8 @@ class PriceExportDeviationNoteTest extends TestCase
     {
         $this->assertSame('действует: 30 days; «KM601 pulley: USD 52/pc, MOQ 10»', PriceExportService::mailComment('30 days', "KM601 pulley:\n USD 52/pc, MOQ 10"));
         $this->assertNull(PriceExportService::mailComment(null, ''));
+        // Срок из самого фрагмента письма не повторяем отдельной подписью.
+        $this->assertSame('«GAA26800KF1 оригинал 672 долл по шт, срок подготовки 3-5 дней»',
+            PriceExportService::mailComment('срок подготовки 3-5 дней', 'GAA26800KF1 оригинал 672 долл по шт, срок подготовки 3-5 дней'));
     }
 }

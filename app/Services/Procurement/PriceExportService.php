@@ -228,10 +228,13 @@ class PriceExportService
     public static function mailComment(?string $validUntil, ?string $quote): ?string
     {
         $parts = [];
-        if (trim((string) $validUntil) !== '') {
-            $parts[] = 'действует: '.trim((string) $validUntil);
-        }
         $quote = trim((string) preg_replace('/\s+/u', ' ', (string) $quote));
+        // Срок действия — только если его нет во фрагменте письма: разбор кладёт сюда и срок
+        // подготовки («срок подготовки 3-5 дней»), тогда подпись «действует» была бы неверной.
+        $valid = trim((string) $validUntil);
+        if ($valid !== '' && mb_stripos($quote, $valid) === false) {
+            $parts[] = 'действует: '.$valid;
+        }
         if ($quote !== '') {
             $parts[] = '«'.mb_substr($quote, 0, 300).'»';
         }
