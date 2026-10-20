@@ -38,8 +38,12 @@
         <button type="button" wire:click="setTab('pilot')" class="btn btn-sm {{ $tab === 'pilot' ? 'btn-primary' : '' }}">
             Пилот <span class="chip {{ $this->pilotSwitchedOn ? 'chip-ok' : 'chip-neutral' }} text-[10px] ml-1">{{ $this->pilotSwitchedOn ? 'вкл' : 'выкл' }}</span>
         </button>
-        <input type="search" wire:model.live.debounce.300ms="search" placeholder="Поиск: артикул / наименование / бренд"
-               class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+        {{-- Общий поиск раздела: на вкладках, где он что-то ищет (у «Групп товаров» — свой). --}}
+        @if(in_array($tab, ['candidates', 'pool', 'offers', 'questions'], true))
+            <input type="search" wire:model.live.debounce.300ms="search"
+                   placeholder="{{ in_array($tab, ['offers', 'questions'], true) ? 'Поиск: артикул, позиция, поставщик, заявка, QP-…' : 'Поиск: артикул / наименование / бренд' }}"
+                   class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+        @endif
     </div>
 
     @if($tab === 'candidates')
@@ -194,11 +198,11 @@
     @endif
 
     @if($tab === 'offers')
-        <livewire:quote-parts.price-offers />
+        <livewire:quote-parts.price-offers :search="$search" />
     @endif
 
     @if($tab === 'questions')
-        <livewire:quote-parts.supplier-questions />
+        <livewire:quote-parts.supplier-questions :search="$search" />
     @endif
 
     @if($tab === 'prices')

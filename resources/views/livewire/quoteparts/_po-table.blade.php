@@ -1,4 +1,5 @@
-{{-- Таблица предложений вкладки «Актуализация цен». Ожидает $rows, $showRequest (колонка «Заявка»), $showItem (колонки позиции).
+{{-- Таблица предложений вкладки «Актуализация цен». Ожидает $rows, $showRequest (колонка «Заявка»), $showItem (колонки позиции),
+     необязательно $declines — отказы поставщиков по позиции (строкой под предложениями).
      Лучшее предложение позиции выделено; у каждого — «Закупаем здесь», у отклонений — учитывать или нет, «Уточнить» — диалог с поставщиком. --}}
 @php
     $sources = ['form' => 'форма запроса', 'email' => 'письмо', 'cabinet' => 'кабинет', 'price_list' => 'прайс', 'api' => 'API'];
@@ -9,6 +10,7 @@
     $choices = $this->choices;
     $clarifications = $this->clarifications;
     $tzc = config('app.timezone');
+    $declines = $declines ?? collect();
 @endphp
 {{-- Ширины колонок фиксированы и одинаковы во всех блоках: таблицы стоят друг под другом и не «пляшут». --}}
 <div class="overflow-x-auto">
@@ -183,6 +185,48 @@
                     <tr wire:key="po-card-{{ $r['id'] }}" class="border-b border-border-subtle bg-surface-2">
                         <td colspan="{{ $cols }}" class="px-4 py-2.5">
                             @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'supplyHistoryOpen' => true])
+                        </td>
+                    </tr>
+                @endif
+            @endforeach
+            {{-- Отказы: поставщик ответил, что цены не даст, — с причиной; переписка по запросу. --}}
+            @foreach($declines as $d)
+                <tr wire:key="po-{{ $d['id'] }}" class="border-b border-border-subtle align-top" style="background:rgba(254,226,226,.35)">
+                    <td class="px-3 py-1.5 whitespace-nowrap text-fg-3">
+                        {{ $d['at']?->timezone($tzc)->format('d.m H:i') }}
+                        <div class="text-[11px] text-fg-4">отказ</div>
+                        <button type="button" wire:click="openDeclineDialog('{{ $d['id'] }}')" class="mt-0.5 text-[11px] {{ $declineDialog === $d['id'] ? 'text-fg-1 font-medium' : 'text-sky-700' }} hover:underline"
+                                title="Переписка с поставщиком по запросу {{ $d['rfq_tag'] }}">{{ $declineDialog === $d['id'] ? '▾' : '▸' }} переписка</button>
+                    </td>
+                    @if($showItem)
+                        <td class="px-3 py-1.5"><span class="mono">{{ $d['sku'] }}</span>@if($d['name'])<div class="text-[11.5px] text-fg-3 truncate" title="{{ $d['name'] }}">{{ $d['name'] }}</div>@endif</td>
+                    @endif
+                    <td class="px-3 py-1.5 break-words">
+                        <span class="font-medium text-fg-1">{{ $d['supplier'] }}</span>
+                        <span class="chip chip-danger text-[10px]">отказ</span>
+                    </td>
+                    <td colspan="{{ 3 + ($showItem ? 2 : 0) }}" class="px-3 py-1.5 text-[12px] text-fg-2 break-words">
+                        {{ $d['reason'] ? '«'.$d['reason'].'»' : 'цену не дал' }}
+                    </td>
+                    @if($showRequest)
+                        <td class="px-3 py-1.5 whitespace-nowrap">
+                            @if($d['request'])<a href="{{ route('requests.show', $d['request']->id) }}" class="mono text-sky-700 hover:underline">{{ $d['request']->internal_code }}</a>@else<span class="text-fg-4">—</span>@endif
+                            @if($d['rfq_tag'])<div class="mono text-[11px] text-fg-4">{{ $d['rfq_tag'] }}</div>@endif
+                        </td>
+                    @endif
+                    <td class="px-3 py-1.5">
+                        <button type="button" wire:click="openDeclineDialog('{{ $d['id'] }}')" class="btn btn-sm {{ $declineDialog === $d['id'] ? 'btn-primary' : '' }}" title="Переспросить или уточнить — ответ уйдёт в ветку запроса">💬 Написать</button>
+                    </td>
+                </tr>
+                @if($declineDialog === $d['id'])
+                    <tr wire:key="po-dialog-{{ $d['id'] }}" class="border-b border-border-subtle bg-surface-2">
+                        <td colspan="{{ $cols }}" class="px-4 py-3">
+                            @if($rfq = $this->declineRfq)
+                                <div class="text-[12px] text-fg-3 mb-1.5">Переписка с поставщиком по запросу <span class="mono">{{ $rfq->tag }}</span> — ответ уйдёт в его ветку письмом от MyZip.</div>
+                                @include('livewire.quote-parts._rfq-card', ['rfq' => $rfq, 'supplierNames' => app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames([$rfq]), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $d['key']])
+                            @else
+                                <div class="text-[12.5px] text-fg-3">Запрос не найден.</div>
+                            @endif
                         </td>
                     </tr>
                 @endif

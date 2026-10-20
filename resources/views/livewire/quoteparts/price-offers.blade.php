@@ -25,9 +25,7 @@
         <label class="inline-flex items-center gap-1.5 cursor-pointer text-fg-2" title="Предложения, заменённые новыми, и с истёкшим сроком действия">
             <input type="checkbox" wire:model.live="withStale" class="w-4 h-4 accent-sky-600"> и устаревшие
         </label>
-        <input type="search" wire:model.live.debounce.300ms="search" placeholder="Артикул, позиция, поставщик, заявка, QP-…"
-               class="h-[30px] w-full max-w-[320px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
-        <span class="text-fg-4">Предложений: {{ $rows->count() }}{{ $rows->count() >= 500 ? ' (последние 500)' : '' }}. ≈ ₽ — по курсу ЦБ. Позицию можно раскрыть — карточка каталога.</span>
+        <span class="text-fg-4">Предложений: {{ $rows->count() }}{{ $rows->count() >= 500 ? ' (последние 500)' : '' }}@if($this->declines->isNotEmpty()) · отказов: {{ $this->declines->count() }}@endif{{ trim($search) !== '' ? ' по «'.trim($search).'»' : '' }}. ≈ ₽ — по курсу ЦБ. Позицию можно раскрыть — карточка каталога.</span>
     </div>
 
     {{-- Готово к актуализации: цену дали больше половины спрошенных или есть предложение и прошло больше 2 рабочих дней. --}}
@@ -71,7 +69,7 @@
                     @endif
                     <span class="ml-auto text-[11.5px] text-fg-3">
                         @foreach($g['rfqs'] as $tag)<span class="mono">{{ $tag }}</span>@if(! $loop->last), @endif @endforeach
-                        · предложений {{ $g['rows']->count() }}
+                        · предложений {{ $g['rows']->count() }}@if($g['declines']->isNotEmpty()) · отказов {{ $g['declines']->count() }}@endif
                     </span>
                 </div>
                 @foreach($g['items'] as $it)

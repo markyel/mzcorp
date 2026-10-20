@@ -14,6 +14,7 @@ use App\Services\QuoteParts\QuotePartsRfqService;
 use Illuminate\Support\Collection;
 use App\Services\QuoteParts\OfferClarifications;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Reactive;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -48,8 +49,12 @@ class PriceOffers extends Component
     #[Url(as: 'pa', except: false)]
     public bool $withStale = false;
 
-    #[Url(as: 'pq', except: '')]
+    /** Поиск — общая строка раздела QuoteParts (Index). */
+    #[Reactive]
     public string $search = '';
+
+    /** Открытая переписка по отказу: id строки отказа (declines). */
+    public ?string $declineDialog = null;
 
     /** @var list<int> раскрытые карточки позиций каталога */
     public array $openItems = [];
@@ -107,6 +112,100 @@ class PriceOffers extends Component
         }
     }
 
+    /** Переписка с поставщиком по запросу, на который он ответил отказом. */
+    public function openDeclineDialog(string $id, QuotePartsRfqService $rfqs): void
+    {
+        $this->declineDialog = $this->declineDialog === $id ? null : $id;
+        if ($this->declineDialog !== null && ($rfq = $this->declineRfq) !== null) {
+            try {
+                $rfqs->refresh($rfq);
+            } catch (Throwable) {
+                // Покажем последний снимок.
+            }
+            unset($this->declineRfq);
+        }
+    }
+
+    #[Computed]
+    public function declineRfq(): ?QuotePartsRfq
+    {
+        $row = $this->declineDialog ? $this->allDeclines->firstWhere('id', $this->declineDialog) : null;
+
+        return $row ? QuotePartsRfq::query()->where('remote_id', $row['rfq_remote_id'])->first() : null;
+    }
+
+    /**
+     * Отказы поставщиков по позициям запросов QuoteParts за окно запросов (из снимков запросов):
+     * в mzCorp их нет среди предложений, а снабжению важно видеть, кто уже отказал и почему.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    #[Computed]
+    public function allDeclines(): Collection
+    {
+        $rfqs = QuotePartsRfq::query()->with('request:id,internal_code,client_name,subject,assigned_user_id', 'request.assignedUser:id,name')
+            ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))->get();
+        $names = app(QuotePartsRfqService::class)->supplierNames($rfqs);
+
+        $rows = collect();
+        foreach ($rfqs as $rfq) {
+            foreach ((array) ($rfq->snapshot['suppliers'] ?? []) as $s) {
+                $key = (string) ($s['external_id'] ?? '');
+                $at = $s['answered_at'] ?? $s['last_reply_at'] ?? $s['sent_at'] ?? null;
+                foreach ((array) ($s['lines'] ?? []) as $line) {
+                    if (($line['status'] ?? '') !== 'declined' || empty($line['code'])) {
+                        continue;
+                    }
+                    $rows->push([
+                        'id' => 'd'.$rfq->remote_id.'-'.$key.'-'.$line['code'],
+                        'decline' => true,
+                        'at' => $at ? \Illuminate\Support\Carbon::parse($at) : $rfq->synced_at,
+                        'request_id' => $rfq->request_id,
+                        'request' => $rfq->request,
+                        'rfq_tag' => $rfq->tag,
+                        'rfq_remote_id' => $rfq->remote_id,
+                        'sku' => (string) $line['code'],
+                        'line_name' => $line['name'] ?? null,
+                        'supplier' => (string) ($names[$key] ?? $key),
+                        'key' => $key,
+                        'reason' => $line['decline_reason'] ?? null,
+                    ]);
+                }
+            }
+        }
+
+        $catalog = CatalogItem::query()->whereIn('sku', $rows->pluck('sku')->unique())
+            ->get(['id', 'sku', 'name', 'price', 'purchase_price', 'is_price_actual'])->keyBy('sku');
+        $rows = $rows->map(function ($r) use ($catalog) {
+            $ci = $catalog->get($r['sku']);
+
+            return $r + [
+                'cid' => $ci?->id,
+                'name' => $ci?->name ?? $r['line_name'],
+                'purchase' => $ci?->purchase_price !== null ? (float) $ci->purchase_price : null,
+                'sale' => $ci?->price !== null ? (float) $ci->price : null,
+                'actual' => (bool) ($ci?->is_price_actual ?? false),
+            ];
+        });
+
+        if (($term = trim($this->search)) !== '') {
+            $rows = $rows->filter(fn ($r) => mb_stripos(implode(' ', [
+                $r['sku'], $r['name'], $r['supplier'], $r['rfq_tag'], $r['request']?->internal_code, $r['reason'],
+            ]), $term) !== false);
+        }
+
+        return $rows->sortByDesc(fn ($r) => $r['at']?->getTimestamp() ?? 0)->values();
+    }
+
+    /** Отказы за выбранный период. */
+    #[Computed]
+    public function declines(): Collection
+    {
+        $since = now()->subDays(in_array($this->days, self::DAYS, true) ? $this->days : 7);
+
+        return $this->allDeclines->filter(fn ($r) => $r['at'] && $r['at']->gte($since))->values();
+    }
+
     #[Computed]
     public function dialogOffer(): ?QuotePartsOffer
     {
@@ -142,7 +241,7 @@ class PriceOffers extends Component
         } catch (Throwable $e) {
             $this->dispatch('toast', type: 'error', message: 'QuoteParts не ответил: '.mb_substr($e->getMessage(), 0, 200));
         }
-        unset($this->dialogRfq);
+        unset($this->dialogRfq, $this->declineRfq);
     }
 
     protected function quotePartsRfqForAnswer(int $id): QuotePartsRfq
@@ -306,7 +405,9 @@ class PriceOffers extends Component
         // Пока по позиции ждём ответа на уточнение — решение отложено, она не «готова».
         $waiting = collect($this->clarifications)->where('state', OfferClarifications::WAITING)->keys()->all();
 
-        return $this->itemsFrom($this->readyRows)
+        $skus = $this->readyRows->pluck('sku')->filter()->unique()->all();
+
+        return $this->itemsFrom($this->readyRows, $this->allDeclines->whereIn('sku', $skus))
             ->reject(fn ($it) => $it['offers']->contains(fn ($r) => in_array($r['id'], $waiting, true)))
             ->values();
     }
@@ -337,20 +438,31 @@ class PriceOffers extends Component
         $ready = $this->readyItems->pluck('sku')->all();
         $rows = $this->rows->merge($this->readyRows->reject(fn ($r) => in_array($r['sku'], $ready, true)))->unique('id');
 
-        return $this->itemsFrom($rows->reject(fn ($r) => in_array($r['sku'], $ready, true)))->values();
+        return $this->itemsFrom($rows->reject(fn ($r) => in_array($r['sku'], $ready, true)), $this->declines->reject(fn ($r) => in_array($r['sku'], $ready, true)))->values();
     }
 
     /**
+     * Позиции из предложений и отказов: позиция, где поставщики только отказали, тоже в списке.
+     *
      * @param  Collection<int, array<string, mixed>>  $rows
+     * @param  Collection<int, array<string, mixed>>|null  $declines
      * @return Collection<int, array<string, mixed>>
      */
-    private function itemsFrom(Collection $rows): Collection
+    private function itemsFrom(Collection $rows, ?Collection $declines = null): Collection
     {
         $checker = app(PriceRefreshReadiness::class);
+        $declinesBySku = ($declines ?? collect())->groupBy('sku');
+        $bySku = $rows->groupBy(fn ($r) => $r['sku'] ?: 'offer-'.$r['id']);
+        foreach ($declinesBySku->keys() as $sku) {
+            if (! $bySku->has($sku)) {
+                $bySku->put($sku, collect());
+            }
+        }
 
-        return $rows->groupBy(fn ($r) => $r['sku'] ?: 'offer-'.$r['id'])
-            ->map(function (Collection $offers, string $sku) use ($checker) {
-                $first = $offers->first();
+        return $bySku
+            ->map(function (Collection $offers, string $sku) use ($checker, $declinesBySku) {
+                $itemDeclines = $declinesBySku->get($sku, collect())->values();
+                $first = $offers->first() ?? $itemDeclines->first();
                 $st = $this->readiness[$sku] ?? null;
                 $sorted = $offers->sortBy(fn ($r) => $r['rub'] ?? PHP_FLOAT_MAX)->values();
 
@@ -362,6 +474,7 @@ class PriceOffers extends Component
                     'sale' => $first['sale'],
                     'actual' => $first['actual'],
                     'offers' => $sorted,
+                    'declines' => $itemDeclines,
                     'best' => $sorted->first(fn ($r) => $r['rub'] !== null && ! $r['stale'] && $r['counts']),
                     'asked' => $st ? count($st['asked']) : null,
                     'offered' => $st ? count($st['offered']) : null,
@@ -369,7 +482,7 @@ class PriceOffers extends Component
                     'requested_at' => $st['requested_at'] ?? null,
                     'wait_until' => $st ? $checker->waitUntil($st['requested_at']) : null,
                     'rfqs' => $st['rfqs'] ?? [],
-                    'at' => $offers->max('at'),
+                    'at' => $offers->merge($itemDeclines)->max('at'),
                 ];
             })
             ->sortByDesc(fn ($i) => $i['at']?->getTimestamp() ?? 0);
@@ -385,17 +498,26 @@ class PriceOffers extends Component
     public function groups(): Collection
     {
         $ready = $this->readyItems->pluck('sku')->all();
+        $groupKey = fn ($r) => $r['request_id'] ? 'r'.$r['request_id'] : 'none';
+        $offers = $this->rows->reject(fn ($r) => in_array($r['sku'], $ready, true))->groupBy($groupKey);
+        $declines = $this->declines->reject(fn ($r) => in_array($r['sku'], $ready, true))->groupBy($groupKey);
 
-        return $this->rows->reject(fn ($r) => in_array($r['sku'], $ready, true))
-            ->groupBy(fn ($r) => $r['request_id'] ? 'r'.$r['request_id'] : 'none')
-            ->map(fn (Collection $rows, string $key) => [
-                'key' => $key,
-                'request' => $rows->first()['request'],
-                'rfqs' => $rows->pluck('rfq_tag')->filter()->unique()->values()->all(),
-                'rows' => $rows,
-                'items' => $this->itemsFrom($rows)->values(),
-                'at' => $rows->max('at'),
-            ])
+        return $offers->keys()->merge($declines->keys())->unique()->values()
+            ->map(function (string $key) use ($offers, $declines) {
+                $rows = $offers->get($key, collect());
+                $refused = $declines->get($key, collect());
+                $all = $rows->merge($refused);
+
+                return [
+                    'key' => $key,
+                    'request' => $all->first()['request'],
+                    'rfqs' => $all->pluck('rfq_tag')->filter()->unique()->values()->all(),
+                    'rows' => $rows,
+                    'declines' => $refused,
+                    'items' => $this->itemsFrom($rows, $refused)->values(),
+                    'at' => $all->max('at'),
+                ];
+            })
             ->sortBy(fn ($g) => [$g['key'] === 'none' ? 1 : 0, -($g['at']?->getTimestamp() ?? 0)])
             ->values();
     }

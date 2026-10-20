@@ -9,6 +9,7 @@ use App\Services\QuoteParts\QuotePartsRfqService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Reactive;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -30,6 +31,10 @@ class SupplierQuestions extends Component
     /** Показывать и отвеченные (за ANSWERED_DAYS дней). */
     #[Url(as: 'qa', except: false)]
     public bool $withAnswered = false;
+
+    /** Поиск — общая строка раздела QuoteParts (Index). */
+    #[Reactive]
+    public string $search = '';
 
     /** Открытая переписка: «{id запроса}|{ключ поставщика}|{группа вопроса или 0}» — под одним вопросом. */
     public ?string $dialog = null;
@@ -124,6 +129,13 @@ class SupplierQuestions extends Component
         $rows = $rows->when(! $this->withAnswered, fn ($c) => $c->where('open', true))
             ->filter(fn ($r) => $r['open'] || ($r['at'] && $r['at']->gte(now()->subDays(self::ANSWERED_DAYS))));
         $catalog = CatalogItem::query()->whereIn('sku', $rows->pluck('code')->filter()->unique())->get(['id', 'sku', 'name'])->keyBy('sku');
+
+        // Поиск раздела: артикул, наименование, поставщик, запрос QP-…, заявка, текст вопроса.
+        if (($term = trim($this->search)) !== '') {
+            $rows = $rows->filter(fn ($r) => mb_stripos(implode(' ', [
+                $r['code'], $catalog->get((string) $r['code'])?->name, $r['supplier'], $r['rfq']->tag, $r['rfq']->request?->internal_code, $r['text'], $r['original'],
+            ]), $term) !== false);
+        }
 
         return $rows->groupBy(fn ($r) => $r['code'] ?: 'rfq-'.$r['rfq']->id)
             ->map(fn (Collection $qs, string $key) => [

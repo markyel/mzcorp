@@ -45,5 +45,5 @@
             @include('livewire.catalog._catalog-item-detail', ['cat' => $card['cat'], 'pc' => $card['pc'], 'iqp' => null, 'canIqot' => false, 'allowIqotAnalyze' => false, 'supplyHistoryOpen' => true])
         </div>
     @endif
-    @include('livewire.quoteparts._po-table', ['rows' => $it['offers'], 'showRequest' => true, 'showItem' => false])
+    @include('livewire.quoteparts._po-table', ['rows' => $it['offers'], 'declines' => $it['declines'] ?? collect(), 'showRequest' => true, 'showItem' => false])
 </div>
