@@ -201,4 +201,33 @@ class CatalogItem extends Model
 
         return false;
     }
+
+    /** Папка схем форм-факторов в public: файл назван кодом форм-фактора («17-3.png», «Handrail.png»). */
+    public const FORM_FACTOR_IMAGES = 'images/form-factors';
+
+    /** @var array<string, string>|null код => имя файла */
+    private static ?array $formFactorFiles = null;
+
+    /**
+     * Схема форм-фактора (габариты A, B, C… как в размерах позиции) — адрес картинки, или null,
+     * если для кода схемы нет (тогда показываем сам код).
+     */
+    public static function formFactorImage(?string $code): ?string
+    {
+        $code = trim((string) $code);
+        if ($code === '') {
+            return null;
+        }
+        if (self::$formFactorFiles === null) {
+            self::$formFactorFiles = [];
+            foreach (glob(public_path(self::FORM_FACTOR_IMAGES.'/*')) ?: [] as $file) {
+                if (in_array(strtolower(pathinfo($file, PATHINFO_EXTENSION)), ['png', 'jpg', 'jpeg', 'webp'], true)) {
+                    self::$formFactorFiles[mb_strtolower(pathinfo($file, PATHINFO_FILENAME))] = basename($file);
+                }
+            }
+        }
+        $file = self::$formFactorFiles[mb_strtolower($code)] ?? null;
+
+        return $file !== null ? asset(self::FORM_FACTOR_IMAGES.'/'.$file) : null;
+    }
 }

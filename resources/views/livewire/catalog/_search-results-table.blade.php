@@ -193,7 +193,7 @@
                             <span class="inline-flex items-center h-5 px-1.5 rounded bg-sky-50 text-sky-700 text-[10.5px] font-medium whitespace-nowrap overflow-hidden text-ellipsis" style="max-width: 280px;">{{ $cat->part_type }}</span>
                         @endif
                         @if($cat->form_factor)
-                            <span class="inline-flex items-center h-5 px-1.5 rounded bg-surface-2 text-fg-2 text-[10.5px] font-medium border border-border-subtle">{{ $cat->form_factor }}</span>
+                            @include('partials.form-factor', ['ffCode' => $cat->form_factor, 'ffSize' => 36, 'ffChipClass' => 'inline-flex items-center h-5 px-1.5 rounded bg-surface-2 text-fg-2 text-[10.5px] font-medium border border-border-subtle'])
                         @endif
                         @if($dimSummary)
                             <span class="inline-flex items-center h-5 px-1.5 rounded mono"

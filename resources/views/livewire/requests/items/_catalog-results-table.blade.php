@@ -147,7 +147,7 @@
                                 <span class="inline-flex items-center px-1.5 rounded-sm bg-surface-2 text-fg-2">{{ $cat->part_type }}</span>
                             @endif
                             @if($cat->form_factor)
-                                <span class="inline-flex items-center px-1.5 rounded-sm bg-surface-2 text-fg-2">{{ $cat->form_factor }}</span>
+                                @include('partials.form-factor', ['ffCode' => $cat->form_factor, 'ffSize' => 32])
                             @endif
                             @if(! empty($catDims))
                                 <span class="inline-flex items-center px-1.5 rounded-sm bg-amber-50 text-amber-800 mono"

@@ -249,7 +249,12 @@
                     ['Узел', $cat->unit_name ? e($cat->unit_name) : '<span class="text-fg-3 italic">—</span>'],
                     ['Размещение', $cat->placement ? e($cat->placement) : '<span class="text-fg-3 italic">—</span>'],
                     ['Тип', $cat->part_type ? e($cat->part_type) : '<span class="text-fg-3 italic">—</span>'],
-                    ['Форм-фактор', $cat->form_factor ? '<span class="mono">' . e($cat->form_factor) . '</span>' : '<span class="text-fg-3 italic">—</span>'],
+                    // Схема габаритов (A, B, C — как размеры ниже) и код; схемы нет — только код.
+                    ['Форм-фактор', $cat->form_factor
+                        ? (\App\Models\CatalogItem::formFactorImage($cat->form_factor)
+                            ? '<span class="inline-flex items-end gap-2">' . view('partials.form-factor', ['ffCode' => $cat->form_factor, 'ffSize' => 110])->render() . '<span class="mono text-fg-3 text-[11px]">' . e($cat->form_factor) . '</span></span>'
+                            : '<span class="mono">' . e($cat->form_factor) . '</span>')
+                        : '<span class="text-fg-3 italic">—</span>'],
                     ['Активна', $cat->is_active
                         ? '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium text-[11.5px]">да</span>'
                         : '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 text-fg-3 font-medium text-[11.5px]">нет (архив)</span>'],
