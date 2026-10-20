@@ -5,6 +5,8 @@ namespace App\Livewire\Procurement;
 use App\Models\PriceExport;
 use App\Services\Procurement\PriceExportService;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Livewire\Component;
 use Throwable;
 
@@ -40,14 +42,16 @@ class PriceExports extends Component
     }
 
     /** «Выгрузить новое»: всё, что пришло после прошлой выгрузки, до сейчас. */
-    public function exportNew(PriceExportService $service): void
+    public function exportNew(PriceExportService $service): ?StreamedResponse
     {
         $this->from = $this->lastExportEnd()->format('Y-m-d\TH:i');
         $this->to = now()->format('Y-m-d\TH:i');
-        $this->export($service);
+
+        return $this->export($service);
     }
 
-    public function export(PriceExportService $service): void
+    /** Сформировать и сразу скачать файл (он остаётся и в списке выгрузок). */
+    public function export(PriceExportService $service): ?StreamedResponse
     {
         $this->validate([
             'from' => ['required', 'date'],
@@ -61,12 +65,14 @@ class PriceExports extends Component
             report($e);
             $this->error = 'Не удалось сформировать выгрузку: '.mb_substr($e->getMessage(), 0, 300);
 
-            return;
+            return null;
         }
 
         $this->from = $export->to_at->format('Y-m-d\TH:i');
         $this->to = now()->format('Y-m-d\TH:i');
         $this->dispatch('toast', type: 'success', message: 'Выгрузка готова: '.$export->rows_count.' артикулов, '.$export->suppliers_count.' поставщиков.');
+
+        return Storage::disk(config('procurement.price_export.disk', 'local'))->download($export->file_path, basename($export->file_path));
     }
 
     public function render()
