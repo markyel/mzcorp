@@ -608,7 +608,10 @@ class SupplierInquiryService
         $parent = trim((string) $message->in_reply_to, '<> ');
         if ($parent !== '') {
             $inquiryId = EmailMessage::query()->whereIn('message_id', [$parent, '<'.$parent.'>'])->whereNotNull('supplier_inquiry_id')->value('supplier_inquiry_id');
-            if ($inquiryId !== null && ($inquiry = $toInquiry(SupplierInquiry::query()->find($inquiryId))) !== null) {
+            // Без токена — только в запрос цены и только если это его тема: в ветку уже попадали
+            // заказы и отгрузки («Re: Order EVE…», inquiry 7400), за ними наши ответы не тянем.
+            $inquiry = $inquiryId !== null ? $toInquiry(SupplierInquiry::query()->find($inquiryId)) : null;
+            if ($inquiry !== null && self::isPriceRequest($inquiry) && self::looksLikeReplyTo($inquiry, $message)) {
                 return $inquiry;
             }
         }
