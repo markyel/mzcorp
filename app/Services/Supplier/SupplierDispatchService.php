@@ -138,11 +138,13 @@ class SupplierDispatchService
                     ? 'Price request — [' . $request->internal_code . ']' . $onecSuffix
                     : 'Запрос расценки — [' . $request->internal_code . ']' . $onecSuffix)
                     . $rfqMarker;
+                // Примечание — на языке письма (English-поставщику переводим, как названия позиций).
+                $langNote = app(SupplierNoteTranslator::class)->forLanguage($note, $lang);
                 $bodyHtml = view('emails.supplier-rfq', [
                     'request' => $request,
                     'supplier' => $supplier,
                     'rows' => $rows,
-                    'note' => trim((string) $note),
+                    'note' => $langNote,
                     'greeting' => $personalGreeting,
                     'lang' => $lang,
                     'intro' => $intro,
@@ -153,7 +155,7 @@ class SupplierDispatchService
                     'to_recipients' => [['email' => $supplier->email, 'name' => $supplier->name ?: '']],
                     'subject' => $subject,
                     'body_html' => $bodyHtml,
-                    'body_plain' => $this->plainBody($request, $rows, (string) $note, $personalGreeting, $lang, $intro, $closing),
+                    'body_plain' => $this->plainBody($request, $rows, $langNote, $personalGreeting, $lang, $intro, $closing),
                 ]);
 
                 // Вложения: файлы заявки + загруженные с диска — до отправки,

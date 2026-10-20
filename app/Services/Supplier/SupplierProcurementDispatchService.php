@@ -113,15 +113,17 @@ class SupplierProcurementDispatchService
                 $subject = ($lang === 'en' ? 'Price request' : 'Запрос расценки')
                     . ' ' . $this->inquiries->rfqMarker($rfqToken);
 
+                // Примечание — на языке письма (English-поставщику переводим, как названия позиций).
+                $langNote = app(SupplierNoteTranslator::class)->forLanguage($note, $lang);
                 $html = view('emails.supplier-rfq-catalog', [
                     'rows' => $rows,
-                    'note' => trim((string) $note),
+                    'note' => $langNote,
                     'greeting' => $personalGreeting,
                     'intro' => $intro,
                     'closing' => $closing,
                     'lang' => $lang,
                 ])->render();
-                $plain = $this->plainBody($personalGreeting, $rows, (string) $note, $lang, $intro, $closing);
+                $plain = $this->plainBody($personalGreeting, $rows, $langNote, $lang, $intro, $closing);
 
                 $draft = $this->createDraft($mailbox, $by, $supplier, $subject, $html, $plain);
 

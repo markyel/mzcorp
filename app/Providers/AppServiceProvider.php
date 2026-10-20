@@ -15,7 +15,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Перевод примечания к запросу поставщикам — один на рассылку (запрос / job), не на каждого поставщика.
+        $this->app->scoped(\App\Services\Supplier\SupplierNoteTranslator::class);
     }
 
     /**
