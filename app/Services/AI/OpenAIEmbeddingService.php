@@ -74,24 +74,46 @@ class OpenAIEmbeddingService
 
         $url = rtrim((string) $baseUrl, '/') . '/v1/embeddings';
 
-        $response = Http::withHeaders($headers)
-            ->timeout(60)
-            ->connectTimeout(15)
-            ->retry(3, function (int $attempt, $exception) {
-                // Уважаем Retry-After / x-ratelimit-reset (кап 8с), иначе
-                // экспоненциальный бэкофф от 1с. Раньше фикс 500мс игнорировал
-                // подсказку сервера → оба ретрая падали на том же 429.
-                return OpenAIRetry::backoffMs($attempt, $exception, 1000, 8000);
-            }, function ($exception) {
-                if ($exception instanceof \Illuminate\Http\Client\RequestException) {
-                    $status = $exception->response?->status();
+        $response = null;
+        $connectError = null;
+        try {
+            $response = Http::withHeaders($headers)
+                ->timeout(60)
+                ->connectTimeout(15)
+                ->retry(3, function (int $attempt, $exception) {
+                    // Уважаем Retry-After / x-ratelimit-reset (кап 8с), иначе
+                    // экспоненциальный бэкофф от 1с. Раньше фикс 500мс игнорировал
+                    // подсказку сервера → оба ретрая падали на том же 429.
+                    return OpenAIRetry::backoffMs($attempt, $exception, 1000, 8000);
+                }, function ($exception) {
+                    if ($exception instanceof \Illuminate\Http\Client\RequestException) {
+                        $status = $exception->response?->status();
+                            // Нет денег на счёте — повтором не лечится: сразу резерв (или ошибка).
+                            if ($status === 429 && str_contains((string) $exception->response?->body(), 'insufficient_quota')) {
+                                return false;
+                            }
 
-                    return in_array($status, [429, 500, 502, 503], true);
-                }
+                        return in_array($status, [429, 500, 502, 503], true);
+                    }
 
-                return false;
-            }, throw: false)
-            ->post($url, $payload);
+                    return false;
+                }, throw: false)
+                ->post($url, $payload);
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $connectError = $e;
+        }
+
+        // Резервный шлюз — только если там та же модель эмбеддингов (векторы другой модели
+        // несовместимы с уже сохранёнными в pgvector): включается OPENAI_FALLBACK_EMBEDDINGS.
+        $fallback = app(OpenAIFallbackGateway::class);
+        if (($response === null || ! $response->successful()) && $fallback->enabled() && config('services.openai.fallback.embeddings')
+            && OpenAIFallbackGateway::shouldFallback($response, $connectError)) {
+            $why = $response !== null ? $response->status().' '.mb_substr($response->body(), 0, 200) : (string) $connectError?->getMessage();
+            $response = $fallback->post('/v1/embeddings', $payload, $why, 60);
+        }
+        if ($response === null) {
+            throw new RuntimeException('OpenAI embeddings API failed: '.$connectError?->getMessage());
+        }
 
         if (! $response->successful()) {
             Log::error('OpenAIEmbeddingService: HTTP error', [

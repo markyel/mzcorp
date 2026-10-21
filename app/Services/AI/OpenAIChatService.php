@@ -51,23 +51,44 @@ class OpenAIChatService
         ], $options);
 
         try {
-            $response = Http::withHeaders($headers)
-                ->timeout(120)
-                ->retry(3, function (int $attempt, $exception) {
-                    // Уважаем Retry-After / x-ratelimit-reset (кап 10с), иначе
-                    // экспоненциальный бэкофф от 2с. Раньше фикс 2с игнорировал
-                    // подсказку сервера и жёг попытки на 429.
-                    return OpenAIRetry::backoffMs($attempt, $exception, 2000, 10000);
-                }, function ($exception) {
-                    if ($exception instanceof \Illuminate\Http\Client\RequestException) {
-                        $status = $exception->response?->status();
+            $response = null;
+            $connectError = null;
+            try {
+                $response = Http::withHeaders($headers)
+                    ->timeout(120)
+                    ->retry(3, function (int $attempt, $exception) {
+                        // Уважаем Retry-After / x-ratelimit-reset (кап 10с), иначе
+                        // экспоненциальный бэкофф от 2с. Раньше фикс 2с игнорировал
+                        // подсказку сервера и жёг попытки на 429.
+                        return OpenAIRetry::backoffMs($attempt, $exception, 2000, 10000);
+                    }, function ($exception) {
+                        if ($exception instanceof \Illuminate\Http\Client\RequestException) {
+                            $status = $exception->response?->status();
+                            // Нет денег на счёте — повтором не лечится: сразу резерв (или ошибка).
+                            if ($status === 429 && str_contains((string) $exception->response?->body(), 'insufficient_quota')) {
+                                return false;
+                            }
 
-                        return in_array($status, [429, 500, 502, 503], true);
-                    }
+                            return in_array($status, [429, 500, 502, 503], true);
+                        }
 
-                    return false;
-                }, throw: false)
-                ->post(rtrim((string) $baseUrl, '/') . '/v1/chat/completions', $payload);
+                        return false;
+                    }, throw: false)
+                    ->post(rtrim((string) $baseUrl, '/') . '/v1/chat/completions', $payload);
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                $connectError = $e;
+            }
+
+            // Основной канал недоступен (нет денег, ключ, перегрузка, нет связи) — резервный шлюз.
+            $fallback = app(OpenAIFallbackGateway::class);
+            if (($response === null || ! $response->successful()) && $fallback->enabled()
+                && OpenAIFallbackGateway::shouldFallback($response, $connectError)) {
+                $why = $response !== null ? $response->status().' '.mb_substr($response->body(), 0, 200) : (string) $connectError?->getMessage();
+                $response = $fallback->post('/v1/chat/completions', $payload, $why);
+            }
+            if ($response === null) {
+                throw $connectError;
+            }
 
             if (! $response->successful()) {
                 throw new RuntimeException(

@@ -72,6 +72,17 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com'),
         'proxy_key' => env('OPENAI_PROXY_KEY', ''),
+        // Резервный шлюз (Beget AI Gateway, OpenAI-совместимый): основной канал недоступен —
+        // запрос уходит туда. Пустой ключ — резерва нет. См. App\Services\AI\OpenAIFallbackGateway.
+        'fallback' => [
+            'api_key' => env('OPENAI_FALLBACK_API_KEY'),
+            'base_url' => env('OPENAI_FALLBACK_BASE_URL', 'https://api-llm.beget.com'),
+            // Названия моделей у шлюза: префикс провайдера и/или явные замены JSON {"gpt-4o":"…"}.
+            'model_prefix' => env('OPENAI_FALLBACK_MODEL_PREFIX', ''),
+            'models' => env('OPENAI_FALLBACK_MODELS', '{}'),
+            // Эмбеддинги через резерв — только если там та же модель (иначе векторы несовместимы).
+            'embeddings' => (bool) env('OPENAI_FALLBACK_EMBEDDINGS', false),
+        ],
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
         'mail_classifier_model' => env('OPENAI_MAIL_CLASSIFIER_MODEL', 'gpt-4o-mini'),
         // Проверка писем менеджеров на образ компании (mail:tone-audit): отсев
