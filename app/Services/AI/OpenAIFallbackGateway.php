@@ -70,7 +70,11 @@ class OpenAIFallbackGateway
      */
     public function post(string $path, array $payload, string $why, int $timeout = 120): Response
     {
-        $payload['model'] = self::modelFor((string) ($payload['model'] ?? ''));
+        // Чатовые модели — по замене / модели по умолчанию; эмбеддинги — под своим названием
+        // (у шлюза та же text-embedding-3-small; чатовая модель вместо неё — 400).
+        $payload['model'] = $path === '/v1/chat/completions'
+            ? self::modelFor((string) ($payload['model'] ?? ''))
+            : (string) ($payload['model'] ?? '');
         if ($path === '/v1/chat/completions' && ! isset($payload['max_tokens']) && ! isset($payload['max_completion_tokens'])) {
             $payload['max_tokens'] = self::DEFAULT_MAX_TOKENS;
         }
