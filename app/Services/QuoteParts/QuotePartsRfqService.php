@@ -98,7 +98,7 @@ class QuotePartsRfqService
             $payload += [
                 'channel' => 'offsystem',
                 'from_name' => $by->name,
-                'signature' => $this->signature($by),
+                'signature' => $this->signature($by, offsystem: true),
                 'letters' => $this->offsystemLetters($letters, $rows, $by),
             ];
             $payload['mirror'] = ['email' => $this->mirrorAddress($by), 'name' => $by->name];
@@ -243,7 +243,7 @@ class QuotePartsRfqService
         $snapshot = $this->client->answerSupplier($rfq->remote_id, $externalId, trim($text), $by->name, [
             'files' => $this->uploadedFiles($files),
             'cc' => self::parseCc($cc),
-            'signature' => $withSignature ? $this->signature($by) : null,
+            'signature' => $withSignature ? $this->signature($by, offsystem: ($rfq->snapshot['channel'] ?? null) === 'offsystem') : null,
         ]);
         $rfq->forceFill([
             'snapshot' => $snapshot,
@@ -329,7 +329,7 @@ class QuotePartsRfqService
             $askers->map(fn ($key) => ['supplier' => $key, 'text' => $languages[$key] === 'en' ? $en : $ru])->values()->all(),
             $en !== '' ? $en : $ru,
             $by->name,
-            ['files' => $this->uploadedFiles($files), 'signature' => $withSignature ? $this->signature($by) : null],
+            ['files' => $this->uploadedFiles($files), 'signature' => $withSignature ? $this->signature($by, offsystem: ($rfq->snapshot['channel'] ?? null) === 'offsystem') : null],
         );
         $rfq->forceFill(['snapshot' => $snapshot, 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
 
@@ -444,7 +444,7 @@ class QuotePartsRfqService
      */
     private function offsystemLetters(array $letters, \Illuminate\Support\Collection $suppliers, User $by): array
     {
-        $signature = app(\App\Services\Mail\EmailSignatureService::class)->render($by);
+        $signature = $this->offsystemSignature($by);
         $safe = new \App\Services\Mail\OutboundHtmlPostProcessor;
         $out = [];
         foreach ($suppliers as $s) {
@@ -466,11 +466,32 @@ class QuotePartsRfqService
         return $out;
     }
 
-    /** Подпись автора — та же, что у писем из mzCorp, текстом. */
-    private function signature(User $by): ?string
+    /**
+     * Подпись автора для писем внесистемным: его личный адрес заменён ящиком канала (orders@) — поставщик,
+     * пишущий «на адрес из подписи», попадает туда, где ответ прочитает QuoteParts (решение 2026-10-21).
+     *
+     * @return array{html: string, plain: string}
+     */
+    private function offsystemSignature(User $by): array
     {
+        $signature = app(\App\Services\Mail\EmailSignatureService::class)->render($by);
+        $channel = (string) config('services.quoteparts.offsystem_mailbox');
+        // Личный ящик (если он не совпадает с логином) — из базы, только у сохранённого сотрудника.
+        $personal = array_values(array_unique(array_filter([mb_strtolower((string) $by->email), $by->exists ? mb_strtolower($this->mirrorAddress($by)) : null])));
+        if ($channel === '' || $personal === []) {
+            return $signature;
+        }
+        $swap = fn (string $text) => (string) preg_replace(array_map(fn ($a) => '/'.preg_quote($a, '/').'/iu', $personal), $channel, $text);
+
+        return ['html' => $swap((string) ($signature['html'] ?? '')), 'plain' => $swap((string) ($signature['plain'] ?? ''))];
+    }
+
+    /** Подпись автора — та же, что у писем из mzCorp, текстом (внесистемным — с адресом канала вместо личного). */
+    private function signature(User $by, bool $offsystem = false): ?string
+    {
+        $rendered = $offsystem ? $this->offsystemSignature($by) : app(\App\Services\Mail\EmailSignatureService::class)->render($by);
         // Разделитель «-- » ставит QuoteParts — свой с начала подписи убираем.
-        $plain = trim((string) preg_replace('/^\s*--\s*\R/u', '', (string) (app(\App\Services\Mail\EmailSignatureService::class)->render($by)['plain'] ?? '')));
+        $plain = trim((string) preg_replace('/^\s*--\s*\R/u', '', (string) ($rendered['plain'] ?? '')));
 
         return $plain !== '' ? mb_substr($plain, 0, 2000) : null;
     }

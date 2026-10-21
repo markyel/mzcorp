@@ -51,6 +51,19 @@ class QuotePartsOffsystemLettersTest extends TestCase
         $this->assertStringContainsString('МайЗип', $out['sup:7']['html']);
     }
 
+    public function test_the_personal_address_in_the_signature_becomes_the_channel_mailbox(): void
+    {
+        config(['services.quoteparts.offsystem_mailbox' => 'orders@myzip.ru']);
+        $by = new User(['name' => 'Александр', 'email' => 'Alexander.Rodenkov@myzip.ru', 'email_signature' => "Александр\ne-mail: alexander.rodenkov@myzip.ru\ne-mail: info@myzip.ru"]);
+        $out = self::letters([7 => self::letter('ru', 'Запрос')], collect([self::supplier(7)]), $by);
+
+        foreach (['text', 'html'] as $part) {
+            $this->assertStringNotContainsString('rodenkov', mb_strtolower($out['sup:7'][$part]));
+            $this->assertStringContainsString('orders@myzip.ru', $out['sup:7'][$part]);
+            $this->assertStringContainsString('info@myzip.ru', $out['sup:7'][$part], 'общий адрес компании остаётся');
+        }
+    }
+
     public function test_one_letter_per_organization_and_none_missing(): void
     {
         $by = new User(['name' => 'Иван Петров']);
