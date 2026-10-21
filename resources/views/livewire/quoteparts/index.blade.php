@@ -130,6 +130,31 @@
                     @forelse($this->routedSuppliers as $rs)<span class="chip chip-ok text-[11px]">{{ $rs->organization?->name ?: $rs->name }} · {{ $rs->email }}</span>@empty<span class="text-fg-4 text-[12px]">Пока никто не принял приглашение.</span>@endforelse
                 </div>
             </div>
+            {{-- Внесистемные: наше письмо через QuoteParts с ящика orders@ (вход через Яндекс, токены — в QuoteParts). --}}
+            <div class="ds-card-header"><h3>Внесистемные поставщики — письмом с {{ config('services.quoteparts.offsystem_mailbox') }}</h3></div>
+            <div class="ds-card-body text-[13px] space-y-2 border-b border-border-subtle" wire:init="loadOffsystem">
+                <div class="text-[12px] text-fg-3">Поставщикам с отметкой «Внесистемный» (карточка поставщика → QuoteParts) запрос уходит нашим обычным письмом с этого ящика через QuoteParts: ответ разбирает платформа, цены — в «Актуализации цен», копия ответа — автору запроса. Ящик подключается входом в Яндекс под ним; в «Почте» mzCorp его нет.</div>
+                @if($offsystemLoaded)
+                    <div class="flex flex-wrap items-center gap-3">
+                        @if($offsystemBox['connected'] ?? false)
+                            <span class="chip chip-ok text-[11px]">подключён · {{ $offsystemBox['address'] }}{{ ($offsystemBox['auth'] ?? null) === 'oauth' ? ' · вход через Яндекс' : '' }}</span>
+                            @if(! empty($offsystemBox['checked_at']))<span class="text-[12px] text-fg-3">почта прочитана {{ \Illuminate\Support\Carbon::parse($offsystemBox['checked_at'])->timezone('Europe/Moscow')->format('d.m H:i') }}</span>@endif
+                        @elseif(isset($offsystemBox['load_error']))
+                            <span class="text-[12px] text-amber-800">QuoteParts не ответил: {{ $offsystemBox['load_error'] }}</span>
+                        @else
+                            <span class="chip chip-neutral text-[11px]">не подключён</span>
+                        @endif
+                        <a href="{{ route('oauth.yandex.quoteparts') }}" class="btn btn-sm {{ ($offsystemBox['connected'] ?? false) ? '' : 'btn-primary' }}">{{ ($offsystemBox['connected'] ?? false) ? 'Подключить заново' : 'Подключить через Яндекс' }}</a>
+                        <span class="text-[12px] text-fg-4">войдите в Яндекс под {{ config('services.quoteparts.offsystem_mailbox') }}</span>
+                    </div>
+                    @if(! empty($offsystemBox['error']))<div class="text-[12px] text-[var(--status-overdue-fg)]">Ошибка чтения почты: {{ $offsystemBox['error'] }}</div>@endif
+                    <div class="flex flex-wrap gap-1.5">
+                        @forelse($this->offsystemSuppliers as $os)<span class="chip chip-info text-[11px]">{{ $os->organization?->name ?: $os->name }} · {{ $os->email }}</span>@empty<span class="text-fg-4 text-[12px]">Пока никто не отмечен внесистемным.</span>@endforelse
+                    </div>
+                @else
+                    <div class="text-fg-4 text-[12px]">Загружаю…</div>
+                @endif
+            </div>
             {{-- Сообщения поставщиков из переписки QuoteParts — в «Почту». --}}
             <div class="ds-card-header"><h3>Сообщения поставщиков — в «Почту»</h3></div>
             <div class="ds-card-body text-[13px] space-y-2 border-b border-border-subtle" wire:init="loadMirror">

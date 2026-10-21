@@ -47,8 +47,28 @@ class OAuthYandexController extends Controller
         return redirect()->away($url);
     }
 
+    /**
+     * Ящик внесистемных поставщиков QuoteParts (orders@): вход через Яндекс здесь, в mzCorp (адрес возврата
+     * уже зарегистрирован), токены уходят в QuoteParts по API — у себя ящик не заводим и не синкаем.
+     */
+    public function authorizeQuoteParts(Request $request): RedirectResponse
+    {
+        abort_unless($request->user()?->hasAnyRole(['director', 'admin']), 403);
+
+        $nonce = Str::random(32);
+        $request->session()->put('yandex_oauth_nonce.qp_offsystem', $nonce);
+        $state = base64_encode(json_encode(['purpose' => 'qp_offsystem', 'nonce' => $nonce]));
+
+        return redirect()->away($this->oauth->authorizationUrl($state, loginHint: (string) config('services.quoteparts.offsystem_mailbox')));
+    }
+
     public function callback(Request $request): RedirectResponse
     {
+        $decodedState = json_decode((string) base64_decode((string) $request->query('state', ''), true), true);
+        if (is_array($decodedState) && ($decodedState['purpose'] ?? null) === 'qp_offsystem') {
+            return $this->quotePartsCallback($request, (string) ($decodedState['nonce'] ?? ''));
+        }
+
         if ($error = $request->query('error')) {
             return redirect('/dashboard')->with(
                 'status',
@@ -106,5 +126,40 @@ class OAuthYandexController extends Controller
             'status',
             "OAuth-токены для {$mailbox->email} сохранены. Можно запустить mail:test {$mailbox->id}."
         );
+    }
+
+    /** Вход под ящиком внесистемных: токены — в QuoteParts, назад — на вкладку «Пилот» раздела QuoteParts. */
+    private function quotePartsCallback(Request $request, string $nonce): RedirectResponse
+    {
+        $back = route('quoteparts.index', ['tab' => 'pilot']);
+        abort_unless($request->user()?->hasAnyRole(['director', 'admin']), 403);
+        $expected = $request->session()->pull('yandex_oauth_nonce.qp_offsystem');
+        if (! is_string($expected) || ! hash_equals($expected, $nonce)) {
+            abort(403, 'OAuth state mismatch.');
+        }
+        if ($error = $request->query('error')) {
+            return redirect($back)->with('status', 'Яндекс: '.$error.' — '.$request->query('error_description', ''));
+        }
+
+        $address = (string) config('services.quoteparts.offsystem_mailbox');
+        try {
+            $tokens = $this->oauth->exchangeCode((string) $request->query('code', ''));
+            if (empty($tokens['refresh_token'])) {
+                throw new \RuntimeException('Яндекс не выдал refresh-токен.');
+            }
+            app(\App\Services\QuoteParts\QuotePartsClient::class)->connectOffsystemMailbox([
+                'address' => $address,
+                'access_token' => $tokens['access_token'],
+                'refresh_token' => $tokens['refresh_token'],
+                'expires_in' => max(60, (int) now()->diffInSeconds($tokens['expires_at'])),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('QuoteParts offsystem mailbox connect failed', ['address' => $address, 'error' => $e->getMessage()]);
+
+            return redirect($back)->with('status', "Ящик {$address} не подключён: ".mb_substr($e->getMessage(), 0, 300));
+        }
+        Log::info('QuoteParts offsystem mailbox connected', ['address' => $address, 'user_id' => $request->user()->id]);
+
+        return redirect($back)->with('status', "Ящик {$address} подключён к QuoteParts через Яндекс.");
     }
 }

@@ -380,6 +380,41 @@ class QuotePartsClient
     }
 
     /**
+     * Ящик внесистемных поставщиков в QuoteParts (orders@): подключён ли, когда читался, ошибка.
+     *
+     * @return array{connected: bool, address: ?string, auth: ?string, checked_at: ?string, error: ?string}
+     */
+    public function offsystemMailbox(): array
+    {
+        $response = $this->http()->get('/api/v1/mailboxes/offsystem');
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts mailboxes: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
+     * Подключить ящик внесистемных поставщиков токенами входа через Яндекс (их получил mzCorp):
+     * QuoteParts проверяет вход под этим адресом и дальше сам обновляет токен.
+     *
+     * @param  array{address:string, access_token:string, refresh_token:string, expires_in:int}  $payload
+     * @return array<string, mixed>
+     */
+    public function connectOffsystemMailbox(array $payload): array
+    {
+        $response = $this->http()->put('/api/v1/mailboxes/offsystem', $payload);
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял ящик.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts mailboxes: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * Файл письма или вопроса поставщика в переписке по запросу: [содержимое, имя, тип].
      *
      * @return array{0:string, 1:string, 2:string}

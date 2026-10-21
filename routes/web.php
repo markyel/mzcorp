@@ -94,6 +94,9 @@ Route::middleware('auth')->group(function () {
         ->name('oauth.yandex.authorize');
     Route::get('/oauth/yandex/callback', [OAuthYandexController::class, 'callback'])
         ->name('oauth.yandex.callback');
+    // Ящик внесистемных поставщиков QuoteParts (orders@): вход здесь, токены — в QuoteParts.
+    Route::get('/oauth/yandex/quoteparts', [OAuthYandexController::class, 'authorizeQuoteParts'])
+        ->name('oauth.yandex.quoteparts');
 
     // Heartbeat присутствия — фронтенд (layouts/app.blade.php) пингует, пока
     // вкладка видима. Доступен всем авторизованным (менеджеры тоже пишут).

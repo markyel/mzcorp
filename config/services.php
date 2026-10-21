@@ -1092,6 +1092,9 @@ return [
 
     'quoteparts' => [
         'url' => env('QUOTEPARTS_URL', 'https://quoteparts.ru'),
+        // Ящик внесистемных поставщиков: запросы им QuoteParts шлёт с него; подключается входом через Яндекс
+        // (вкладка «Пилот» раздела QuoteParts), токены — в QuoteParts, в почте mzCorp его нет.
+        'offsystem_mailbox' => env('QUOTEPARTS_OFFSYSTEM_MAILBOX', 'orders@myzip.ru'),
         'token' => env('QUOTEPARTS_API_TOKEN', ''),
         'timeout' => (int) env('QUOTEPARTS_TIMEOUT', 30),
         // Сколько позиций в одном запросе sync (лимит API — 500).

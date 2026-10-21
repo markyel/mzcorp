@@ -261,6 +261,27 @@ class Index extends Component
 
     public bool $mirrorLoaded = false;
 
+    /** Ящик внесистемных в QuoteParts (orders@): состояние из API, грузится при открытии вкладки. */
+    public ?array $offsystemBox = null;
+
+    public bool $offsystemLoaded = false;
+
+    public function loadOffsystem(\App\Services\QuoteParts\QuotePartsClient $client): void
+    {
+        try {
+            $this->offsystemBox = $client->offsystemMailbox();
+        } catch (\Throwable $e) {
+            $this->offsystemBox = ['connected' => false, 'load_error' => mb_substr($e->getMessage(), 0, 200)];
+        }
+        $this->offsystemLoaded = true;
+    }
+
+    #[Computed]
+    public function offsystemSuppliers()
+    {
+        return \App\Models\Supplier::query()->where('quoteparts_offsystem', true)->with('organization:id,name')->orderBy('name')->get(['id', 'name', 'email', 'supplier_organization_id']);
+    }
+
     #[Computed]
     public function mailboxOptions()
     {
