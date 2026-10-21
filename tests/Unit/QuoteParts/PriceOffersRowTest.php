@@ -45,4 +45,15 @@ class PriceOffersRowTest extends TestCase
         $this->assertNull($r['purchase']);
         $this->assertSame('M1', $r['sku']);
     }
+
+    public function test_new_product_without_catalog_card_is_named_from_the_request(): void
+    {
+        $o = new QuotePartsOffer(['sku' => 'T-VZQ4BU', 'price' => 21, 'currency' => 'USD', 'status' => 'active', 'superseded' => false, 'product_name' => 'Door contact']);
+        $o->setRelation('catalogItem', null);
+        $o->setRelation('request', null);
+        $m = new \ReflectionMethod(PriceOffers::class, 'row');
+
+        $this->assertSame('Контакт двери AT120', $m->invoke(null, $o, 'Контакт двери AT120')['name']);
+        $this->assertSame('Door contact', $m->invoke(null, $o, null)['name'], 'no request name — as the supplier named it');
+    }
 }

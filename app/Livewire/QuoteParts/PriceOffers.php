@@ -367,7 +367,24 @@ class PriceOffers extends Component
             ->where(fn ($q) => $q->where('remote_updated_at', '>=', $since)->orWhere('created_at', '>=', $since))
             ->limit(500)
             ->get()
-            ->map(fn (QuotePartsOffer $o) => self::row($o));
+            ->pipe(fn (Collection $offers) => self::rowsOf($offers));
+    }
+
+    /**
+     * Строки предложений; новому товару без M-артикула (предварительная позиция T-…) — его
+     * название из заявки: в каталоге его ещё нет, а без названия строка ни о чём (21.10, T-VZQ4BU).
+     *
+     * @param  Collection<int, QuotePartsOffer>  $offers
+     * @return Collection<int, array<string, mixed>>
+     */
+    private static function rowsOf(Collection $offers): Collection
+    {
+        $draftCodes = $offers->filter(fn (QuotePartsOffer $o) => $o->catalogItem === null && $o->sku)->pluck('sku')->unique()->values();
+        $draftNames = $draftCodes->isEmpty() ? collect() : \App\Models\RequestItem::query()
+            ->whereIn('quoteparts_code', $draftCodes)->whereNotNull('parsed_name')
+            ->orderBy('id')->get(['quoteparts_code', 'parsed_name'])->unique('quoteparts_code')->pluck('parsed_name', 'quoteparts_code');
+
+        return $offers->map(fn (QuotePartsOffer $o) => self::row($o, $draftNames->get((string) $o->sku)))->values();
     }
 
     private function query()
@@ -428,7 +445,7 @@ class PriceOffers extends Component
 
         return $this->query()->whereIn('sku', $ready)
             ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))
-            ->get()->map(fn (QuotePartsOffer $o) => self::row($o));
+            ->get()->pipe(fn (Collection $offers) => self::rowsOf($offers));
     }
 
     /** @return Collection<int, array<string, mixed>> позиция и все предложения на неё */
@@ -537,7 +554,7 @@ class PriceOffers extends Component
     }
 
     /** @return array<string, mixed> */
-    private static function row(QuotePartsOffer $o): array
+    private static function row(QuotePartsOffer $o, ?string $draftName = null): array
     {
         $ci = $o->catalogItem;
         $rub = IqotCurrencyConverter::toRub($o->price !== null ? (float) $o->price : null, $o->currency);
@@ -551,7 +568,8 @@ class PriceOffers extends Component
             'rfq_tag' => $o->rfq_tag,
             'cid' => $o->catalog_item_id,
             'sku' => $ci?->sku ?? $o->sku,
-            'name' => $ci?->name,
+            // Новый товар (T-…) — название из заявки, иначе как назвал поставщик.
+            'name' => $ci?->name ?? $draftName ?? ($o->product_name ?: null),
             'supplier' => (string) ($o->supplier_name ?: $o->supplier_key),
             'key' => $o->supplier_key,
             'counts' => $o->countsAsItemPrice(),
