@@ -90,6 +90,13 @@ class PriceOffers extends Component
         unset($this->choices);
     }
 
+    /** Комментарий к предложению в выгрузке 1С: поправка снабжения (null — снова собирается сам). */
+    public function saveComment(int $offerId, ?string $text, QuotePartsPriceService $prices): void
+    {
+        $prices->setExportComment(QuotePartsOffer::query()->findOrFail($offerId), $text, auth()->user());
+        unset($this->rows, $this->readyRows, $this->readyItems, $this->items, $this->groups);
+    }
+
     /** «Игнорировать» / «Вернуть»: предложение не о том — его цена не идёт в выгрузку 1С, в «лучшее» и в закупку. */
     public function ignore(int $offerId, bool $ignore, QuotePartsPriceService $prices): void
     {
@@ -589,6 +596,9 @@ class PriceOffers extends Component
             'product' => trim(($o->brand ?? '').' '.($o->part_number ?? '')),
             'review' => $o->review_status,
             'ignored' => $o->ignored_at !== null,
+            // Комментарий в выгрузке 1С: поправленный снабжением или собранный.
+            'export_comment' => $o->export_comment ?? \App\Services\Procurement\PriceExportService::offerComment($o),
+            'comment_edited' => $o->export_comment !== null,
             'tiers' => (array) ($o->tiers ?? []),
             'price' => $o->price !== null ? (float) $o->price : null,
             'currency' => $o->currency,

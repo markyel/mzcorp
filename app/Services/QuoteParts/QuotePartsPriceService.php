@@ -232,6 +232,20 @@ class QuotePartsPriceService
     }
 
     /**
+     * Комментарий к предложению в выгрузке 1С, поправленный снабжением. Совпадает с собранным
+     * (или null) — снова собирается сам: поправки не было.
+     */
+    public function setExportComment(QuotePartsOffer $offer, ?string $text, User $by): QuotePartsOffer
+    {
+        $text = $text === null ? null : trim((string) preg_replace('/\s+/u', ' ', $text));
+        $auto = (string) \App\Services\Procurement\PriceExportService::offerComment($offer);
+        $own = $text === null || $text === $auto ? null : mb_substr($text, 0, 2000);
+        $offer->forceFill(['export_comment' => $own, 'export_comment_by_user_id' => $own !== null ? $by->id : null])->save();
+
+        return $offer;
+    }
+
+    /**
      * «Игнорировать» / «вернуть»: предложение не о том — его цена не идёт в выгрузку 1С, в «лучшее»
      * и в выбор закупки; если по нему уже выбрали «закупаем здесь», выбор снимается.
      */

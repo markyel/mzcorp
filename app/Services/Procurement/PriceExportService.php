@@ -175,7 +175,8 @@ class PriceExportService
                 'key' => $o->supplier_key, 'fallback' => (string) ($o->supplier_name ?: $o->supplier_key),
                 'price' => (float) $o->price, 'currency' => $o->currency,
                 'date' => Carbon::parse($at),
-                'comment' => self::offerComment($o),
+                // Поправленный снабжением комментарий — как есть, иначе собранный.
+                'comment' => $o->export_comment ?? self::offerComment($o),
             ]);
         }
 

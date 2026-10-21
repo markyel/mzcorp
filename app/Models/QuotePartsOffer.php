@@ -44,6 +44,8 @@ class QuotePartsOffer extends Model
         'clarify_cleared_at',
         'ignored_at',
         'ignored_by_user_id',
+        'export_comment',
+        'export_comment_by_user_id',
     ];
 
     /** Разбор отклонения (не оригинала): ждёт, принято к закупке, отклонено. */

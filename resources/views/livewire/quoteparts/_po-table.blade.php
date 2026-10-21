@@ -94,6 +94,19 @@
                             </div>
                         @endif
                         @if($r['stale'])<div class="text-[10.5px] text-fg-4">устарело</div>@endif
+                        {{-- Комментарий в выгрузке 1С: собран из предложения, снабжение может поправить (сохраняется при уходе из поля). --}}
+                        <div class="mt-1" x-data="{ v: @js((string) ($r['export_comment'] ?? '')), saved: @js((string) ($r['export_comment'] ?? '')) }">
+                            <textarea x-model="v" rows="1" placeholder="комментарий для 1С"
+                                      x-on:blur="if (v !== saved) { saved = v; $wire.saveComment({{ $r['id'] }}, v) }"
+                                      x-init="$nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px' })"
+                                      x-on:input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                      class="w-full px-1.5 py-0.5 border border-border-subtle rounded bg-surface text-[11.5px] text-fg-2 leading-snug resize-none focus:border-sky-500 outline-none"
+                                      style="min-height:22px"
+                                      title="Комментарий к этой цене в выгрузке 1С"></textarea>
+                            @if($r['comment_edited'] ?? false)
+                                <div class="text-[10.5px] text-fg-4">поправлено · <button type="button" wire:click="saveComment({{ $r['id'] }}, null)" class="text-sky-700 hover:underline">вернуть собранный</button></div>
+                            @endif
+                        </div>
                         {{-- Уточнение у поставщика: ждём ответа (решение отложено), ответил, не ответил в срок. --}}
                         @if($cl)
                             <div class="mt-1">
