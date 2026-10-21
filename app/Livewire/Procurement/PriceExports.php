@@ -33,6 +33,54 @@ class PriceExports extends Component
         $this->to = now()->format('Y-m-d\TH:i');
     }
 
+    /** Ручной код 1С поставщика: supplier_key => код. */
+    public array $manualCodes = [];
+
+    /**
+     * Поставщики с ценами за 30 дней, у которых нет кода 1С: название, подсказки из справочника.
+     *
+     * @return list<array{key:string, name:string, suggestions:\Illuminate\Support\Collection}>
+     */
+    #[\Livewire\Attributes\Computed]
+    public function withoutCode(): array
+    {
+        if (\App\Models\OnecCounterparty::query()->doesntExist()) {
+            return [];
+        }
+        $service = app(PriceExportService::class);
+        $codes = app(\App\Services\Procurement\SupplierOnecCodeService::class);
+        [$prices] = $service->collect(now()->subDays(30), now());
+        $keys = $prices->pluck('key')->filter()->unique()->values()->all();
+        $names = $service->names1c($keys);
+        $found = $codes->codesFor($keys, $names);
+
+        $out = [];
+        foreach ($keys as $key) {
+            if (isset($found[$key])) {
+                continue;
+            }
+            $name = $names[$key] ?? (string) $prices->firstWhere('key', $key)['fallback'];
+            $out[] = ['key' => $key, 'name' => $name, 'suggestions' => $codes->suggestions($codes->registryNames($key)[0] ?? $name)];
+        }
+
+        return $out;
+    }
+
+    /** Привязать поставщика к контрагенту 1С (кнопкой подсказки или введённым кодом). */
+    public function setCode(string $supplierKey, ?string $code = null): void
+    {
+        $code ??= (string) ($this->manualCodes[$supplierKey] ?? '');
+        try {
+            app(\App\Services\Procurement\SupplierOnecCodeService::class)->setCode($supplierKey, $code, auth()->user());
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: $e->getMessage());
+
+            return;
+        }
+        unset($this->withoutCode, $this->manualCodes[$supplierKey]);
+        $this->dispatch('toast', type: 'success', message: 'Код 1С '.$code.' привязан.');
+    }
+
     /** Конец прошлой выгрузки — начало «нового» (первая выгрузка — за неделю). */
     public function lastExportEnd(): Carbon
     {

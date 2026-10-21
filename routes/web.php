@@ -375,6 +375,10 @@ Route::middleware('auth')->group(function () {
             return \Illuminate\Support\Facades\Storage::disk(config('procurement.price_export.disk', 'local'))->download($export->file_path, basename($export->file_path));
         })->whereNumber('export')->name('procurement.price-exports.download');
 
+        // Справочник контрагентов 1С УНФ — коды поставщиков для выгрузки цен.
+        Route::post('/dashboard/procurement/onec-counterparties', \App\Http\Controllers\Procurement\OnecCounterpartiesUploadController::class)
+            ->name('procurement.onec-counterparties.upload');
+
         // Еженедельные персональные отчёты менеджеров. Менеджер видит свои
         // (вкл. прошлые), РОП/директор/админ — все (фильтр по менеджеру внутри
         // компонента). См. App\Livewire\Reports\Weekly.

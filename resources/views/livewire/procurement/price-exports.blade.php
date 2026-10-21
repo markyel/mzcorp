@@ -2,7 +2,7 @@
     <div class="ds-card">
         <div class="ds-card-header">
             <h3>Выгрузка новых цен поставщиков</h3>
-            <span class="text-[12px] text-fg-3 ml-2">Excel по шаблону для 1С: M-артикул, по каждому поставщику — цена, дата предложения, валюта; в конце — выбранный поставщик</span>
+            <span class="text-[12px] text-fg-3 ml-2">Excel для загрузки в 1С: М-артикул, код поставщика, цена, дата цены, валюта, комментарий</span>
         </div>
         <div class="ds-card-body text-[13px] space-y-3">
             {{-- Новое — с конца прошлой выгрузки (история общая со «Снабжением»): цены не повторяются и не теряются. --}}
@@ -30,6 +30,61 @@
                 Аналог, копия, восстановленное попадают, только если приняты к закупке, — как цена самой позиции.
                 По умолчанию период начинается там, где закончилась прошлая выгрузка.
             </p>
+        </div>
+    </div>
+
+    {{-- Коды поставщиков: справочник контрагентов 1С и привязка тех, кого не нашли по названию. --}}
+    @php
+        $cpCount = \App\Models\OnecCounterparty::query()->count();
+        $cpAt = \App\Models\OnecCounterparty::query()->max('seen_at');
+        $missing = $this->withoutCode;
+    @endphp
+    <div class="ds-card">
+        <div class="ds-card-header flex-wrap gap-y-1">
+            <h3>Коды поставщиков 1С</h3>
+            <span class="text-[12px] text-fg-3 ml-2">
+                @if($cpCount)справочник контрагентов: {{ number_format($cpCount, 0, ',', ' ') }}, загружен {{ \Illuminate\Support\Carbon::parse($cpAt)->format('d.m.Y H:i') }}@else справочник контрагентов 1С не загружен — коды поставщиков в выгрузке будут пустыми@endif
+                @if($cpCount && $missing !== []) · <span class="text-amber-700">без кода: {{ count($missing) }}</span>@endif
+            </span>
+        </div>
+        <div class="ds-card-body text-[13px] space-y-3">
+            <form method="POST" action="{{ route('procurement.onec-counterparties.upload') }}" enctype="multipart/form-data" class="flex flex-wrap items-center gap-2">
+                @csrf
+                <span class="text-fg-2">Список контрагентов 1С УНФ (xlsx):</span>
+                <input type="file" name="file" accept=".xlsx,.xls" required class="text-[12.5px]">
+                <button type="submit" class="btn btn-sm">{{ $cpCount ? 'Обновить справочник' : 'Загрузить справочник' }}</button>
+                @error('onec_file')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror
+                @error('file')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror
+            </form>
+            @if($missing !== [])
+                <div>
+                    <div class="text-fg-2 mb-1">Поставщики с ценами за 30 дней без кода 1С — выберите контрагента (привязка запоминается):</div>
+                    <table class="w-full text-[12.5px]">
+                        <tbody>
+                            @foreach($missing as $m)
+                                <tr wire:key="nocode-{{ $m['key'] }}" class="border-t border-border-subtle align-top">
+                                    <td class="py-1.5 pr-3 font-medium text-fg-1 whitespace-nowrap">{{ $m['name'] }}</td>
+                                    <td class="py-1.5 pr-3">
+                                        <div class="flex flex-wrap gap-1">
+                                            @forelse($m['suggestions'] as $cp)
+                                                <button type="button" wire:click="setCode('{{ $m['key'] }}', '{{ $cp->code }}')" class="chip chip-neutral text-[11.5px] hover:bg-hover" title="{{ $cp->full_name }}{{ $cp->inn ? ' · ИНН '.$cp->inn : '' }}">
+                                                    <span class="mono">{{ $cp->code }}</span> {{ \Illuminate\Support\Str::limit($cp->name, 60) }}
+                                                </button>
+                                            @empty
+                                                <span class="text-fg-4">похожих в справочнике нет</span>
+                                            @endforelse
+                                        </div>
+                                    </td>
+                                    <td class="py-1.5 whitespace-nowrap">
+                                        <input type="text" wire:model="manualCodes.{{ $m['key'] }}" placeholder="00-000000" class="h-[26px] w-[100px] px-2 border border-border rounded-md bg-surface text-[12px] mono">
+                                        <button type="button" wire:click="setCode('{{ $m['key'] }}')" class="btn btn-sm">Привязать</button>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
         </div>
     </div>
 

@@ -16,11 +16,14 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 /**
- * Выгрузка новых цен поставщиков в Excel под загрузку в 1С — по шаблону заказчика:
- * M-артикул, затем по каждому поставщику (названием, как в 1С) — цена, дата предложения,
- * валюта, комментарий (что важно знать о предложении: аналог, мин. партия, ступени цены,
- * срок, действует до, примечание поставщика); в конце — выбранный поставщик позиции.
- * Колонки без данных (поставщик шаблона без цен за период, никто не выбран) не выводятся.
+ * Выгрузка новых цен поставщиков в Excel под загрузку в 1С — 6 колонок, строка на пару
+ * «позиция × поставщик»: М-артикул, код поставщика (контрагент 1С), цена, дата цены, валюта,
+ * комментарий (что важно знать о предложении: аналог, мин. партия, ступени цены, срок,
+ * действует до, примечание поставщика, «закупаем здесь»).
+ *
+ * Код поставщика — из справочника контрагентов 1С (SupplierOnecCodeService). Поставщик без
+ * кода выгружается с пустым кодом и своим названием в комментарии; список таких — на листе
+ * «Пояснения», привязать их можно в «Выгрузке цен».
  *
  * Правила:
  *  - все поставщики, приславшие цену за период (письмом на рассылку или через QuoteParts);
@@ -34,67 +37,53 @@ class PriceExportService
 {
     private const DEVIATION_WORDS = '/(аналог|analog|alternative|equivalent|replacement|копи[яи]|\bcopy\b|replica|совместим|compatible|восстановлен|refurbish)/iu';
 
+    public const HEADER = ['М-артикул', 'Код поставщика', 'Цена', 'Дата цены', 'Валюта', 'Комментарий'];
+
     public function export(Carbon $from, Carbon $to, ?User $by): PriceExport
     {
         [$prices, $skipped] = $this->collect($from, $to);
-        $names = $this->names1c($prices->pluck('key')->merge(
-            app(SupplierChoiceService::class)->forItems($prices->pluck('cid')->unique()->values()->all())->pluck('supplier_key')
-        )->filter()->unique()->values()->all());
+        $keys = $prices->pluck('key')->filter()->unique()->values()->all();
+        $names = $this->names1c($keys);
+        $codes = app(SupplierOnecCodeService::class);
+        $codeByKey = $codes->codesFor($keys, $names);
 
-        // По поставщику (как в 1С) и позиции — последняя цена периода.
-        $latest = $prices->map(fn ($p) => $p + ['name' => $names[$p['key']] ?? $p['fallback']])
-            ->sortBy('date')->keyBy(fn ($p) => $p['sku'].'|'.$p['name']);
+        // По поставщику и позиции — последняя цена периода.
+        $latest = $prices->map(function ($p) use ($names, $codeByKey, $codes) {
+            $name = $p['key'] !== null ? ($names[$p['key']] ?? $p['fallback']) : $p['fallback'];
+            $code = $p['key'] !== null ? ($codeByKey[$p['key']]['code'] ?? null) : $codes->codeForName($p['fallback']);
 
-        // Поставщики шаблона — в его порядке, но только с ценами за период; затем остальные.
-        $template = config('procurement.price_export.template_suppliers', []);
-        $withPrices = $latest->pluck('name')->unique();
-        $others = $latest->groupBy('name')->map->count()->sortDesc()->keys()->reject(fn ($n) => in_array($n, $template, true))->values()->all();
-        $columns = array_values(array_filter(array_unique([...$template, ...$others]), fn ($n) => $withPrices->contains($n)));
+            return $p + ['name' => $name, 'code' => $code];
+        })->sortBy('date')->keyBy(fn ($p) => $p['sku'].'|'.($p['key'] ?? 'name:'.$p['name']))->sortBy(fn ($p) => [$p['sku'], $p['name']])->values();
 
         $choices = app(SupplierChoiceService::class)->forItems($latest->pluck('cid')->unique()->values()->all());
-        $rows = $latest->groupBy('sku')->sortKeys();
-        $withChoice = $rows->contains(fn ($bySupplier) => $choices->has($bySupplier->first()['cid']));
 
-        // По поставщику — 4 колонки: цена, дата предложения, валюта, комментарий.
-        $per = 4;
         $book = new Spreadsheet;
         $sheet = $book->getActiveSheet();
         $sheet->setTitle('Лист1');
-        $header = ['М-артикул'];
-        foreach ($columns as $name) {
-            array_push($header, $name, 'Дата предложения', 'Валюта', 'Комментарий');
-        }
-        if ($withChoice) {
-            $header[] = 'Выбранный поставщик';
-        }
-        $sheet->fromArray($header, null, 'A1');
+        $sheet->fromArray(self::HEADER, null, 'A1');
 
         $r = 2;
-        foreach ($rows as $sku => $bySupplier) {
-            $line = [$sku];
-            $bySupplier = $bySupplier->keyBy('name');
-            foreach ($columns as $name) {
-                $p = $bySupplier->get($name);
-                array_push($line, $p ? $p['price'] : null, $p ? ExcelDate::PHPToExcel($p['date']->copy()->startOfDay()) : null, $p ? $p['currency'] : null, $p ? ($p['comment'] ?? null) : null);
-            }
-            if ($withChoice) {
-                $choice = $choices->get($bySupplier->first()['cid']);
-                $line[] = $choice ? ($names[$choice->supplier_key] ?? $choice->supplier_name) : null;
-            }
-            $sheet->fromArray($line, null, 'A'.$r, true);
+        foreach ($latest as $p) {
+            $choice = $choices->get($p['cid']);
+            $comment = implode('; ', array_filter([
+                $p['code'] === null ? 'поставщик: '.$p['name'].' (нет кода 1С)' : null,
+                $choice && $p['key'] !== null && $choice->supplier_key === $p['key'] ? 'закупаем здесь (выбор снабжения)' : null,
+                $p['comment'] ?? null,
+            ]));
+            $sheet->fromArray([$p['sku'], $p['code'], $p['price'], ExcelDate::PHPToExcel($p['date']->copy()->startOfDay()), $p['currency'], $comment !== '' ? $comment : null], null, 'A'.$r, true);
+            // Коды — текстом: «00-000523» не должен стать числом.
+            $sheet->setCellValueExplicit('B'.$r, (string) $p['code'], \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
             $r++;
         }
-        // Даты — датами, ширина колонок, комментарий — переносом.
-        foreach ($columns as $i => $name) {
-            $col = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(3 + $i * $per);
-            $sheet->getStyle($col.'2:'.$col.max(2, $r - 1))->getNumberFormat()->setFormatCode('dd.mm.yyyy');
-            $note = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(5 + $i * $per);
-            $sheet->getColumnDimension($note)->setWidth(40);
-            $sheet->getStyle($note.'2:'.$note.max(2, $r - 1))->getAlignment()->setWrapText(true);
+        $last = max(2, $r - 1);
+        $sheet->getStyle('D2:D'.$last)->getNumberFormat()->setFormatCode('dd.mm.yyyy');
+        $sheet->getStyle('F2:F'.$last)->getAlignment()->setWrapText(true);
+        foreach (['A' => 12, 'B' => 14, 'C' => 12, 'D' => 12, 'E' => 8, 'F' => 70] as $col => $w) {
+            $sheet->getColumnDimension($col)->setWidth($w);
         }
-        $sheet->getColumnDimension('A')->setWidth(12);
-        $sheet->freezePane('B2');
+        $sheet->freezePane('A2');
 
+        $noCode = $latest->whereNull('code')->pluck('name')->unique()->values();
         $notes = $book->createSheet();
         $notes->setTitle('Пояснения');
         $notes->fromArray([
@@ -102,16 +91,16 @@ class PriceExportService
             ['Период', $from->format('d.m.Y H:i').' – '.$to->format('d.m.Y H:i').' (по дате письма / предложения поставщика)'],
             ['Сформировано', now()->format('d.m.Y H:i').($by ? ' · '.$by->name : '')],
             ['', ''],
-            ['Строки', 'M-артикул. Принятые к закупке аналог / восстановленное и т. п. — как цена самой позиции; что предложено — в комментарии.'],
-            ['Колонки', 'Поставщики, приславшие цену за период: сначала поставщики шаблона в его порядке, затем остальные по числу артикулов; поставщики без цен не выводятся. Названия — как в 1С (по закупкам), иначе как в справочнике.'],
-            ['Комментарий', 'Что важно знать о предложении: не оригинал (аналог, копия…) с брендом и артикулом, минимальная партия и ступени цены, срок поставки, до какой даты действует цена, примечание поставщика; для ответов письмом — фрагмент письма с ценой.'],
-            ['Цена', 'Последняя цена поставщика по позиции за период; цена за единицу, в валюте поставщика.'],
-            ['Выбранный поставщик', 'У кого закупаем позицию — выбор снабжения в «Снабжении».'],
+            ['Строки', 'Позиция × поставщик: последняя цена поставщика по позиции за период, за единицу, в валюте поставщика. Принятые к закупке аналог / восстановленное и т. п. — как цена самой позиции; что предложено — в комментарии.'],
+            ['Код поставщика', 'Код контрагента из справочника 1С УНФ. Нет кода — поставщик не привязан к контрагенту 1С: его название в комментарии, привязать можно в «Выгрузке цен».'],
+            ['Комментарий', 'Что важно знать о предложении: не оригинал (аналог, копия…) с брендом и артикулом, минимальная партия и ступени цены, срок поставки, до какой даты действует цена, примечание поставщика, «закупаем здесь»; для ответов письмом — фрагмент письма с ценой.'],
             ['Не выгружено', $skipped.' ответ(ов) рассылки с аналогом / копией в тексте — их нужно разобрать по письму.'],
-            ['Итого', ($r - 2).' артикулов, '.count(array_filter($columns, fn ($n) => $latest->contains('name', $n))).' поставщиков'],
+            ['Без кода 1С', $noCode->isEmpty() ? '—' : $noCode->implode(', ')],
+            ['Итого', ($r - 2).' строк, '.$latest->pluck('sku')->unique()->count().' артикулов, '.$latest->pluck('name')->unique()->count().' поставщиков'],
         ], null, 'A1');
         $notes->getColumnDimension('A')->setWidth(22);
         $notes->getColumnDimension('B')->setWidth(110);
+        $notes->getStyle('B1:B12')->getAlignment()->setWrapText(true);
         $book->setActiveSheetIndex(0);
 
         $disk = config('procurement.price_export.disk', 'local');
@@ -124,14 +113,13 @@ class PriceExportService
         return PriceExport::create([
             'from_at' => $from,
             'to_at' => $to,
-            'rows_count' => $r - 2,
+            'rows_count' => $latest->pluck('sku')->unique()->count(),
             'suppliers_count' => $latest->pluck('name')->unique()->count(),
             'skipped_count' => $skipped,
             'file_path' => $path,
             'created_by_user_id' => $by?->id,
         ]);
     }
-
     /**
      * Цены периода из обоих каналов.
      *
