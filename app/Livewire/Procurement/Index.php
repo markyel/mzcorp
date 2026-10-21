@@ -263,7 +263,7 @@ class Index extends Component
      * @param  list<int>  $cids
      * @param  list<int>  $supplierIds
      */
-    private function routeToQuoteParts(array $cids, array $supplierIds, array $files = []): string
+    private function routeToQuoteParts(array $cids, array $supplierIds, array $files = [], array $letters = []): string
     {
         $quantities = [];
         foreach ($cids as $cid) {
@@ -272,13 +272,36 @@ class Index extends Component
             $quantities[$cid] = $q > 0 ? $q : 1.0;
         }
         try {
-            $rfq = app(QuotePartsRfqService::class)->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), [], routed: true, files: $files);
+            $rfq = app(QuotePartsRfqService::class)->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), [], routed: true, files: $files, letters: $letters);
         } catch (Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('QuoteParts RFQ refused', ['procurement' => true, 'offsystem' => $letters !== [], 'error' => $e->getMessage()]);
+
             return 'QuoteParts не принял запрос ('.mb_substr($e->getMessage(), 0, 200).') — этим поставщикам не отправлено.';
         }
         unset($this->quotePartsRfqs);
+        if ($letters !== []) {
+            return 'Внесистемным через QuoteParts (письмо с orders@): запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' — ответы придут копией вам.';
+        }
 
         return 'Через QuoteParts: запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' (приняли приглашение).';
+    }
+
+    /** Правки письма: названия/кол-во по языкам, артикул, обращение, вступление, заключение. */
+    private function letterEdits(): array
+    {
+        return [
+            'names_ru' => $this->editedNames,
+            'names_en' => $this->editedNamesEn,
+            'oem' => $this->editedOem,
+            'qty' => $this->editedQty,
+            'qty_en' => $this->editedQtyEn,
+            'greeting_ru' => $this->greeting,
+            'greeting_en' => $this->greetingEn,
+            'intro_ru' => $this->intro,
+            'intro_en' => $this->introEn,
+            'closing_ru' => $this->closing,
+            'closing_en' => $this->closingEn,
+        ];
     }
 
     /** Догрузить следующую порцию списка (вызывается x-intersect sentinel'ом). */
@@ -1006,6 +1029,21 @@ class Index extends Component
         $allSupplierIds = $supplierIds;
         $route = app(\App\Services\QuoteParts\QuotePartsRouting::class)->split($supplierIds);
         $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($cids, $route['quoteparts'], $extraFiles) : null;
+        $edits = $this->letterEdits();
+        // Внесистемные — наше же письмо через QuoteParts (orders@); не принял — им обычное письмо.
+        if ($route['offsystem'] !== []) {
+            $catalog = \App\Models\CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article', 'articles']);
+            $letters = [];
+            foreach (\App\Models\Supplier::query()->whereIn('id', $route['offsystem'])->get() as $s) {
+                $letters[(int) $s->id] = $dispatcher->composeLetter($catalog, $s, $this->note, $edits);
+            }
+            $offMsg = $this->routeToQuoteParts($cids, $route['offsystem'], $extraFiles, $letters);
+            if (str_starts_with($offMsg, 'QuoteParts не принял')) {
+                $route['mail'] = array_values(array_unique([...$route['mail'], ...$route['offsystem']]));
+                $offMsg = 'Внесистемным поставщикам QuoteParts не принял запрос — им уходит обычное письмо.';
+            }
+            $qpMsg = trim(($qpMsg ?? '').' '.$offMsg);
+        }
         $supplierIds = $route['mail'];
         if ($supplierIds === []) {
             session()->flash('procurement_status', $qpMsg);
@@ -1015,20 +1053,6 @@ class Index extends Component
 
             return;
         }
-
-        $edits = [
-            'names_ru' => $this->editedNames,
-            'names_en' => $this->editedNamesEn,
-            'oem' => $this->editedOem,
-            'qty' => $this->editedQty,
-            'qty_en' => $this->editedQtyEn,
-            'greeting_ru' => $this->greeting,
-            'greeting_en' => $this->greetingEn,
-            'intro_ru' => $this->intro,
-            'intro_en' => $this->introEn,
-            'closing_ru' => $this->closing,
-            'closing_en' => $this->closingEn,
-        ];
 
         $result = $dispatcher->dispatch($cids, $supplierIds, $this->note, $user, $edits, $extraFiles);
 

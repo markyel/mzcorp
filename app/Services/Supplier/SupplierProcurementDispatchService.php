@@ -78,8 +78,6 @@ class SupplierProcurementDispatchService
 
                 continue;
             }
-            $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
-
             // Дедуп: не спрашиваем повторно позиции, по которым этому поставщику
             // уже есть открытый pending-запрос.
             $alreadyPending = $this->pendingCatalogIdsForSupplier((string) $supplier->email);
@@ -91,41 +89,14 @@ class SupplierProcurementDispatchService
             }
 
             try {
-                $names = $lang === 'en' ? ($edits['names_en'] ?? []) : ($edits['names_ru'] ?? []);
-                $oem = $edits['oem'] ?? [];
-                $qty = $lang === 'en' ? ($edits['qty_en'] ?? []) : ($edits['qty'] ?? []);
-                $greetingTpl = $lang === 'en' ? ($edits['greeting_en'] ?? null) : ($edits['greeting_ru'] ?? null);
-
-                $rows = $askItems->map(fn (CatalogItem $ci) => [
-                    'name' => $this->itemName($ci, $names, $lang),
-                    'oem' => $this->itemOem($ci, $oem),
-                    'brand' => $ci->brand ?: null,
-                    'qty' => $this->itemQty($ci, $qty),
-                ])->all();
-
-                $personalGreeting = $this->base->personalGreeting($greetingTpl, $supplier, $lang);
-                $intro = trim((string) ($lang === 'en' ? ($edits['intro_en'] ?? '') : ($edits['intro_ru'] ?? '')));
-                $closing = trim((string) ($lang === 'en' ? ($edits['closing_en'] ?? '') : ($edits['closing_ru'] ?? '')));
+                $letter = $this->composeLetter($askItems, $supplier, $note, $edits);
                 // Уникальный токен RFQ в теме → детерминированный матч ответа
                 // (позиция-центричный RFQ без заявки, вся прочая переписка
                 // снабжения с поставщиком игнорируется). См. matchInboundByRfqToken.
                 $rfqToken = $this->inquiries->generateRfqToken();
-                $subject = ($lang === 'en' ? 'Price request' : 'Запрос расценки')
-                    . ' ' . $this->inquiries->rfqMarker($rfqToken);
+                $subject = $letter['subject'].' '.$this->inquiries->rfqMarker($rfqToken);
 
-                // Примечание — на языке письма (English-поставщику переводим, как названия позиций).
-                $langNote = app(SupplierNoteTranslator::class)->forLanguage($note, $lang);
-                $html = view('emails.supplier-rfq-catalog', [
-                    'rows' => $rows,
-                    'note' => $langNote,
-                    'greeting' => $personalGreeting,
-                    'intro' => $intro,
-                    'closing' => $closing,
-                    'lang' => $lang,
-                ])->render();
-                $plain = $this->plainBody($personalGreeting, $rows, $langNote, $lang, $intro, $closing);
-
-                $draft = $this->createDraft($mailbox, $by, $supplier, $subject, $html, $plain);
+                $draft = $this->createDraft($mailbox, $by, $supplier, $subject, $letter['html'], $letter['plain']);
 
                 // Вложения (фото/файлы) — копия в черновик каждого поставщика.
                 if ($extraFiles !== []) {
@@ -172,6 +143,50 @@ class SupplierProcurementDispatchService
 
         return ['sent' => $sent, 'failed' => $failed, 'skipped' => $skipped, 'suppliers' => $names,
             'inquiry_ids' => $inquiryIds, 'error' => null];
+    }
+
+    /**
+     * Письмо поставщику из «Снабжения» — то же, что уходит по старому алгоритму, без маркера [RFQ-…]
+     * и без подписи (её клеит отправка). Его же получает внесистемный поставщик через QuoteParts.
+     *
+     * @param  \Illuminate\Support\Collection<int, CatalogItem>  $items
+     * @return array{lang: string, subject: string, html: string, plain: string}
+     */
+    public function composeLetter(\Illuminate\Support\Collection $items, Supplier $supplier, ?string $note, array $edits = []): array
+    {
+        $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
+        $names = $lang === 'en' ? ($edits['names_en'] ?? []) : ($edits['names_ru'] ?? []);
+        $oem = $edits['oem'] ?? [];
+        $qty = $lang === 'en' ? ($edits['qty_en'] ?? []) : ($edits['qty'] ?? []);
+        $greetingTpl = $lang === 'en' ? ($edits['greeting_en'] ?? null) : ($edits['greeting_ru'] ?? null);
+
+        $rows = $items->map(fn (CatalogItem $ci) => [
+            'name' => $this->itemName($ci, $names, $lang),
+            'oem' => $this->itemOem($ci, $oem),
+            'brand' => $ci->brand ?: null,
+            'qty' => $this->itemQty($ci, $qty),
+        ])->values()->all();
+
+        $personalGreeting = $this->base->personalGreeting($greetingTpl, $supplier, $lang);
+        $intro = trim((string) ($lang === 'en' ? ($edits['intro_en'] ?? '') : ($edits['intro_ru'] ?? '')));
+        $closing = trim((string) ($lang === 'en' ? ($edits['closing_en'] ?? '') : ($edits['closing_ru'] ?? '')));
+        // Примечание — на языке письма (English-поставщику переводим, как названия позиций).
+        $langNote = app(SupplierNoteTranslator::class)->forLanguage($note, $lang);
+        $html = view('emails.supplier-rfq-catalog', [
+            'rows' => $rows,
+            'note' => $langNote,
+            'greeting' => $personalGreeting,
+            'intro' => $intro,
+            'closing' => $closing,
+            'lang' => $lang,
+        ])->render();
+
+        return [
+            'lang' => $lang,
+            'subject' => $lang === 'en' ? 'Price request' : 'Запрос расценки',
+            'html' => $html,
+            'plain' => $this->plainBody($personalGreeting, $rows, $langNote, $lang, $intro, $closing),
+        ];
     }
 
     /** Название каталожной позиции: правка > name_en (для en) > name. */

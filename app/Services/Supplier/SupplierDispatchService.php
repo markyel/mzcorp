@@ -115,47 +115,21 @@ class SupplierDispatchService
             try {
                 $draft = $this->drafts->createCompose($request, $by);
 
-                $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
-                $rows = $this->itemRows($items, $lang, $edits);
-                $greetingTpl = $lang === 'en' ? ($edits['greeting_en'] ?? null) : ($edits['greeting_ru'] ?? null);
-                $personalGreeting = $this->personalGreeting($greetingTpl, $supplier, $lang);
-                $intro = trim((string) ($lang === 'en' ? ($edits['intro_en'] ?? '') : ($edits['intro_ru'] ?? '')));
-                $closing = trim((string) ($lang === 'en' ? ($edits['closing_en'] ?? '') : ($edits['closing_ru'] ?? '')));
-                // Тема несёт код заявки MZC, а при наличии — и номер запроса 1С
-                // (onec_number), чтобы поставщик/менеджер видели оба в переписке:
-                // «Price request — [M-2026-XXXX] / [360989]».
-                $onecSuffix = filled($request->onec_number)
-                    ? ' / [' . trim((string) $request->onec_number) . ']'
-                    : '';
+                $letter = $this->composeLetter($request, $supplier, $items, $note, $edits);
+                $lang = $letter['lang'];
                 // Уникальный токен RFQ в теме → детерминированный матч ответа
                 // поставщика. Устойчив к сломанному треду и к пересылке чужого
                 // письма. Токен ОБЯЗАТЕЛЬНО сохраняем на инквайри ниже: матч
                 // ищет по колонке rfq_token, а не по тексту темы.
                 $rfqSvc = app(SupplierInquiryService::class);
                 $rfqToken = $rfqSvc->generateRfqToken();
-                $rfqMarker = ' ' . $rfqSvc->rfqMarker($rfqToken);
-                $subject = ($lang === 'en'
-                    ? 'Price request — [' . $request->internal_code . ']' . $onecSuffix
-                    : 'Запрос расценки — [' . $request->internal_code . ']' . $onecSuffix)
-                    . $rfqMarker;
-                // Примечание — на языке письма (English-поставщику переводим, как названия позиций).
-                $langNote = app(SupplierNoteTranslator::class)->forLanguage($note, $lang);
-                $bodyHtml = view('emails.supplier-rfq', [
-                    'request' => $request,
-                    'supplier' => $supplier,
-                    'rows' => $rows,
-                    'note' => $langNote,
-                    'greeting' => $personalGreeting,
-                    'lang' => $lang,
-                    'intro' => $intro,
-                    'closing' => $closing,
-                ])->render();
+                $subject = $letter['subject'] . ' ' . $rfqSvc->rfqMarker($rfqToken);
 
                 $this->drafts->update($draft, [
                     'to_recipients' => [['email' => $supplier->email, 'name' => $supplier->name ?: '']],
                     'subject' => $subject,
-                    'body_html' => $bodyHtml,
-                    'body_plain' => $this->plainBody($request, $rows, $langNote, $personalGreeting, $lang, $intro, $closing),
+                    'body_html' => $letter['html'],
+                    'body_plain' => $letter['plain'],
                 ]);
 
                 // Вложения: файлы заявки + загруженные с диска — до отправки,
@@ -241,6 +215,56 @@ class SupplierDispatchService
             'no_supplier' => 0,
             'suppliers' => $suppliers,
             'skipped' => $skipped,
+        ];
+    }
+
+    /**
+     * Письмо поставщику — ровно то, что уходит по старому алгоритму, без маркера [RFQ-…] в теме и
+     * без подписи (её клеит отправка): язык поставщика, правки названий/кол-ва, обращение,
+     * вступление, заключение, примечание на языке письма. Его же получает внесистемный
+     * поставщик через QuoteParts (QuotePartsRfqService::send, letters).
+     *
+     * @param  \Illuminate\Support\Collection<int, RequestItem>|list<int>  $items  позиции заявки или их id ([] — все активные)
+     * @return array{lang: string, subject: string, html: string, plain: string}
+     */
+    public function composeLetter(RequestModel $request, \App\Models\Supplier $supplier, $items, ?string $note, array $edits = []): array
+    {
+        if (! $items instanceof \Illuminate\Support\Collection) {
+            $items = $this->loadItems($request, $items);
+        }
+        $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
+        $rows = $this->itemRows($items, $lang, $edits);
+        $greetingTpl = $lang === 'en' ? ($edits['greeting_en'] ?? null) : ($edits['greeting_ru'] ?? null);
+        $personalGreeting = $this->personalGreeting($greetingTpl, $supplier, $lang);
+        $intro = trim((string) ($lang === 'en' ? ($edits['intro_en'] ?? '') : ($edits['intro_ru'] ?? '')));
+        $closing = trim((string) ($lang === 'en' ? ($edits['closing_en'] ?? '') : ($edits['closing_ru'] ?? '')));
+        // Тема несёт код заявки MZC, а при наличии — и номер запроса 1С
+        // (onec_number), чтобы поставщик/менеджер видели оба в переписке:
+        // «Price request — [M-2026-XXXX] / [360989]».
+        $onecSuffix = filled($request->onec_number)
+            ? ' / [' . trim((string) $request->onec_number) . ']'
+            : '';
+        $subject = $lang === 'en'
+            ? 'Price request — [' . $request->internal_code . ']' . $onecSuffix
+            : 'Запрос расценки — [' . $request->internal_code . ']' . $onecSuffix;
+        // Примечание — на языке письма (English-поставщику переводим, как названия позиций).
+        $langNote = app(SupplierNoteTranslator::class)->forLanguage($note, $lang);
+        $html = view('emails.supplier-rfq', [
+            'request' => $request,
+            'supplier' => $supplier,
+            'rows' => $rows,
+            'note' => $langNote,
+            'greeting' => $personalGreeting,
+            'lang' => $lang,
+            'intro' => $intro,
+            'closing' => $closing,
+        ])->render();
+
+        return [
+            'lang' => $lang,
+            'subject' => $subject,
+            'html' => $html,
+            'plain' => $this->plainBody($request, $rows, $langNote, $personalGreeting, $lang, $intro, $closing),
         ];
     }
 

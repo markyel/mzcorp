@@ -71,6 +71,18 @@ class QuotePartsInvite extends Component
     }
 
     /** Группы товаров уже приглашённого поставщика. */
+    /**
+     * Внесистемный поставщик: в QuoteParts не приглашаем, но запросы цен идут через платформу —
+     * нашим письмом с ящика orders@, ответ разбирает QuoteParts, копия ответа — автору запроса.
+     */
+    public function toggleOffsystem(): void
+    {
+        $this->supplier->forceFill(['quoteparts_offsystem' => ! $this->supplier->quoteparts_offsystem])->save();
+        \Illuminate\Support\Facades\Log::info('Supplier off-system flag changed', [
+            'supplier_id' => $this->supplier->id, 'offsystem' => $this->supplier->quoteparts_offsystem, 'user_id' => auth()->id(),
+        ]);
+    }
+
     public function saveGroups(QuotePartsSupplierService $service): void
     {
         $groups = array_values(array_intersect(\App\Models\SupplyGroup::codes(), $this->groups));

@@ -24,6 +24,18 @@
             <div class="text-amber-800">Ключ API QuoteParts не задан — приглашение не отправится.</div>
         @endunless
 
+        {{-- Внесистемный: не приглашаем, но запросы цен — нашим письмом с orders@ через QuoteParts. --}}
+        @if($status !== 'active')
+            <label class="flex items-start gap-2 text-[12.5px] cursor-pointer">
+                <input type="checkbox" wire:click="toggleOffsystem" @checked($supplier->quoteparts_offsystem) class="w-4 h-4 mt-0.5 accent-sky-600">
+                <span>
+                    <span class="font-medium text-fg-1">Внесистемный — запросы через QuoteParts</span>
+                    <span class="block text-fg-3">Без приглашения и кабинета. Запрос уходит нашим обычным письмом с orders@, ответ разбирает QuoteParts,
+                        цены появляются в «Актуализации цен», копия ответа — автору запроса.</span>
+                </span>
+            </label>
+        @endif
+
         @if($status && ! $open)
             {{-- Какие группы товаров поставщик видит в кабинете. --}}
             <div class="flex flex-wrap items-center gap-3 text-[12.5px]">

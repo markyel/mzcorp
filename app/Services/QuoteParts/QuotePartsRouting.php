@@ -22,17 +22,21 @@ class QuotePartsRouting
     }
 
     /**
+     * Три пути: принявшие приглашение — через платформу (её письмо и форма); внесистемные
+     * (suppliers.quoteparts_offsystem) — через платформу нашим письмом с ящика orders@;
+     * остальные — письмом из mzCorp, как раньше.
+     *
      * @param  list<int>  $supplierIds
-     * @return array{quoteparts: list<int>, mail: list<int>}
+     * @return array{quoteparts: list<int>, offsystem: list<int>, mail: list<int>}
      */
     public function split(array $supplierIds): array
     {
         $supplierIds = array_values(array_unique(array_map('intval', $supplierIds)));
         if ($supplierIds === [] || ! self::enabled()) {
-            return ['quoteparts' => [], 'mail' => $supplierIds];
+            return ['quoteparts' => [], 'offsystem' => [], 'mail' => $supplierIds];
         }
 
-        $rows = Supplier::query()->whereIn('id', $supplierIds)->get(['id', 'supplier_organization_id', 'quoteparts_status']);
+        $rows = Supplier::query()->whereIn('id', $supplierIds)->get(['id', 'supplier_organization_id', 'quoteparts_status', 'quoteparts_offsystem']);
         $activeOrgs = Supplier::query()->where('quoteparts_status', 'active')->whereNotNull('supplier_organization_id')
             ->whereIn('supplier_organization_id', $rows->pluck('supplier_organization_id')->filter())
             ->pluck('supplier_organization_id')->unique()->all();
@@ -41,9 +45,13 @@ class QuotePartsRouting
             || ($s->supplier_organization_id !== null && in_array($s->supplier_organization_id, $activeOrgs, true)))
             ->pluck('id')->map(fn ($id) => (int) $id)->all();
 
+        $offsystem = $rows->filter(fn (Supplier $s) => $s->quoteparts_offsystem && ! in_array((int) $s->id, $viaQp, true))
+            ->pluck('id')->map(fn ($id) => (int) $id)->all();
+
         return [
             'quoteparts' => array_values($viaQp),
-            'mail' => array_values(array_diff($supplierIds, $viaQp)),
+            'offsystem' => array_values($offsystem),
+            'mail' => array_values(array_diff($supplierIds, $viaQp, $offsystem)),
         ];
     }
 
@@ -56,5 +64,16 @@ class QuotePartsRouting
     public function routedIds(iterable $supplierIds): array
     {
         return array_fill_keys($this->split(collect($supplierIds)->map(fn ($id) => (int) $id)->all())['quoteparts'], true);
+    }
+
+    /**
+     * Внесистемные поставщики (id), запрос которым уйдёт нашим письмом через QuoteParts (orders@), — для пометки.
+     *
+     * @param  iterable<int>  $supplierIds
+     * @return array<int, true>
+     */
+    public function offsystemIds(iterable $supplierIds): array
+    {
+        return array_fill_keys($this->split(collect($supplierIds)->map(fn ($id) => (int) $id)->all())['offsystem'], true);
     }
 }

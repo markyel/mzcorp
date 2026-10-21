@@ -94,6 +94,21 @@ class DispatchPriceMonitorsCommand extends Command
                     Log::warning('PriceMonitors: QuoteParts не принял запрос', ['user_id' => $user->id, 'error' => $e->getMessage()]);
                 }
             }
+            // Внесистемные — наше же письмо через QuoteParts (orders@); не принял — им обычное письмо.
+            if ($route['offsystem'] !== []) {
+                try {
+                    $catalog = \App\Models\CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article', 'articles']);
+                    $letters = [];
+                    foreach (\App\Models\Supplier::query()->whereIn('id', $route['offsystem'])->get() as $s) {
+                        $letters[(int) $s->id] = $dispatcher->composeLetter($catalog, $s, $note);
+                    }
+                    app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send(null, array_fill_keys($cids, 1.0), $route['offsystem'], null, $note, $user, [], routed: true, letters: $letters);
+                    $qpSent += count($route['offsystem']);
+                } catch (\Throwable $e) {
+                    Log::warning('PriceMonitors: QuoteParts не принял запрос внесистемным', ['user_id' => $user->id, 'error' => $e->getMessage()]);
+                    $route['mail'] = array_values(array_unique([...$route['mail'], ...$route['offsystem']]));
+                }
+            }
             $res = $route['mail'] === [] ? ['sent' => 0] : $dispatcher->dispatch($cids, $route['mail'], $note, $user);
             $res['sent'] = ($res['sent'] ?? 0) + $qpSent;
 

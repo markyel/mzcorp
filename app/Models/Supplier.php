@@ -47,6 +47,7 @@ class Supplier extends Model
             'matrix_built_at' => 'datetime',
             'quoteparts_invited_at' => 'datetime',
             'quoteparts_groups' => 'array',
+            'quoteparts_offsystem' => 'boolean',
         ];
     }
 

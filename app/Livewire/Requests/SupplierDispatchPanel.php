@@ -1105,7 +1105,7 @@ class SupplierDispatchPanel extends Component
         // Поставщики, принявшие приглашение QuoteParts, — через платформу; остальным письмо.
         $route = app(\App\Services\QuoteParts\QuotePartsRouting::class)->split($supplierIds);
         $runs = app(\App\Services\Supplier\SupplierDispatchRuns::class);
-        if ($route['mail'] !== [] && ($active = $runs->active($req->id)) !== null) {
+        if (($route['mail'] !== [] || $route['offsystem'] !== []) && ($active = $runs->active($req->id)) !== null) {
             $this->addError('send', 'По заявке уже идёт рассылка ('.$active['user_name'].': отправлено '.$active['sent'].' из '.$active['total'].') — дождитесь, она видна выше.');
 
             return null;
@@ -1116,6 +1116,19 @@ class SupplierDispatchPanel extends Component
             $qpFiles[] = ['path' => (string) $a->file_path, 'disk' => (string) ($a->disk ?: 'local'), 'name' => (string) $a->filename, 'mime' => (string) ($a->mime_type ?: 'application/octet-stream')];
         }
         $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($req, $itemIds, $route['quoteparts'], $user, $qpFiles) : null;
+        // Внесистемные — наше же письмо через QuoteParts (orders@); не принял — им обычное письмо.
+        if ($route['offsystem'] !== []) {
+            $letters = [];
+            foreach (Supplier::query()->whereIn('id', $route['offsystem'])->get() as $s) {
+                $letters[(int) $s->id] = $dispatcher->composeLetter($req, $s, $itemIds, $this->note, $edits);
+            }
+            $offMsg = $this->routeToQuoteParts($req, $itemIds, $route['offsystem'], $user, $qpFiles, $letters);
+            if (str_starts_with($offMsg, 'QuoteParts не принял')) {
+                $route['mail'] = array_values(array_unique([...$route['mail'], ...$route['offsystem']]));
+                $offMsg = 'Внесистемным поставщикам QuoteParts не принял запрос — им уходит обычное письмо.';
+            }
+            $qpMsg = trim(($qpMsg ?? '').' '.$offMsg);
+        }
         // Письма — фоновой рассылкой (письмо уходит до минуты, страница ждёт 60 с: по таймауту
         // менеджер жал ещё раз и поставщики получали дубли). Повторы отсеиваем сразу.
         $skipped = [];
@@ -1153,7 +1166,7 @@ class SupplierDispatchPanel extends Component
      * @param  list<int>  $itemIds
      * @param  list<int>  $supplierIds
      */
-    private function routeToQuoteParts(RequestModel $req, array $itemIds, array $supplierIds, \App\Models\User $user, array $files = []): string
+    private function routeToQuoteParts(RequestModel $req, array $itemIds, array $supplierIds, \App\Models\User $user, array $files = [], array $letters = []): string
     {
         $quantities = [];
         $drafts = [];
@@ -1176,9 +1189,14 @@ class SupplierDispatchPanel extends Component
             }
         }
         try {
-            $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true, files: $files, notes: $notes);
+            $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true, files: $files, notes: $notes, letters: $letters);
         } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('QuoteParts RFQ refused', ['request_id' => $req->id, 'offsystem' => $letters !== [], 'error' => $e->getMessage()]);
+
             return 'QuoteParts не принял запрос ('.mb_substr($e->getMessage(), 0, 200).') — этим поставщикам не отправлено.';
+        }
+        if ($letters !== []) {
+            return 'Внесистемным через QuoteParts (письмо с orders@): запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' — ответы придут копией вам и в блок QuoteParts ниже.';
         }
 
         return 'Через QuoteParts: запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' (приняли приглашение) — ответы в блоке QuoteParts ниже.';

@@ -37,8 +37,12 @@ class QuotePartsRfqService
      *                                                                                                 (фото позиций, файлы) — в письмо и в кабинет поставщика
      * @param  array<string, string>  $notes  примечание к позиции для поставщика («c:{catalog_item_id}» или
      *                                        «d:{request_item_id}»): длина, количество текстом — в письме и форме
+     * @param  array<int, array{lang:string, subject:string, html:string, plain:string}>  $letters  внесистемные поставщики
+     *         (supplier_id => письмо по старому алгоритму, SupplierDispatchService/SupplierProcurementDispatchService::composeLetter):
+     *         QuoteParts шлёт его как есть с ящика внесистемных (orders@) от имени автора, с его подписью, без формы
+     *         и кабинета; ответы поставщиков — копией автору (решение 2026-10-21)
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = []): QuotePartsRfq
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = [], array $letters = []): QuotePartsRfq
     {
         // routed — поставщики, принявшие приглашение, из обычной рассылки (QuotePartsRouting): у любого сотрудника.
         if ($routed ? ! QuotePartsRouting::enabled() : ! QuotePartsPilot::enabledFor($by)) {
@@ -75,7 +79,7 @@ class QuotePartsRfqService
             }
         }
 
-        $result = $this->client->createRfq([
+        $payload = [
             'items' => $items,
             'suppliers' => $suppliers->all(),
             'reply_by' => $replyBy,
@@ -88,7 +92,18 @@ class QuotePartsRfqService
             // ответы поставщиков — копией автору, ответ на копию уходит поставщику.
             'mirror' => $by->quoteparts_mirror ? ['email' => $this->mirrorAddress($by), 'name' => $by->name] : null,
             'attachments' => $this->attachments($files),
-        ]);
+        ];
+        if ($letters !== []) {
+            // Внесистемные: письмо как по старому алгоритму, с подписью автора; копии ответов — автору всегда.
+            $payload += [
+                'channel' => 'offsystem',
+                'from_name' => $by->name,
+                'signature' => $this->signature($by),
+                'letters' => $this->offsystemLetters($letters, $rows, $by),
+            ];
+            $payload['mirror'] = ['email' => $this->mirrorAddress($by), 'name' => $by->name];
+        }
+        $result = $this->client->createRfq($payload);
 
         return QuotePartsRfq::create([
             'remote_id' => $result['id'],
@@ -413,6 +428,39 @@ class QuotePartsRfqService
                 throw new RuntimeException('Вложения больше '.round($limit / 1024 / 1024).' МБ — уберите часть файлов.');
             }
             $out[] = ['name' => mb_substr($f->getClientOriginalName() ?: 'file', 0, 200), 'mime' => $f->getMimeType() ?: 'application/octet-stream', 'content' => base64_encode($bytes)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Письма внесистемным поставщикам по ключу поставщика в QuoteParts: тело — как у письма из mzCorp
+     * (email-safe HTML) плюс подпись автора. Несколько адресов одной организации — один получатель
+     * в QuoteParts: ему письмо первого из них.
+     *
+     * @param  array<int, array{lang:string, subject:string, html:string, plain:string}>  $letters  supplier_id => письмо
+     * @param  \Illuminate\Support\Collection<int, Supplier>  $suppliers
+     * @return array<string, array{subject:string, html:string, text:string, locale:string}>
+     */
+    private function offsystemLetters(array $letters, \Illuminate\Support\Collection $suppliers, User $by): array
+    {
+        $signature = app(\App\Services\Mail\EmailSignatureService::class)->render($by);
+        $safe = new \App\Services\Mail\OutboundHtmlPostProcessor;
+        $out = [];
+        foreach ($suppliers as $s) {
+            $letter = $letters[$s->id] ?? null;
+            if ($letter === null || isset($out[$s->quotepartsKey()])) {
+                continue;
+            }
+            $out[$s->quotepartsKey()] = [
+                'subject' => mb_substr($letter['subject'], 0, 500),
+                'html' => $safe->emailSafe($letter['html']).(string) ($signature['html'] ?? ''),
+                'text' => rtrim($letter['plain']).(($signature['plain'] ?? '') !== '' ? "\n\n".$signature['plain'] : ''),
+                'locale' => $letter['lang'] === 'en' ? 'en' : 'ru',
+            ];
+        }
+        if (count($out) !== $suppliers->map->quotepartsKey()->unique()->count()) {
+            throw new RuntimeException('Не собрано письмо для части внесистемных поставщиков.');
         }
 
         return $out;
