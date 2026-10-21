@@ -78,7 +78,9 @@ class PriceExportService
             $r++;
         }
         $last = max(2, $r - 1);
-        $sheet->getStyle('D2:D'.$last)->getNumberFormat()->setFormatCode('dd.mm.yyyy');
+        // Дата — встроенным форматом даты Excel (код 14): категория «Дата», в русском Excel — 19.10.2026;
+        // пользовательский dd.mm.yyyy Excel относит к «(все форматы)», и загрузчик дату не узнаёт.
+        $sheet->getStyle('D2:D'.$last)->getNumberFormat()->setBuiltInFormatCode(14);
         $sheet->getStyle('F2:F'.$last)->getAlignment()->setWrapText(true);
         foreach (['A' => 12, 'B' => 14, 'C' => 12, 'D' => 12, 'E' => 8, 'F' => 70] as $col => $w) {
             $sheet->getColumnDimension($col)->setWidth($w);
