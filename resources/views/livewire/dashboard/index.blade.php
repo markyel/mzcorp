@@ -8,9 +8,10 @@
 
 <div class="space-y-4">
 
-    {{-- ───────── Period switcher (для funnel / heatmap) ─────────
-         Сохраняется в URL ?period=N (preset) или ?from=Y-m-d&to=Y-m-d (custom). --}}
-    @if($this->isPrivileged)
+    {{-- ───────── Period switcher (отчёт, воронка, heatmap) ─────────
+         Сохраняется в URL ?period=N (preset) или ?from=Y-m-d&to=Y-m-d (custom).
+         Виден всем: менеджеру отчёт считается по его заявкам (periodReport, $mine). --}}
+    @if(true)
         @php
             $isCustom = $this->isCustomPeriod;
             $pickerOpen = $this->customPickerOpen;
