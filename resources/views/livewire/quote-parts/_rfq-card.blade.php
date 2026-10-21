@@ -141,6 +141,14 @@
                                         {{ ['pending' => 'ждём ответа', 'declined' => 'отказ', 'question' => 'вопрос к нам', 'no_answer' => 'нет ответа'][$st] ?? $st }}
                                     </span>
                                     @if(! empty($line['decline_reason']))<span class="text-fg-3 text-[11.5px]">«{{ $line['decline_reason'] }}»</span>@endif
+                                    {{-- Поставщик отложил ответ до даты (ждёт обновления своей цены); дата наступила — пора отвечать. --}}
+                                    @if(! empty($line['postponed_until']) && in_array($st, ['pending', 'question'], true))
+                                        @php $pu = \Illuminate\Support\Carbon::parse($line['postponed_until']); @endphp
+                                        <span class="chip {{ $pu->isFuture() ? 'chip-neutral' : 'chip-warn' }} text-[10.5px]" title="{{ $line['postpone_note'] ?? '' }}">
+                                            {{ $pu->isFuture() ? 'поставщик отложил ответ до '.$pu->format('d.m') : 'срок, до которого отложил, наступил ('.$pu->format('d.m').')' }}
+                                        </span>
+                                        @if(! empty($line['postpone_note']))<span class="text-fg-3 text-[11.5px]">— {{ $line['postpone_note'] }}</span>@endif
+                                    @endif
                                 @endif
                             </td>
                         </tr>
