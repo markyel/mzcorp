@@ -309,12 +309,17 @@ class MediaDataService
      * когда тот выходил с опозданием, — позиция попадала в два поста подряд.
      * Граница — момент, когда писался прошлый вышедший материал: его факты
      * собраны тогда, всё, что появилось позже, — уже новое.
+     *
+     * Прошлый выпуск — вышедший до сегодняшнего дня: сегодняшний пост этой же темы в другой
+     * канал — тот же выпуск. Иначе второй канал прогона видел пустой период (21.10: пост
+     * «Поступления на склад» вышел во ВКонтакте, Telegram следом — «данных нет»).
      */
     public function since(MediaTopic $topic, int $days): Carbon
     {
         $floor = now()->subDays($days);
         $last = $topic->id
-            ? MediaPublication::query()->where('media_topic_id', $topic->id)->where('status', 'published')->max('created_at')
+            ? MediaPublication::query()->where('media_topic_id', $topic->id)->where('status', 'published')
+                ->where('created_at', '<', now()->startOfDay())->max('created_at')
             : null;
 
         return $last !== null && Carbon::parse($last)->gt($floor) ? Carbon::parse($last) : $floor;
