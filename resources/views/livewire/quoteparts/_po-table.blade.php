@@ -55,7 +55,7 @@
                     $cl = $clarifications[$r['id']] ?? null;
                     $clWaiting = ($cl['state'] ?? null) === \App\Services\QuoteParts\OfferClarifications::WAITING;
                 @endphp
-                <tr wire:key="po-{{ $r['id'] }}" class="border-b border-border-subtle align-top {{ $r['stale'] ? 'opacity-60' : '' }} {{ $chosenHere ? 'bg-sky-50' : ($isBest ? 'bg-emerald-50' : '') }}">
+                <tr wire:key="po-{{ $r['id'] }}" class="border-b border-border-subtle align-top {{ $r['stale'] || ($r['ignored'] ?? false) ? 'opacity-60' : '' }} {{ $chosenHere ? 'bg-sky-50' : ($isBest ? 'bg-emerald-50' : '') }}">
                     <td class="px-3 py-1.5 whitespace-nowrap text-fg-3">
                         {{ $r['at']?->timezone(config('app.timezone'))->format('d.m H:i') }}
                         <div class="text-[11px] text-fg-4">{{ $sources[$r['source']] ?? $r['source'] }}</div>
@@ -135,7 +135,11 @@
                     @endif
                     <td class="px-3 py-1.5">
                         <div class="flex flex-wrap items-center gap-1">
-                            @if($clWaiting)
+                            @if($r['ignored'] ?? false)
+                                {{-- Игнорируем: предложение не о том — в выгрузку 1С, «лучшее» и закупку не идёт. --}}
+                                <span class="chip chip-neutral text-[10.5px]" title="Цена не идёт в выгрузку 1С и не участвует в выборе">игнорируем</span>
+                                <button type="button" wire:click="ignore({{ $r['id'] }}, false)" class="text-[11px] text-sky-700 hover:underline">вернуть</button>
+                            @elseif($clWaiting)
                                 {{-- Задан уточняющий вопрос: решение — по ответу поставщика (или по истечении рабочего дня). --}}
                                 <span class="text-[11px] text-amber-700">решение после ответа</span>
                                 <button type="button" wire:click="clearClarification({{ $r['id'] }})" class="text-[11px] text-fg-4 hover:text-fg-1 underline" title="Снять ожидание и решить сейчас">решить без ответа</button>
@@ -163,6 +167,10 @@
                             @if($r['key'])
                                 <button type="button" wire:click="openDialog({{ $r['id'] }})" class="btn btn-sm {{ $dialog === $r['id'] ? 'btn-primary' : '' }}" title="Уточнить у поставщика — переписка по запросу или обращение">💬 Уточнить</button>
                             @endif
+                            @unless($r['ignored'] ?? false)
+                                <button type="button" wire:click="ignore({{ $r['id'] }}, true)" wire:confirm="Игнорировать это предложение? Его цена не пойдёт в выгрузку 1С."
+                                        class="btn btn-sm text-fg-3" title="Поставщик предложил не то — цена не пойдёт в выгрузку 1С, в «лучшее» и в закупку">Игнорировать</button>
+                            @endunless
                         </div>
                     </td>
                 </tr>

@@ -232,6 +232,21 @@ class QuotePartsPriceService
     }
 
     /**
+     * «Игнорировать» / «вернуть»: предложение не о том — его цена не идёт в выгрузку 1С, в «лучшее»
+     * и в выбор закупки; если по нему уже выбрали «закупаем здесь», выбор снимается.
+     */
+    public function ignore(QuotePartsOffer $offer, bool $ignore, User $by): QuotePartsOffer
+    {
+        $offer->forceFill(['ignored_at' => $ignore ? now() : null, 'ignored_by_user_id' => $ignore ? $by->id : null])->save();
+        if ($ignore && $offer->catalog_item_id !== null) {
+            \App\Models\CatalogItemSupplierChoice::query()->where('catalog_item_id', $offer->catalog_item_id)
+                ->where('source', 'quoteparts')->where('offer_ref', $offer->id)->delete();
+        }
+
+        return $offer;
+    }
+
+    /**
      * Копия отметок поставщиков «не сможем предложить» — изменения с последней синхронизации.
      *
      * @return int сколько записано

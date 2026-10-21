@@ -42,6 +42,8 @@ class QuotePartsOffer extends Model
         'request_id',
         'clarify_asked_at',
         'clarify_cleared_at',
+        'ignored_at',
+        'ignored_by_user_id',
     ];
 
     /** Разбор отклонения (не оригинала): ждёт, принято к закупке, отклонено. */
@@ -60,6 +62,7 @@ class QuotePartsOffer extends Model
         'reviewed_at' => 'datetime',
         'clarify_asked_at' => 'datetime',
         'clarify_cleared_at' => 'datetime',
+        'ignored_at' => 'datetime',
     ];
 
     /** Что предложено (вид оффера QuoteParts). */
@@ -90,6 +93,11 @@ class QuotePartsOffer extends Model
     /** Цена годится как цена позиции: оригинал или отклонение, принятое к закупке. */
     public function countsAsItemPrice(): bool
     {
+        // «Игнорировать» — снабжение решило, что предложение не о том: цены позиции нет.
+        if ($this->ignored_at !== null) {
+            return false;
+        }
+
         return ($this->kind ?? 'original') === 'original' || $this->review_status === self::REVIEW_ACCEPTED;
     }
 

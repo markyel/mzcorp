@@ -90,6 +90,14 @@ class PriceOffers extends Component
         unset($this->choices);
     }
 
+    /** «Игнорировать» / «Вернуть»: предложение не о том — его цена не идёт в выгрузку 1С, в «лучшее» и в закупку. */
+    public function ignore(int $offerId, bool $ignore, QuotePartsPriceService $prices): void
+    {
+        $prices->ignore(QuotePartsOffer::query()->findOrFail($offerId), $ignore, auth()->user());
+        unset($this->rows, $this->readyRows, $this->readyItems, $this->items, $this->groups, $this->choices, $this->bestIds);
+        $this->dispatch('toast', type: 'success', message: $ignore ? 'Игнорируем: цена не пойдёт в выгрузку 1С.' : 'Предложение снова учитывается.');
+    }
+
     /** Отклонение от оригинала (аналог, замена…): учитывать как цену позиции (и в выгрузке) или нет. */
     public function review(int $offerId, bool $accept, QuotePartsPriceService $prices): void
     {
@@ -580,6 +588,7 @@ class PriceOffers extends Component
             'kind' => $o->kind ?? 'original',
             'product' => trim(($o->brand ?? '').' '.($o->part_number ?? '')),
             'review' => $o->review_status,
+            'ignored' => $o->ignored_at !== null,
             'tiers' => (array) ($o->tiers ?? []),
             'price' => $o->price !== null ? (float) $o->price : null,
             'currency' => $o->currency,
