@@ -79,6 +79,7 @@ return [
             'base_url' => env('OPENAI_FALLBACK_BASE_URL', 'https://api-llm.beget.com'),
             // Названия моделей у шлюза: префикс провайдера и/или явные замены JSON {"gpt-4o":"…"}.
             'model_prefix' => env('OPENAI_FALLBACK_MODEL_PREFIX', ''),
+            'default_model' => env('OPENAI_FALLBACK_DEFAULT_MODEL'),
             'models' => env('OPENAI_FALLBACK_MODELS', '{}'),
             // Эмбеддинги через резерв — только если там та же модель (иначе векторы несовместимы).
             'embeddings' => (bool) env('OPENAI_FALLBACK_EMBEDDINGS', false),

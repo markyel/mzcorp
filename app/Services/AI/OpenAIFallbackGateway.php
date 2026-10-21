@@ -49,7 +49,18 @@ class OpenAIFallbackGateway
             return (string) $map[$model];
         }
 
-        return (string) config('services.openai.fallback.model_prefix', '').$model;
+        return self::byDefault($model);
+    }
+
+    /** Без явной замены: префикс провайдера, иначе модель по умолчанию (шлюз не знает наших старых названий). */
+    private static function byDefault(string $model): string
+    {
+        $prefix = (string) config('services.openai.fallback.model_prefix', '');
+        if ($prefix !== '') {
+            return $prefix.$model;
+        }
+
+        return (string) (config('services.openai.fallback.default_model') ?: $model);
     }
 
     /**

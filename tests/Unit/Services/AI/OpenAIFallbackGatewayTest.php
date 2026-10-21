@@ -58,5 +58,9 @@ class OpenAIFallbackGatewayTest extends TestCase
     {
         $this->assertSame('openai/gpt-4.1-2025', OpenAIFallbackGateway::modelFor('gpt-4.1'));
         $this->assertSame('openai/gpt-4o', OpenAIFallbackGateway::modelFor('gpt-4o'));
+        // Без префикса — модель по умолчанию: шлюз не знает наших старых названий.
+        config(['services.openai.fallback.model_prefix' => '', 'services.openai.fallback.default_model' => 'gpt-6.1-sol']);
+        $this->assertSame('gpt-6.1-sol', OpenAIFallbackGateway::modelFor('gpt-4o'));
+        $this->assertSame('openai/gpt-4.1-2025', OpenAIFallbackGateway::modelFor('gpt-4.1'));
     }
 }
