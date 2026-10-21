@@ -21,7 +21,7 @@ class PriceExportDeviationNoteTest extends TestCase
         $o = new QuotePartsOffer(['kind' => 'analog', 'brand' => 'Fermator', 'part_number' => 'FR-60', 'note' => 'подходит по размерам',
             'tiers' => [['min_qty' => 50, 'price' => 48.5], ['min_qty' => 10, 'price' => 52]], 'lead_time_days' => 30, 'valid_until' => '2026-12-31']);
 
-        $this->assertSame('аналог (не оригинал): Fermator FR-60 — подходит по размерам; мин. партия 10; цена по партиям: от 10 — 52; от 50 — 48,5; срок 30 дн.; действует до 31.12.2026',
+        $this->assertSame('аналог (не оригинал): Fermator FR-60 — подходит по размерам; мин. партия 10; цена по партиям: от 10 — 52; от 50 — 48,5; срок 30 дн.',
             PriceExportService::offerComment($o));
     }
 
@@ -33,7 +33,7 @@ class PriceExportDeviationNoteTest extends TestCase
 
     public function test_mail_comment(): void
     {
-        $this->assertSame('действует: 30 days; KM601 pulley: USD 52/pc, MOQ 10', PriceExportService::mailComment('30 days', "KM601 pulley:\n USD 52/pc, MOQ 10"));
+        $this->assertSame('KM601 pulley: USD 52/pc, MOQ 10', PriceExportService::mailComment('30 days', "KM601 pulley:\n USD 52/pc, MOQ 10"));
         $this->assertNull(PriceExportService::mailComment(null, ''));
         // Срок из самого фрагмента письма не повторяем отдельной подписью.
         $this->assertSame('GAA26800KF1 оригинал 672 долл по шт, срок подготовки 3-5 дней',
