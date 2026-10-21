@@ -144,9 +144,17 @@
                         @else
                             <span class="chip chip-neutral text-[11px]">не подключён</span>
                         @endif
-                        <a href="{{ route('oauth.yandex.quoteparts') }}" class="btn btn-sm {{ ($offsystemBox['connected'] ?? false) ? '' : 'btn-primary' }}">{{ ($offsystemBox['connected'] ?? false) ? 'Подключить заново' : 'Подключить через Яндекс' }}</a>
+                        <a href="{{ route('oauth.yandex.quoteparts') }}" target="_blank" rel="noopener" class="btn btn-sm {{ ($offsystemBox['connected'] ?? false) ? '' : 'btn-primary' }}">{{ ($offsystemBox['connected'] ?? false) ? 'Подключить заново' : 'Подключить через Яндекс' }}</a>
                         <span class="text-[12px] text-fg-4">войдите в Яндекс под {{ config('services.quoteparts.offsystem_mailbox') }}</span>
                     </div>
+                    {{-- Яндекс показывает код подтверждения (приложение mzCorp так настроено) — его вставляют сюда. --}}
+                    <form wire:submit="connectOffsystemCode" class="flex flex-wrap items-center gap-2">
+                        <span class="text-[12px] text-fg-2">Код от Яндекса:</span>
+                        <input type="password" wire:model="offsystemCode" autocomplete="off" placeholder="вставьте код" class="h-[30px] w-40 px-2 border border-border rounded-md bg-surface text-[13px]">
+                        <button type="submit" class="btn btn-sm btn-primary" wire:loading.attr="disabled" wire:target="connectOffsystemCode">Подключить</button>
+                        <span class="text-[12px] text-fg-4">код одноразовый и действует несколько минут</span>
+                    </form>
+                    @if($offsystemMessage)<div class="text-[12.5px] {{ str_contains($offsystemMessage, 'не подключён') ? 'text-[var(--status-overdue-fg)]' : 'text-[var(--status-ok-fg)]' }}">{{ $offsystemMessage }}</div>@endif
                     @if(! empty($offsystemBox['error']))<div class="text-[12px] text-[var(--status-overdue-fg)]">Ошибка чтения почты: {{ $offsystemBox['error'] }}</div>@endif
                     <div class="flex flex-wrap gap-1.5">
                         @forelse($this->offsystemSuppliers as $os)<span class="chip chip-info text-[11px]">{{ $os->organization?->name ?: $os->name }} · {{ $os->email }}</span>@empty<span class="text-fg-4 text-[12px]">Пока никто не отмечен внесистемным.</span>@endforelse

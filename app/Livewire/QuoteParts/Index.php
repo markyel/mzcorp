@@ -276,6 +276,44 @@ class Index extends Component
         $this->offsystemLoaded = true;
     }
 
+    /** Код, который Яндекс показал после входа (приложение mzCorp настроено на verification_code). */
+    public string $offsystemCode = '';
+
+    public ?string $offsystemMessage = null;
+
+    /**
+     * Код подтверждения Яндекса → токены → в QuoteParts (там проверка входа под ящиком).
+     * В mzCorp ящик не заводим и токены не храним.
+     */
+    public function connectOffsystemCode(\App\Services\Mail\YandexOAuthService $oauth, \App\Services\QuoteParts\QuotePartsClient $client): void
+    {
+        $code = preg_replace('/\s+/', '', $this->offsystemCode) ?? '';
+        $this->offsystemCode = '';
+        if ($code === '') {
+            $this->offsystemMessage = 'Вставьте код, который показал Яндекс.';
+
+            return;
+        }
+        $address = (string) config('services.quoteparts.offsystem_mailbox');
+        try {
+            $tokens = $oauth->exchangeCode($code);
+            if (empty($tokens['refresh_token'])) {
+                throw new \RuntimeException('Яндекс не выдал refresh-токен.');
+            }
+            $this->offsystemBox = $client->connectOffsystemMailbox([
+                'address' => $address,
+                'access_token' => $tokens['access_token'],
+                'refresh_token' => $tokens['refresh_token'],
+                'expires_in' => max(60, (int) now()->diffInSeconds($tokens['expires_at'])),
+            ]);
+            $this->offsystemMessage = "Ящик {$address} подключён к QuoteParts через Яндекс.";
+            \Illuminate\Support\Facades\Log::info('QuoteParts offsystem mailbox connected', ['address' => $address, 'user_id' => auth()->id()]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('QuoteParts offsystem mailbox connect failed', ['address' => $address, 'error' => $e->getMessage()]);
+            $this->offsystemMessage = "Ящик {$address} не подключён: ".mb_substr($e->getMessage(), 0, 300).' Код одноразовый — получите новый.';
+        }
+    }
+
     #[Computed]
     public function offsystemSuppliers()
     {
