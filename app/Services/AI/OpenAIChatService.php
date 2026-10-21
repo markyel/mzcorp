@@ -85,6 +85,7 @@ class OpenAIChatService
                 && OpenAIFallbackGateway::shouldFallback($response, $connectError)) {
                 $why = $response !== null ? $response->status().' '.mb_substr($response->body(), 0, 200) : (string) $connectError?->getMessage();
                 $response = $fallback->post('/v1/chat/completions', $payload, $why);
+                $viaFallback = true;
             }
             if ($response === null) {
                 throw $connectError;
@@ -97,6 +98,7 @@ class OpenAIChatService
             }
 
             $data = $response->json();
+            AiUsageMeter::record((string) ($data['model'] ?? $model), (array) ($data['usage'] ?? []), isset($viaFallback) ? 'reserve' : 'primary');
 
             return [
                 'content' => $data['choices'][0]['message']['content'] ?? '',

@@ -72,6 +72,20 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com'),
         'proxy_key' => env('OPENAI_PROXY_KEY', ''),
+        // Цены для учёта расхода (ai:usage), $ за 1 млн токенов: [вход, выход, кэшированный вход].
+        // Модели шлюза Beget — его рублёвые цены, переведённые по ~81 ₽/$ (21.10.2026).
+        'prices' => [
+            'gpt-4o-mini' => [0.15, 0.60, 0.075],
+            'gpt-4o' => [2.50, 10.00, 1.25],
+            'gpt-4.1' => [2.00, 8.00, 0.50],
+            'gpt-4.1-mini' => [0.40, 1.60, 0.10],
+            'gpt-4.1-nano' => [0.10, 0.40, 0.025],
+            'text-embedding-3-small' => [0.02, 0, 0.02],
+            'text-embedding-3-large' => [0.13, 0, 0.13],
+            'gpt-6-luna' => [0.15, 0.73, 0.15],
+            'gpt-6.1-sol' => [2.89, 14.44, 2.89],
+            'gpt-5.6-sol' => [5.78, 28.89, 5.78],
+        ],
         // Резервный шлюз (Beget AI Gateway, OpenAI-совместимый): основной канал недоступен —
         // запрос уходит туда. Пустой ключ — резерва нет. См. App\Services\AI\OpenAIFallbackGateway.
         'fallback' => [

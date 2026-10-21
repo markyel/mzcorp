@@ -110,6 +110,7 @@ class OpenAIEmbeddingService
             && OpenAIFallbackGateway::shouldFallback($response, $connectError)) {
             $why = $response !== null ? $response->status().' '.mb_substr($response->body(), 0, 200) : (string) $connectError?->getMessage();
             $response = $fallback->post('/v1/embeddings', $payload, $why, 60);
+            $viaFallback = true;
         }
         if ($response === null) {
             throw new RuntimeException('OpenAI embeddings API failed: '.$connectError?->getMessage());
@@ -128,6 +129,7 @@ class OpenAIEmbeddingService
         }
 
         $data = $response->json();
+        AiUsageMeter::record((string) ($data['model'] ?? $model), (array) ($data['usage'] ?? []), isset($viaFallback) ? 'reserve' : 'primary');
         $items = $data['data'] ?? [];
         // API не гарантирует порядок — сортируем по index.
         usort($items, fn ($a, $b) => ($a['index'] ?? 0) <=> ($b['index'] ?? 0));
