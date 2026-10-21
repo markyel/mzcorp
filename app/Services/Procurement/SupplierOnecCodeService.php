@@ -118,9 +118,14 @@ class SupplierOnecCodeService
             return collect();
         }
         // Самые длинные слова названия (без форм собственности) — по вхождению, потом по сходству.
+        // Формы собственности и города — не отличают поставщика («Тиссен Москва» → все московские).
+        $noise = ['ооо', 'зао', 'оао', 'пао', 'ип', 'ltd', 'gmbh', 'co.', 'поставщик', 'москва', 'мск', 'санкт-петербург', 'спб', 'г.москва', 'китай', 'china', 'germany', 'италия', 'italy'];
         $words = collect(preg_split('/[\s,().\/]+/u', $norm))
-            ->reject(fn ($w) => mb_strlen($w) < 3 || in_array($w, ['ооо', 'зао', 'оао', 'пао', 'ип', 'ltd', 'gmbh', 'co.', 'поставщик'], true))
-            ->sortByDesc(fn ($w) => mb_strlen($w))->take(2)->values();
+            ->reject(fn ($w) => mb_strlen($w) < 3 || in_array($w, $noise, true))
+            ->values();
+        // Первое значимое слово — обычно само название; ещё одно самое длинное — для «ЩЛЗ / Щербинский».
+        $main = $words->first();
+        $words = $words->sortByDesc(fn ($w) => mb_strlen($w))->prepend($main)->filter()->unique()->take(2)->values();
 
         return OnecCounterparty::query()
             ->where(function ($q) use ($words, $norm) {
@@ -130,6 +135,7 @@ class SupplierOnecCodeService
                 $q->orWhere('name_normalized', $norm);
             })
             ->orderByRaw('CASE WHEN name_normalized = ? THEN 0 ELSE 1 END', [$norm])
+            ->orderByRaw('CASE WHEN name_normalized LIKE ? THEN 0 ELSE 1 END', ['%'.($main ?? $norm).'%'])
             ->orderByRaw('length(name_normalized)')
             ->limit($limit)
             ->get();
