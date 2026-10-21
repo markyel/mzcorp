@@ -25,6 +25,8 @@ class OpenAIFallbackGateway
     /** Шлюз Beget отклоняет запрос без max_tokens, если оценка стоимости больше баланса. */
     private const DEFAULT_MAX_TOKENS = 4096;
 
+    private const MIN_MAX_TOKENS = 1000;
+
     public function enabled(): bool
     {
         return trim((string) config('services.openai.fallback.api_key')) !== '';
@@ -75,8 +77,10 @@ class OpenAIFallbackGateway
         $payload['model'] = $path === '/v1/chat/completions'
             ? self::modelFor((string) ($payload['model'] ?? ''))
             : (string) ($payload['model'] ?? '');
-        if ($path === '/v1/chat/completions' && ! isset($payload['max_tokens']) && ! isset($payload['max_completion_tokens'])) {
-            $payload['max_tokens'] = self::DEFAULT_MAX_TOKENS;
+        // Лимит ответа — не меньше MIN_MAX_TOKENS: дешёвые модели шлюза (gpt-6-luna) сначала рассуждают
+        // и при лимите в 20 токенов возвращали пустой ответ; платим только за потраченное.
+        if ($path === '/v1/chat/completions' && ! isset($payload['max_completion_tokens'])) {
+            $payload['max_tokens'] = isset($payload['max_tokens']) ? max((int) $payload['max_tokens'], self::MIN_MAX_TOKENS) : self::DEFAULT_MAX_TOKENS;
         }
 
         // Раз в час — в лог как ошибка: основной канал лежит, работаем на резерве (за деньги Beget).
