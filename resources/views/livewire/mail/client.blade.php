@@ -355,7 +355,7 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .tstrip-all.on{background:var(--bg-selected);border-color:var(--sky-500);color:var(--sky-700)}
 .mailapp .tstrip-list{width:100%;padding:0 12px 6px}
 /* В развёрнутом треде видно, какое письмо выбрано в списке слева. */
-.mailapp .msg.cur{box-shadow:inset 3px 0 0 var(--sky-500);padding-left:12px}
+.mailapp .msg.anchor{box-shadow:inset 3px 0 0 var(--sky-500);padding-left:12px}
 .mailapp .tstrip-item{display:flex;align-items:center;gap:8px;width:100%;border:none;background:none;cursor:pointer;
     padding:5px 12px;border-radius:6px;font:400 12px/1.3 var(--font-sans);color:var(--fg-2);text-align:left}
 .mailapp .tstrip-item:hover{background:var(--bg-hover)}
@@ -1063,7 +1063,7 @@ body.mail-resizing iframe{pointer-events:none}
                 @endphp
                 @foreach($shown as $msg)
                     @php $outbound = $msg->direction?->value === 'outbound'; $html = $this->bodyHtmlFor($msg); @endphp
-                    <div class="msg {{ $msg->is_draft ? 'draft' : ($outbound ? 'outbound' : '') }} {{ $shown->count() > 1 && (int) $msg->id === (int) $anchor->id ? 'cur' : '' }}"
+                    <div class="msg {{ $msg->is_draft ? 'draft' : ($outbound ? 'outbound' : '') }} {{ $shown->count() > 1 && (int) $msg->id === (int) $anchor->id ? 'anchor' : '' }}"
                          wire:key="msg-{{ $msg->id }}">
                         <div class="mhead">
                             <span class="av">{{ $msg->is_draft ? '✎' : $initials($msg->from_name, $msg->from_email) }}</span>

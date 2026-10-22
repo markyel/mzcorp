@@ -14,6 +14,7 @@ use App\Services\Mail\HtmlSanitizer;
 use App\Services\Mail\LetterTemplateService;
 use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\MailHistoryMirrorService;
+use App\Services\Mail\MailQuoteBuilder;
 use App\Services\Mail\OutboundReplyHooks;
 use App\Services\Mail\OutgoingMailSender;
 use App\Services\Mail\OutgoingSendRetryService;
@@ -452,6 +453,36 @@ class Composer extends Component
         $sig = trim((string) (auth()->user()?->email_signature ?? ''));
 
         return $sig !== '' ? $sig : null;
+    }
+
+    /**
+     * Цитата исходного письма — ровно та, что уйдёт клиенту: тот же
+     * MailQuoteBuilder, что и при отправке (OutgoingMailMimeBuilder), как
+     * в композере заявки (Requests\Mail\ComposeForm::quotePreviewHtml).
+     * Рисуется в sandbox-iframe, стили письма в почтовик не текут.
+     */
+    #[Computed]
+    public function quotePreviewHtml(): ?string
+    {
+        $inReplyTo = $this->draftId ? EmailMessage::query()->whereKey($this->draftId)->value('in_reply_to') : null;
+        if (! $inReplyTo) {
+            return null;
+        }
+        $replyTo = EmailMessage::query()
+            ->where('message_id', $inReplyTo)
+            ->where('is_draft', false)
+            ->first();
+        if (! $replyTo) {
+            return null;
+        }
+
+        $quote = app(MailQuoteBuilder::class)->build($replyTo);
+
+        return '<!DOCTYPE html><html><head><meta charset="utf-8"></head>'
+            .'<body style="margin:8px 10px;font-family:-apple-system,Arial,sans-serif;'
+            .'font-size:13px;line-height:1.5;color:#374151;word-break:break-word">'
+            .$quote['html']
+            .'</body></html>';
     }
 
     /* ------------------------------ send ------------------------------ */

@@ -95,6 +95,11 @@
 .mail-composer .rte-ed td p,.mail-composer .rte-ed th p{margin:0}
 .mail-composer .rte-ed .selectedCell:after{content:'';position:absolute;inset:0;background:rgba(14,165,233,.12);pointer-events:none}
 .mail-composer .rte-ed .ProseMirror-gapcursor:after{border-top:1px solid var(--fg-1)}
+.mail-composer .quote{margin-top:10px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-surface);flex:0 0 auto}
+.mail-composer .quote summary{cursor:pointer;padding:7px 10px;font:400 12px/1.4 var(--font-sans);color:var(--fg-3);user-select:none}
+.mail-composer .quote summary:hover{background:var(--bg-surface-2)}
+.mail-composer .quote summary b{color:var(--fg-1);font-weight:500}
+.mail-composer .quote iframe{display:block;width:100%;height:min(240px,30vh);border:0;border-top:1px solid var(--border-subtle);background:#fff;border-radius:0 0 var(--r-md) var(--r-md)}
 .mail-composer .sig{font:400 12px/1.5 var(--font-sans);color:var(--fg-3);margin-top:12px;padding-top:10px;border-top:1px dashed var(--border-subtle);white-space:pre-line;flex:0 0 auto}
 .mail-composer .atts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;flex:0 0 auto}
 .mail-composer .att{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:999px;background:var(--sky-50);color:var(--sky-700);font:500 11px/1 var(--font-sans)}
@@ -398,6 +403,14 @@
 
             @if($this->signaturePreview)
                 <div class="sig">{{ $this->signaturePreview }}</div>
+            @endif
+
+            {{-- Цитата исходного письма — что увидит клиент под ответом (как в композере заявки). --}}
+            @if($quoteHtml = $this->quotePreviewHtml)
+                <details class="quote" wire:key="cq-{{ $draftId }}">
+                    <summary>При отправке к письму добавится: <b>цитата исходного письма</b> · нажмите чтобы посмотреть</summary>
+                    <iframe sandbox="" srcdoc="{{ $quoteHtml }}"></iframe>
+                </details>
             @endif
         </div>
 
