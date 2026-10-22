@@ -192,6 +192,9 @@ class Index extends Component
         return QuotePartsPilot::enabledFor(auth()->user());
     }
 
+    /** Блок «Запросы через QuoteParts»: stuck — только застрявшие (по умолчанию, как у прямых запросов) | all. */
+    public string $qpView = 'stuck';
+
     /** Запросы через QuoteParts из «Снабжения» (без заявки): открытые и закрытые за 30 дней. */
     #[Computed]
     public function quotePartsRfqs(): Collection
@@ -203,6 +206,15 @@ class Index extends Component
             ->when($creatorId !== null, fn ($q) => $q->where(fn ($w) => $w->where('created_by_user_id', $creatorId)->orWhereNull('created_by_user_id')))
             ->where(fn ($q) => $q->where('status', 'open')->orWhere('created_at', '>=', now()->subDays(30)))
             ->with('createdBy:id,name')->latest('id')->limit(30)->get();
+    }
+
+    /** Показанные в блоке: все или только с застрявшими поставщиками (QuotePartsRfq::stuckSuppliers). */
+    #[Computed]
+    public function quotePartsShown(): Collection
+    {
+        return $this->qpView === 'all'
+            ? $this->quotePartsRfqs
+            : $this->quotePartsRfqs->filter(fn (QuotePartsRfq $r) => $r->stuckSuppliers() !== [])->values();
     }
 
     protected function quotePartsRfqForAnswer(int $id): QuotePartsRfq

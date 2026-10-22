@@ -96,18 +96,36 @@
     {{-- Запросы через QuoteParts (пилот): ответы поставщиков формой или письмом. --}}
     @php $qpRfqs = $this->quotePartsRfqs; @endphp
     @if($qpRfqs->isNotEmpty())
-        @php $qpNames = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames($qpRfqs); @endphp
+        @php
+            $qpShown = $this->quotePartsShown;
+            $qpNames = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames($qpRfqs);
+        @endphp
         <div class="ds-card" x-data="{ open: true }">
             <div class="ds-card-header cursor-pointer select-none" @click="open = !open">
                 <h3 class="text-[15px] font-semibold text-fg-1">Запросы через QuoteParts</h3>
-                <span class="text-[12px] text-fg-3 ml-2">пилот · открытые и за 30 дней: {{ $qpRfqs->count() }}</span>
+                <span class="text-[12px] text-fg-3 ml-2">{{ $qpView === 'all' ? 'открытые и за 30 дней: '.$qpRfqs->count() : 'застрявшие: '.$qpShown->count().' из '.$qpRfqs->count() }}</span>
                 <span class="flex-1"></span>
-                <span class="text-[12px] text-fg-3" x-text="open ? '▾' : '▸'"></span>
+                {{-- Как у прямых запросов: по умолчанию только застрявшие. --}}
+                <select wire:model.live="qpView" @click.stop
+                        class="h-[30px] pl-2 pr-8 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500">
+                    <option value="stuck">⚠ Застрявшие</option>
+                    <option value="all">Все</option>
+                </select>
+                <span class="text-[12px] text-fg-3 ml-2" x-text="open ? '▾' : '▸'"></span>
             </div>
             <div class="ds-card-body space-y-3 text-[13px]" x-show="open">
-                @foreach($qpRfqs as $rfq)
+                @forelse($qpShown as $rfq)
+                    @if($qpView !== 'all' && ($stuck = $rfq->stuckSuppliers()) !== [])
+                        <div class="flex flex-wrap gap-1.5 -mb-1">
+                            @foreach($stuck as $key => $why)
+                                <span class="chip text-[10.5px]" style="background:var(--amber-50);color:var(--amber-800)"><span class="dot"></span>{{ $qpNames[$key] ?? $key }}: {{ \App\Models\QuotePartsRfq::STUCK_LABELS[$why] }}</span>
+                            @endforeach
+                        </div>
+                    @endif
                     @include('livewire.quote-parts._rfq-card', ['rfq' => $rfq, 'supplierNames' => $qpNames, 'refreshAction' => 'refreshQuotePartsRfq'])
-                @endforeach
+                @empty
+                    <div class="text-[12.5px] text-fg-3">Застрявших нет — по всем запросам есть ответ или ход за поставщиком. Все запросы — «Все».</div>
+                @endforelse
             </div>
         </div>
     @endif
