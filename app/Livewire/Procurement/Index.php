@@ -1971,6 +1971,11 @@ class Index extends Component
 
         $rows = $q
             ->withCount(['inboundMessages as inbound_count', 'items as items_count', 'offers as offers_count'])
+            // Чьё письмо последнее: поставщик спросил, а мы уже ответили (EVE, запрос #7941) —
+            // это не «ответьте», а ожидание поставщика.
+            ->addSelect(['last_direction' => \App\Models\EmailMessage::query()->select('direction')
+                ->whereColumn('supplier_inquiry_id', 'supplier_inquiries.id')->where('is_draft', false)
+                ->orderByDesc('sent_at')->orderByDesc('id')->limit(1)])
             ->with([
                 'items:id,supplier_inquiry_id,catalog_item_id,item_name,status',
                 'items.catalogItem:id,sku,name',

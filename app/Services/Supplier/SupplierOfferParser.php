@@ -75,8 +75,15 @@ class SupplierOfferParser
         // Пустая или обрубленная текстовая часть («Hello?» при HTML с вопросом «How many meters
         // you need?», запрос #7937) — текст из HTML, как во всём конвейере почты.
         $cleaner = app(\App\Services\Mail\EmailTextCleanerService::class);
-        if (($text === '' || $cleaner->bodyPlainLooksBroken($text)) && trim((string) $reply->body_html) !== '') {
-            $text = trim($cleaner->htmlToText((string) $reply->body_html)) ?: $text;
+        if (trim((string) $reply->body_html) !== '') {
+            $htmlText = trim($cleaner->htmlToText((string) $reply->body_html));
+            // Текстовая часть — одно приветствие, а цена только в HTML (JF, запрос #8001: plain
+            // «Hello Marina.petrova» — ровно 20 символов, «битым» не считался): берём HTML, когда
+            // короткий plain многократно короче текста HTML.
+            $plainTooShort = mb_strlen($text) < 200 && mb_strlen($htmlText) > 3 * mb_strlen($text) + 100;
+            if ($text === '' || $cleaner->bodyPlainLooksBroken($text) || $plainTooShort) {
+                $text = $htmlText ?: $text;
+            }
         }
         // Разбираем ТОЛЬКО новый текст ответа поставщика — цитату нашего же
         // письма (и предыдущей переписки) срезаем. Иначе LLM цепляется за
@@ -103,6 +110,19 @@ class SupplierOfferParser
                 $model,
                 ['temperature' => 0, 'max_tokens' => 1500, 'response_format' => ['type' => 'json_object']],
             );
+            // Модель отказалась из-за картинки («I can't assist with that» — запрос #7945: цена
+            // и вопрос в тексте, фото во вложении) — разбираем текст без картинок, а не молчим.
+            if (trim((string) ($result['content'] ?? '')) === '' && $images !== []) {
+                Log::warning('SupplierOfferParser: empty answer with images, retry text only', [
+                    'inquiry_id' => $inquiry->id, 'message_id' => $reply->id,
+                    'refusal' => mb_substr((string) data_get($result, 'raw.choices.0.message.refusal', ''), 0, 200),
+                ]);
+                $result = $this->openai->chat(
+                    $this->prompt->build($promptItems, $text, $attachmentText, []),
+                    config('services.openai.intent_model', 'gpt-4o-mini'),
+                    ['temperature' => 0, 'max_tokens' => 1500, 'response_format' => ['type' => 'json_object']],
+                );
+            }
         } catch (\Throwable $e) {
             Log::warning('SupplierOfferParser: LLM failed', ['inquiry_id' => $inquiry->id, 'message_id' => $reply->id, 'error' => $e->getMessage()]);
 
@@ -112,6 +132,8 @@ class SupplierOfferParser
 
         $parsed = json_decode($result['content'] ?? '', true);
         if (! is_array($parsed) || ! isset($parsed['offers']) || ! is_array($parsed['offers'])) {
+            Log::warning('SupplierOfferParser: no JSON in the answer', ['inquiry_id' => $inquiry->id, 'message_id' => $reply->id, 'content' => mb_substr((string) ($result['content'] ?? ''), 0, 200)]);
+
             return $zero;
         }
 

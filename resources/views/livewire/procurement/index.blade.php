@@ -40,7 +40,10 @@
                                      только при ОТСУТСТВИИ оффера; null ≠ «без оффера»). --}}
                                 <span class="chip text-[10.5px]" style="background:var(--emerald-50);color:var(--emerald-700)"><span class="dot"></span>оффер получен · {{ $inq->offers_count }}</span>
                             @elseif($inq->inbound_count > 0)
-                                @if($inq->reply_state === 'question_to_us')
+                                @if(($inq->last_direction instanceof \BackedEnum ? $inq->last_direction->value : $inq->last_direction) === 'outbound')
+                                    {{-- Последнее письмо наше (ответили на вопрос, уточнили) — ход за поставщиком. --}}
+                                    <span class="chip text-[10.5px]" style="background:var(--sky-50);color:var(--sky-700)"><span class="dot"></span>вы ответили · ждём поставщика</span>
+                                @elseif($inq->reply_state === 'question_to_us')
                                     <span class="chip text-[10.5px]" style="background:var(--red-50);color:var(--red-700)"><span class="dot"></span>задал вопрос — ответьте</span>
                                 @elseif($inq->reply_state === 'awaiting_supplier')
                                     <span class="chip text-[10.5px]" style="background:var(--neutral-100);color:var(--fg-3)"><span class="dot"></span>поставщик уточняет / ещё считает</span>
