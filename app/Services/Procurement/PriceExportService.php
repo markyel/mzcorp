@@ -42,6 +42,42 @@ class PriceExportService
     public function export(Carbon $from, Carbon $to, ?User $by): PriceExport
     {
         [$prices, $skipped] = $this->collect($from, $to);
+
+        return $this->write($prices, $skipped, $from, $to, $by, PriceExport::KIND_PERIOD);
+    }
+
+    /**
+     * Выгрузка по списку позиций «Актуализации цен»: все действующие цены поставщиков по этим
+     * позициям, выбранный поставщик — с отметкой «закупаем здесь». У поставщика по позиции одна
+     * строка: выбранное предложение, иначе оригинал, иначе последнее (копию 3 USD рядом с
+     * оригиналом 6 USD того же поставщика в 1С не грузим, пока её не выбрали).
+     *
+     * @param  Collection<int, QuotePartsOffer>  $offers
+     */
+    public function exportOffers(Collection $offers, ?User $by): PriceExport
+    {
+        $offers = $offers->filter(fn (QuotePartsOffer $o) => $o->catalogItem !== null && (float) $o->price > 0 && $o->countsAsItemPrice());
+        $chosen = app(SupplierChoiceService::class)->forItems($offers->pluck('catalog_item_id')->unique()->values()->all())
+            ->filter(fn ($c) => $c->source === 'quoteparts')->map(fn ($c) => (int) $c->offer_ref);
+
+        $prices = $offers->groupBy(fn (QuotePartsOffer $o) => $o->catalog_item_id.'|'.$o->supplier_key)
+            ->map(fn (Collection $g) => $g->first(fn ($o) => ($chosen[$o->catalog_item_id] ?? null) === (int) $o->id)
+                ?? $g->where('kind', 'original')->sortByDesc('remote_updated_at')->first()
+                ?? $g->sortByDesc('remote_updated_at')->first())
+            ->map(fn (QuotePartsOffer $o) => self::quotePartsPrice($o))
+            ->values();
+
+        $from = $prices->min('date');
+
+        return $this->write($prices, 0, $from ? Carbon::parse($from) : now(), now(), $by, PriceExport::KIND_POSITIONS);
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $prices
+     */
+    private function write(Collection $prices, int $skipped, Carbon $from, Carbon $to, ?User $by, string $kind): PriceExport
+    {
+        $positions = $kind === PriceExport::KIND_POSITIONS;
         $keys = $prices->pluck('key')->filter()->unique()->values()->all();
         $names = $this->names1c($keys);
         $codes = app(SupplierOnecCodeService::class);
@@ -92,13 +128,17 @@ class PriceExportService
         $notes->setTitle('Пояснения');
         $notes->fromArray([
             ['Выгрузка новых цен поставщиков', ''],
-            ['Период', $from->format('d.m.Y H:i').' – '.$to->format('d.m.Y H:i').' (по дате письма / предложения поставщика)'],
+            $positions
+                ? ['Позиции', 'Список выгрузки «Актуализация цен»: все действующие цены поставщиков по позициям, выбранный поставщик — «закупаем здесь».']
+                : ['Период', $from->format('d.m.Y H:i').' – '.$to->format('d.m.Y H:i').' (по дате письма / предложения поставщика)'],
             ['Сформировано', now()->format('d.m.Y H:i').($by ? ' · '.$by->name : '')],
             ['', ''],
             ['Артикул', 'M-артикул позиции. Строка — позиция × поставщик: последняя цена поставщика по позиции за период, за единицу, в валюте поставщика. Принятые к закупке аналог / восстановленное и т. п. — как цена самой позиции; что предложено — в комментарии.'],
             ['Поставщик', 'Код контрагента из справочника 1С УНФ. Нет кода — поставщик не привязан к контрагенту 1С: его название в комментарии, привязать можно в «Выгрузке цен».'],
             ['Комментарий', 'Что важно знать о предложении: не оригинал (аналог, копия…) с брендом и артикулом, минимальная партия и ступени цены, срок поставки, примечание поставщика, закупаем здесь; для ответов письмом — фрагмент письма с ценой.'],
-            ['Не выгружено', $skipped.' ответ(ов) рассылки с аналогом / копией в тексте — их нужно разобрать по письму.'],
+            $positions
+                ? ['Не выгружено', 'Копии и аналоги, которые не выбраны к закупке; предложения, отмеченные «Игнорировать».']
+                : ['Не выгружено', $skipped.' ответ(ов) рассылки с аналогом / копией в тексте — их нужно разобрать по письму.'],
             ['Без кода 1С', $noCode->isEmpty() ? '—' : $noCode->implode(', ')],
             ['Итого', ($r - 2).' строк, '.$latest->pluck('sku')->unique()->count().' артикулов, '.$latest->pluck('name')->unique()->count().' поставщиков'],
         ], null, 'A1');
@@ -108,7 +148,7 @@ class PriceExportService
         $book->setActiveSheetIndex(0);
 
         $disk = config('procurement.price_export.disk', 'local');
-        $path = trim(config('procurement.price_export.directory', 'exports/prices'), '/').'/Цены поставщиков '.$from->format('d.m').'-'.$to->format('d.m.Y').' '.now()->format('His').'.xlsx';
+        $path = trim(config('procurement.price_export.directory', 'exports/prices'), '/').'/Цены поставщиков '.($positions ? 'актуализация '.now()->format('d.m.Y His') : $from->format('d.m').'-'.$to->format('d.m.Y').' '.now()->format('His')).'.xlsx';
         $tmp = tempnam(sys_get_temp_dir(), 'px');
         (new Xlsx($book))->save($tmp);
         Storage::disk($disk)->put($path, (string) file_get_contents($tmp));
@@ -122,6 +162,7 @@ class PriceExportService
             'skipped_count' => $skipped,
             'file_path' => $path,
             'created_by_user_id' => $by?->id,
+            'kind' => $kind,
         ]);
     }
     /**
@@ -169,18 +210,27 @@ class PriceExportService
             if (! $o->countsAsItemPrice() || $o->catalogItem === null) {
                 continue;
             }
-            $at = $o->remote_updated_at ?? $o->created_at;
-            $out->push([
-                'cid' => (int) $o->catalog_item_id, 'sku' => (string) $o->catalogItem->sku,
-                'key' => $o->supplier_key, 'fallback' => (string) ($o->supplier_name ?: $o->supplier_key),
-                'price' => (float) $o->price, 'currency' => $o->currency,
-                'date' => Carbon::parse($at),
-                // Поправленный снабжением комментарий — как есть, иначе собранный.
-                'comment' => $o->export_comment ?? self::offerComment($o),
-            ]);
+            $out->push(self::quotePartsPrice($o));
         }
 
         return [$out, $skipped];
+    }
+
+    /**
+     * Строка выгрузки по предложению QuoteParts.
+     *
+     * @return array{cid:int, sku:string, key:?string, fallback:string, price:float, currency:?string, date:Carbon, comment:?string}
+     */
+    private static function quotePartsPrice(QuotePartsOffer $o): array
+    {
+        return [
+            'cid' => (int) $o->catalog_item_id, 'sku' => (string) $o->catalogItem->sku,
+            'key' => $o->supplier_key, 'fallback' => (string) ($o->supplier_name ?: $o->supplier_key),
+            'price' => (float) $o->price, 'currency' => $o->currency,
+            'date' => Carbon::parse($o->remote_updated_at ?? $o->created_at),
+            // Поправленный снабжением комментарий — как есть, иначе собранный.
+            'comment' => $o->export_comment ?? self::offerComment($o),
+        ];
     }
 
     /**

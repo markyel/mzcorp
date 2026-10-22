@@ -1,10 +1,48 @@
 <div class="space-y-3">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-            <h1 class="text-[20px] font-semibold text-fg-1">QuoteParts</h1>
-            <div class="text-[12px] text-fg-3">Платформа работы с поставщиками · тестирование. Передаём группы позиций из пула «К актуализации».</div>
+    {{-- Шапка раздела (дизайн «Актуализация цен», 10.2026): заголовок вкладки, вкладки с подчёркиванием и счётчиками. --}}
+    @php
+        $counts = $this->poolCounts;
+        $tabs = [
+            'candidates' => ['К актуализации', count($this->candidates), null, null],
+            'pool' => ['В QuoteParts', array_sum($counts), ($counts['error'] ?? 0) > 0 ? 'ошибка '.$counts['error'] : (($counts['paused'] ?? 0) > 0 ? 'пауза '.$counts['paused'] : null), ($counts['error'] ?? 0) > 0 ? 'red' : 'attn'],
+            'suppliers' => ['Поставщики', $this->invitedGroups->count(), null, null],
+            'offers' => ['Актуализация цен', $this->freshOffersCount, null, null],
+            'questions' => ['Вопросы поставщиков', null, $this->openQuestionsCount > 0 ? $this->openQuestionsCount : null, 'red'],
+            'prices' => ['Закупки 1С', null, null, null],
+            'groups' => ['Группы товаров', null, null, null],
+            'pilot' => ['Пилот', null, $this->pilotSwitchedOn ? 'вкл' : 'выкл', $this->pilotSwitchedOn ? 'ok' : 'neutral'],
+        ];
+        $badge = ['red' => 'background: var(--accent); color: #fff', 'attn' => 'background: var(--status-attn-bg); color: var(--status-attn-fg)',
+            'ok' => 'background: var(--status-ok-bg); color: var(--status-ok-fg)', 'neutral' => 'background: var(--status-neutral-bg); color: var(--status-neutral-fg)'];
+    @endphp
+    <div style="display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--border)">
+        <div style="display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap">
+            <div style="flex: 1 1 320px; min-width: 0">
+                <div style="font-size: 12px; font-weight: 500; color: var(--fg-3); margin-bottom: 4px">QuoteParts · платформа работы с поставщиками</div>
+                <h1 style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.2; letter-spacing: -0.005em; color: var(--fg-1)">{{ $tabs[$tab][0] ?? 'QuoteParts' }}</h1>
+                <div style="font-size: 12px; color: var(--fg-3); margin-top: 4px">{{ $tab === 'offers'
+                    ? 'Ответы поставщиков на запросы цен. Решите по каждой позиции — закупаем, уточняем или игнорируем — и выгрузите решения в 1С.'
+                    : 'Тестирование. Передаём группы позиций из пула «К актуализации».' }}</div>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                @if($tab === 'offers')
+                    {{-- Файлы прошлых выгрузок и выгрузка за период — в «Снабжении». --}}
+                    <a href="{{ url('/dashboard/procurement') }}?tab=exports" class="btn btn-sm">Выгрузка в 1С · история</a>
+                @endif
+                <a href="https://quoteparts.ru/items" target="_blank" rel="noopener" class="btn btn-sm">Открыть QuoteParts ↗</a>
+            </div>
         </div>
-        <a href="https://quoteparts.ru/items" target="_blank" rel="noopener" class="btn btn-sm">Открыть QuoteParts ↗</a>
+        <div style="display: flex; gap: 2px; flex-wrap: wrap; margin: 0 -4px">
+            @foreach($tabs as $key => [$label, $n, $b, $tone])
+                <button type="button" wire:click="setTab('{{ $key }}')"
+                        style="display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border: 0; background: transparent; font-size: 13px; cursor: pointer; white-space: nowrap;
+                               font-weight: {{ $tab === $key ? 600 : 500 }}; color: {{ $tab === $key ? 'var(--fg-1)' : 'var(--fg-2)' }}; box-shadow: {{ $tab === $key ? 'inset 0 -2px 0 var(--accent)' : 'none' }}">
+                    {{ $label }}
+                    @if($n !== null)<span style="font-family: var(--font-mono); font-size: 11px; color: var(--fg-3)">{{ number_format($n, 0, ',', ' ') }}</span>@endif
+                    @if($b !== null)<span style="padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 600; {{ $badge[$tone] ?? $badge['neutral'] }}">{{ $b }}</span>@endif
+                </button>
+            @endforeach
+        </div>
     </div>
 
     @unless($this->configured)
@@ -13,38 +51,12 @@
         </div></div>
     @endunless
 
-    @php $counts = $this->poolCounts; @endphp
-    <div class="flex flex-wrap items-center gap-2">
-        <button type="button" wire:click="setTab('candidates')" class="btn btn-sm {{ $tab === 'candidates' ? 'btn-primary' : '' }}">
-            К актуализации <span class="opacity-70">{{ count($this->candidates) }}</span>
-        </button>
-        <button type="button" wire:click="setTab('pool')" class="btn btn-sm {{ $tab === 'pool' ? 'btn-primary' : '' }}">
-            В QuoteParts <span class="opacity-70">{{ array_sum($counts) }}</span>
-            @if(($counts['paused'] ?? 0) > 0)<span class="chip chip-warn text-[10px] ml-1">на паузе {{ $counts['paused'] }}</span>@endif
-            @if(($counts['error'] ?? 0) > 0)<span class="chip chip-danger text-[10px] ml-1">ошибка {{ $counts['error'] }}</span>@endif
-        </button>
-        <button type="button" wire:click="setTab('suppliers')" class="btn btn-sm {{ $tab === 'suppliers' ? 'btn-primary' : '' }}">
-            Поставщики <span class="opacity-70">{{ $this->invitedGroups->count() }}</span>
-        </button>
-        <button type="button" wire:click="setTab('offers')" class="btn btn-sm {{ $tab === 'offers' ? 'btn-primary' : '' }}" title="Свежие предложения поставщиков: ответы на запросы, кабинет, прайсы">
-            Актуализация цен <span class="opacity-70">{{ $this->freshOffersCount }}</span>
-        </button>
-        <button type="button" wire:click="setTab('questions')" class="btn btn-sm {{ $tab === 'questions' ? 'btn-primary' : '' }}" title="Позиции, по которым поставщики задали уточняющие вопросы">
-            Вопросы поставщиков
-            @if($this->openQuestionsCount > 0)<span class="chip chip-warn text-[10px] ml-1">{{ $this->openQuestionsCount }}</span>@endif
-        </button>
-        <button type="button" wire:click="setTab('prices')" class="btn btn-sm {{ $tab === 'prices' ? 'btn-primary' : '' }}">Закупки 1С</button>
-        <button type="button" wire:click="setTab('groups')" class="btn btn-sm {{ $tab === 'groups' ? 'btn-primary' : '' }}">Группы товаров</button>
-        <button type="button" wire:click="setTab('pilot')" class="btn btn-sm {{ $tab === 'pilot' ? 'btn-primary' : '' }}">
-            Пилот <span class="chip {{ $this->pilotSwitchedOn ? 'chip-ok' : 'chip-neutral' }} text-[10px] ml-1">{{ $this->pilotSwitchedOn ? 'вкл' : 'выкл' }}</span>
-        </button>
-        {{-- Общий поиск раздела: на вкладках, где он что-то ищет (у «Групп товаров» — свой). --}}
-        @if(in_array($tab, ['candidates', 'pool', 'offers', 'questions'], true))
-            <input type="search" wire:model.live.debounce.300ms="search"
-                   placeholder="{{ in_array($tab, ['offers', 'questions'], true) ? 'Поиск: артикул, позиция, поставщик, заявка, QP-…' : 'Поиск: артикул / наименование / бренд' }}"
-                   class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
-        @endif
-    </div>
+    {{-- Общий поиск раздела: на вкладках, где он что-то ищет (у «Актуализации цен» и «Групп товаров» — свой). --}}
+    @if(in_array($tab, ['candidates', 'pool', 'questions'], true))
+        <input type="search" wire:model.live.debounce.300ms="search"
+               placeholder="{{ $tab === 'questions' ? 'Поиск: артикул, позиция, поставщик, заявка, QP-…' : 'Поиск: артикул / наименование / бренд' }}"
+               class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+    @endif
 
     @if($tab === 'candidates')
         @php
@@ -231,18 +243,7 @@
     @endif
 
     @if($tab === 'offers')
-        {{-- Выгрузка полученных предложений в 1С (та же, что «Снабжение» → «Выгрузки цен», история общая). --}}
-        <details class="ds-card" x-data="{ open: false }" x-on:toggle="open = $el.open">
-            <summary class="ds-card-header cursor-pointer select-none list-none">
-                <h3>Выгрузка в 1С</h3>
-                <span class="text-[12px] text-fg-3 ml-2">новое — с конца прошлой выгрузки, или за период · Excel по шаблону 1С</span>
-                <span class="ml-auto text-[12px] text-sky-700" x-text="open ? '▾ свернуть' : '▸ открыть'"></span>
-            </summary>
-            <div class="px-4 pb-3">
-                <livewire:procurement.price-exports :compact="true" />
-            </div>
-        </details>
-        <livewire:quote-parts.price-offers :search="$search" />
+        <livewire:quote-parts.price-offers />
     @endif
 
     @if($tab === 'questions')

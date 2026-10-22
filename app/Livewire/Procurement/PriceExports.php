@@ -28,7 +28,8 @@ class PriceExports extends Component
 
     public function mount(): void
     {
-        $last = PriceExport::query()->latest('to_at')->value('to_at');
+        // Выгрузки по списку позиций «Актуализации цен» период не закрывают.
+        $last = PriceExport::query()->where('kind', PriceExport::KIND_PERIOD)->latest('to_at')->value('to_at');
         $this->from = ($last ? Carbon::parse($last) : now()->subDays(7)->startOfDay())->format('Y-m-d\TH:i');
         $this->to = now()->format('Y-m-d\TH:i');
     }
@@ -84,7 +85,8 @@ class PriceExports extends Component
     /** Конец прошлой выгрузки — начало «нового» (первая выгрузка — за неделю). */
     public function lastExportEnd(): Carbon
     {
-        $last = PriceExport::query()->latest('to_at')->value('to_at');
+        // Выгрузки по списку позиций «Актуализации цен» период не закрывают.
+        $last = PriceExport::query()->where('kind', PriceExport::KIND_PERIOD)->latest('to_at')->value('to_at');
 
         return $last ? Carbon::parse($last) : now()->subDays(7)->startOfDay();
     }

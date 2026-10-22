@@ -4,17 +4,18 @@ namespace App\Livewire\QuoteParts;
 
 use App\Livewire\Concerns\AnswersQuotePartsSuppliers;
 use App\Models\CatalogItem;
+use App\Models\PricePosition;
 use App\Models\QuotePartsOffer;
 use App\Models\QuotePartsRfq;
 use App\Services\Iqot\IqotCurrencyConverter;
 use App\Services\Procurement\SupplierChoiceService;
+use App\Services\QuoteParts\PriceActualizationService;
 use App\Services\QuoteParts\PriceRefreshReadiness;
 use App\Services\QuoteParts\QuotePartsPriceService;
 use App\Services\QuoteParts\QuotePartsRfqService;
 use Illuminate\Support\Collection;
 use App\Services\QuoteParts\OfferClarifications;
 use Livewire\Attributes\Computed;
-use Livewire\Attributes\Reactive;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -25,9 +26,11 @@ use Throwable;
  * Вкладка «Актуализация цен» раздела QuoteParts: свежие предложения поставщиков из QuoteParts
  * (форма и письмо по запросу, кабинет, прайс) рядом с ценами каталога — закупочной и продажной.
  *
- * Вид: по заявкам, по позициям (позиция и все предложения на неё) или списком. Сверху —
- * позиции, по которым предложений достаточно, чтобы актуализировать цену в базе
- * (PriceRefreshReadiness). Позицию можно раскрыть — полная карточка каталога.
+ * Позиция — главная единица, предложения — её строки. Разделы: «Новое предложение по
+ * обработанной позиции» (сбор цен завершён, а предложение пришло), «Готово к актуализации»
+ * (PriceRefreshReadiness), «Ждём ответа и отказы». Выбор поставщика, список выгрузки 1С,
+ * выгрузка и завершение сбора цен — PriceActualizationService. Позицию можно раскрыть — полная
+ * карточка каталога.
  */
 class PriceOffers extends Component
 {
@@ -36,22 +39,32 @@ class PriceOffers extends Component
 
     public const DAYS = [3, 7, 30, 90];
 
-    /** Вид «списком» (отдельная таблица) убран: везде одно оформление — позиция и её предложения. */
-    public const VIEWS = ['request' => 'по заявкам', 'item' => 'по позициям'];
+    /** Оформление одно — позиция и её предложения; «по запросам» — тот же список, упорядоченный по заявкам. */
+    public const VIEWS = ['item' => 'По позициям', 'request' => 'По запросам'];
+
+    /** Фильтр «Готово к актуализации» по решению. */
+    public const DECISIONS = ['all' => 'Все', 'open' => 'Без решения', 'buy' => 'Закупаем', 'ignore' => 'Игнор'];
 
     #[Url(as: 'pd', except: 7)]
     public int $days = 7;
 
-    #[Url(as: 'pv', except: 'request')]
-    public string $view = 'request';
+    #[Url(as: 'pv', except: 'item')]
+    public string $view = 'item';
+
+    #[Url(as: 'pf', except: 'all')]
+    public string $decision = 'all';
+
+    /** Поиск вкладки: артикул, позиция, поставщик, заявка, QP. */
+    #[Url(as: 'pq', except: '')]
+    public string $q = '';
+
+    /** Итог последнего действия выгрузки — в нижней панели. */
+    public ?string $exportNote = null;
 
     /** Показывать и заменённые / истёкшие предложения. */
     #[Url(as: 'pa', except: false)]
     public bool $withStale = false;
 
-    /** Поиск — общая строка раздела QuoteParts (Index). */
-    #[Reactive]
-    public string $search = '';
 
     /** Открытая переписка по отказу: id строки отказа (declines). */
     public ?string $declineDialog = null;
@@ -62,46 +75,123 @@ class PriceOffers extends Component
     /** Предложение, по которому открыт диалог с поставщиком (уточнить цену). */
     public ?int $dialog = null;
 
-    /** «Закупаем здесь»: это предложение — закупочное для позиции (выбор снабжения, идёт в выгрузку 1С). */
-    public function choose(int $offerId, SupplierChoiceService $choices): void
+    /** «Закупаем здесь»: это предложение — закупочное для позиции (выбор снабжения, идёт в выгрузку 1С). Другое выбранное снимается. */
+    public function choose(int $offerId, PriceActualizationService $service): void
     {
         $o = QuotePartsOffer::query()->findOrFail($offerId);
-        if ($o->catalog_item_id === null || $o->supplier_key === null) {
-            $this->dispatch('toast', type: 'error', message: 'Предложение без позиции каталога или поставщика — выбрать нельзя.');
+        try {
+            $service->choose($o, auth()->user());
+        } catch (\DomainException $e) {
+            $this->dispatch('toast', type: 'error', message: $e->getMessage());
 
             return;
         }
-        if (! $o->countsAsItemPrice()) {
-            $this->dispatch('toast', type: 'error', message: QuotePartsOffer::kindLabel($o->kind).' — сначала отметьте «Учитывать».');
+        $this->exportNote = null;
+        $this->forget();
+    }
+
+    /** «+ В выгрузку»: позиция — в список выгрузки 1С; поставщик не выбран — выбирается лучший оригинал. */
+    public function addToExport(string $sku, PriceActualizationService $service): void
+    {
+        $it = $this->screenItems()->firstWhere('sku', $sku);
+        if ($it === null || ! $it['cid']) {
+            return;
+        }
+        try {
+            $auto = $service->add($sku, (int) $it['cid'], self::liveOffers($it), auth()->user());
+        } catch (\DomainException $e) {
+            $this->dispatch('toast', type: 'error', message: $e->getMessage());
 
             return;
         }
-        $choices->choose((int) $o->catalog_item_id, $o->supplier_key, [
-            'supplier' => (string) ($o->supplier_name ?: $o->supplier_key), 'price' => $o->price !== null ? (float) $o->price : null,
-            'currency' => $o->currency, 'source' => 'quoteparts', 'ref' => $o->id,
-        ], auth()->user());
-        unset($this->choices);
-        $this->dispatch('toast', type: 'success', message: 'Закупаем '.$o->sku.' у: '.($o->supplier_name ?: $o->supplier_key).'.');
+        $this->exportNote = null;
+        $this->forget();
+        if ($auto) {
+            $this->dispatch('toast', type: 'success', message: 'В выгрузке '.$sku.': закупаем у '.($auto->supplier_name ?: $auto->supplier_key).' — самое дешёвое'.(($auto->kind ?? 'original') === 'original' ? ' оригинальное' : '').' предложение.');
+        }
+    }
+
+    public function removeFromExport(string $sku, PriceActualizationService $service): void
+    {
+        $service->remove($sku);
+        $this->exportNote = null;
+        $this->forget();
+    }
+
+    /** «+ Добавить все с выбранным поставщиком». */
+    public function addAllChosen(PriceActualizationService $service): void
+    {
+        foreach ($this->bar['addable'] as $it) {
+            $service->add($it['sku'], (int) $it['cid'], self::liveOffers($it), auth()->user());
+        }
+        $this->exportNote = null;
+        $this->forget();
+    }
+
+    /**
+     * «Выгрузить в 1С» — ещё не выгруженные позиции списка, они остаются на экране; «Выгрузить и
+     * завершить сбор цен» — весь список, позиции уходят с экрана. Файл сразу скачивается.
+     */
+    public function exportList(bool $finish, PriceActualizationService $service)
+    {
+        // В списке бывает и завершённая позиция: вернулась с новым предложением и выгружается снова.
+        $list = PricePosition::query()->whereNotNull('in_export_at')->get();
+        if (! $finish) {
+            $list = $list->whereNull('exported_at')->values();
+        }
+        if ($list->isEmpty()) {
+            return null;
+        }
+        try {
+            $export = $service->export($list, $finish, auth()->user());
+        } catch (Throwable $e) {
+            report($e);
+            $this->dispatch('toast', type: 'error', message: 'Не удалось сформировать выгрузку: '.mb_substr($e->getMessage(), 0, 300));
+
+            return null;
+        }
+        $this->exportNote = $finish
+            ? 'Завершено: '.$list->count().' поз. выгружено и убрано с экрана. Вернутся, если придёт новое предложение.'
+            : 'Выгружено в 1С: '.$list->count().' поз. Сбор цен по ним продолжается.';
+        $this->forget();
+
+        return \Illuminate\Support\Facades\Storage::disk(config('procurement.price_export.disk', 'local'))->download($export->file_path, basename($export->file_path));
+    }
+
+    /** Действующие предложения позиции на экране — моделями. */
+    private static function liveOffers(array $it): Collection
+    {
+        return QuotePartsOffer::query()->whereIn('id', $it['offers']->reject(fn ($r) => $r['stale'])->pluck('id'))->get();
+    }
+
+    /** Сбросить посчитанное: решения, список выгрузки, разделы. */
+    private function forget(): void
+    {
+        unset($this->rows, $this->readyRows, $this->readyItems, $this->items, $this->groups, $this->choices, $this->bestIds,
+            $this->positions, $this->newItems, $this->readyList, $this->waitItems, $this->bar, $this->clarifications);
     }
 
     public function clearChoice(int $catalogItemId, SupplierChoiceService $choices): void
     {
         $choices->clear($catalogItemId);
-        unset($this->choices);
+        // Поставщик снят — в выгрузке позиции без него делать нечего.
+        PricePosition::query()->where('catalog_item_id', $catalogItemId)
+            ->update(['in_export_at' => null, 'in_export_by_user_id' => null, 'exported_at' => null]);
+        $this->forget();
     }
 
     /** Комментарий к предложению в выгрузке 1С: поправка снабжения (null — снова собирается сам). */
     public function saveComment(int $offerId, ?string $text, QuotePartsPriceService $prices): void
     {
         $prices->setExportComment(QuotePartsOffer::query()->findOrFail($offerId), $text, auth()->user());
-        unset($this->rows, $this->readyRows, $this->readyItems, $this->items, $this->groups);
+        $this->forget();
     }
 
     /** «Игнорировать» / «Вернуть»: предложение не о том — его цена не идёт в выгрузку 1С, в «лучшее» и в закупку. */
     public function ignore(int $offerId, bool $ignore, QuotePartsPriceService $prices): void
     {
         $prices->ignore(QuotePartsOffer::query()->findOrFail($offerId), $ignore, auth()->user());
-        unset($this->rows, $this->readyRows, $this->readyItems, $this->items, $this->groups, $this->choices, $this->bestIds);
+        $this->forget();
         $this->dispatch('toast', type: 'success', message: $ignore ? 'Игнорируем: цена не пойдёт в выгрузку 1С.' : 'Предложение снова учитывается.');
     }
 
@@ -109,7 +199,7 @@ class PriceOffers extends Component
     public function review(int $offerId, bool $accept, QuotePartsPriceService $prices): void
     {
         $prices->review(QuotePartsOffer::query()->findOrFail($offerId), $accept, auth()->user());
-        unset($this->rows, $this->readyItems, $this->items, $this->groups);
+        $this->forget();
         $this->dispatch('toast', type: 'success', message: $accept ? 'Учитываем: цена идёт как цена позиции, в выгрузке — с примечанием.' : 'Не учитываем это предложение.');
     }
 
@@ -158,9 +248,8 @@ class PriceOffers extends Component
     #[Computed]
     public function allDeclines(): Collection
     {
-        $rfqs = QuotePartsRfq::query()->with('request:id,internal_code,client_name,subject,assigned_user_id', 'request.assignedUser:id,name')
-            ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))->get();
-        $names = app(QuotePartsRfqService::class)->supplierNames($rfqs);
+        $rfqs = $this->windowRfqs;
+        $names = $this->supplierNames;
 
         $rows = collect();
         foreach ($rfqs as $rfq) {
@@ -203,13 +292,28 @@ class PriceOffers extends Component
             ];
         });
 
-        if (($term = trim($this->search)) !== '') {
+        if (($term = trim($this->q)) !== '') {
             $rows = $rows->filter(fn ($r) => mb_stripos(implode(' ', [
                 $r['sku'], $r['name'], $r['supplier'], $r['rfq_tag'], $r['request']?->internal_code, $r['reason'],
             ]), $term) !== false);
         }
 
         return $rows->sortByDesc(fn ($r) => $r['at']?->getTimestamp() ?? 0)->values();
+    }
+
+    /** Запросы QuoteParts за окно запросов. */
+    #[Computed]
+    public function windowRfqs(): Collection
+    {
+        return QuotePartsRfq::query()->with('request:id,internal_code,client_name,subject,assigned_user_id', 'request.assignedUser:id,name')
+            ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))->get();
+    }
+
+    /** @return array<string, string> ключ поставщика => название */
+    #[Computed]
+    public function supplierNames(): array
+    {
+        return app(QuotePartsRfqService::class)->supplierNames($this->windowRfqs);
     }
 
     /** Отказы за выбранный период. */
@@ -296,7 +400,7 @@ class PriceOffers extends Component
     #[Computed]
     public function threadCounts(): array
     {
-        $rows = $this->rows->merge($this->readyRows)->unique('id');
+        $rows = $this->rows->merge($this->readyRows)->merge($this->newItems->flatMap(fn ($i) => $i['offers']))->unique('id');
         $snapshots = QuotePartsRfq::query()->whereIn('remote_id', $rows->pluck('rfq_remote_id')->filter()->unique()->values())
             ->get(['remote_id', 'snapshot'])->keyBy('remote_id');
         $out = [];
@@ -325,7 +429,7 @@ class PriceOffers extends Component
     #[Computed]
     public function clarifications(): array
     {
-        return app(OfferClarifications::class)->states($this->rows->merge($this->readyRows)->unique('id')->values());
+        return app(OfferClarifications::class)->states($this->rows->merge($this->readyRows)->merge($this->newItems->flatMap(fn ($i) => $i['offers']))->unique('id')->values());
     }
 
     /**
@@ -350,7 +454,7 @@ class PriceOffers extends Component
     #[Computed]
     public function choices(): Collection
     {
-        $ids = $this->rows->pluck('cid')->merge($this->readyItems->pluck('cid'))->filter()->unique()->values()->all();
+        $ids = $this->rows->pluck('cid')->merge($this->readyItems->pluck('cid'))->merge($this->newItems->pluck('cid'))->filter()->unique()->values()->all();
 
         return app(SupplierChoiceService::class)->forItems($ids);
     }
@@ -359,7 +463,7 @@ class PriceOffers extends Component
     #[Computed]
     public function lastPurchases(): Collection
     {
-        $ids = $this->rows->pluck('cid')->merge($this->readyItems->pluck('cid'))->filter()->unique()->values()->all();
+        $ids = $this->rows->pluck('cid')->merge($this->readyItems->pluck('cid'))->merge($this->newItems->pluck('cid'))->filter()->unique()->values()->all();
 
         return $ids === [] ? collect() : \App\Models\CatalogSupplierPrice::query()->whereIn('catalog_item_id', $ids)->where('kind', 'last')
             ->orderByDesc('priced_at')->get()->unique('catalog_item_id')->keyBy('catalog_item_id');
@@ -404,7 +508,7 @@ class PriceOffers extends Component
 
     private function query()
     {
-        $term = trim($this->search);
+        $term = trim($this->q);
 
         return QuotePartsOffer::query()
             ->with(['catalogItem:id,sku,name,brand,price,purchase_price,is_price_actual', 'request:id,internal_code,client_name,subject,assigned_user_id', 'request.assignedUser:id,name'])
@@ -434,14 +538,10 @@ class PriceOffers extends Component
     #[Computed]
     public function readyItems(): Collection
     {
-        // Пока по позиции ждём ответа на уточнение — решение отложено, она не «готова».
-        $waiting = collect($this->clarifications)->where('state', OfferClarifications::WAITING)->keys()->all();
-
+        // Ждём ответа на уточнение — позиция остаётся здесь, её решение — «запрошено уточнение».
         $skus = $this->readyRows->pluck('sku')->filter()->unique()->all();
 
-        return $this->itemsFrom($this->readyRows, $this->allDeclines->whereIn('sku', $skus))
-            ->reject(fn ($it) => $it['offers']->contains(fn ($r) => in_array($r['id'], $waiting, true)))
-            ->values();
+        return $this->itemsFrom($this->readyRows, $this->allDeclines->whereIn('sku', $skus))->values();
     }
 
     /**
@@ -514,6 +614,9 @@ class PriceOffers extends Component
                     'requested_at' => $st['requested_at'] ?? null,
                     'wait_until' => $st ? $checker->waitUntil($st['requested_at']) : null,
                     'rfqs' => $st['rfqs'] ?? [],
+                    // Спросили, а он ни цены, ни отказа: строка «ждём ответ».
+                    'waiting' => $st ? array_values(array_map(fn ($k) => $this->supplierNames[$k] ?? $k,
+                        array_diff($st['asked'], $st['offered'], $st['declined'], $offers->pluck('key')->filter()->all()))) : [],
                     'at' => $offers->merge($itemDeclines)->max('at'),
                 ];
             })
@@ -554,6 +657,126 @@ class PriceOffers extends Component
             ->values();
     }
 
+    /** Позиции в работе снабжения (список выгрузки, выгружено, завершено): артикул => позиция. */
+    #[Computed]
+    public function positions(): Collection
+    {
+        return PricePosition::query()->get()->keyBy('sku');
+    }
+
+    /** Артикулы, по которым сбор цен завершён. */
+    private function closedSkus(): array
+    {
+        return $this->positions->filter(fn (PricePosition $p) => $p->closed_at !== null)->keys()->all();
+    }
+
+    /**
+     * «Новое предложение по обработанной позиции»: сбор цен завершён, а после этого пришло
+     * предложение. Новые — отмечены «новое».
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    #[Computed]
+    public function newItems(): Collection
+    {
+        $closed = $this->positions->filter(fn (PricePosition $p) => $p->closed_at !== null);
+        if ($closed->isEmpty()) {
+            return collect();
+        }
+        $rows = $this->query()->whereIn('sku', $closed->keys()->all())
+            ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))
+            ->get()->pipe(fn (Collection $offers) => self::rowsOf($offers));
+
+        return $this->itemsFrom($rows)
+            ->filter(fn ($it) => $it['offers']->contains(fn ($r) => $r['created'] && $r['created']->gt($closed[$it['sku']]->closed_at)))
+            ->values();
+    }
+
+    /** «Готово к актуализации» без завершённых позиций; фильтр по решению, порядок вида. */
+    #[Computed]
+    public function readyList(): Collection
+    {
+        $closed = $this->closedSkus();
+
+        return $this->readyItems->reject(fn ($it) => in_array($it['sku'], $closed, true))->values();
+    }
+
+    /** «Ждём ответа и отказы»: остальные позиции периода — мало цен, ждём или все отказали. */
+    #[Computed]
+    public function waitItems(): Collection
+    {
+        $closed = $this->closedSkus();
+
+        return $this->sorted($this->items->reject(fn ($it) => in_array($it['sku'], $closed, true))->values());
+    }
+
+    /** Все позиции на экране: новое, готово, ждём. */
+    public function screenItems(): Collection
+    {
+        return $this->newItems->merge($this->readyList)->merge($this->waitItems);
+    }
+
+    /** Вид «по запросам»: позиции одной заявки рядом. */
+    public function sorted(Collection $items): Collection
+    {
+        if ($this->view !== 'request') {
+            return $items;
+        }
+
+        return $items->sortBy(fn ($it) => $it['offers']->map(fn ($r) => $r['request']?->internal_code)->filter()->min() ?? 'я')->values();
+    }
+
+    /**
+     * Решение по позиции: buy — выбран поставщик из её предложений, ignore — все предложения
+     * отмечены «Игнорировать», ask — задан уточняющий вопрос, open — решения нет.
+     *
+     * @return array{state:string, chosen:?int}
+     */
+    public function stateOf(array $it): array
+    {
+        $choice = $it['cid'] ? $this->choices->get($it['cid']) : null;
+        $ids = $it['offers']->pluck('id')->all();
+        $chosen = $choice && $choice->source === 'quoteparts' && in_array((int) $choice->offer_ref, $ids, true) ? (int) $choice->offer_ref : null;
+        $live = $it['offers']->reject(fn ($r) => $r['stale']);
+
+        return ['chosen' => $chosen, 'state' => match (true) {
+            $chosen !== null => 'buy',
+            $live->isNotEmpty() && $live->every(fn ($r) => $r['ignored']) => 'ignore',
+            $live->contains(fn ($r) => isset($this->clarifications[$r['id']])) => 'ask',
+            default => 'open',
+        }];
+    }
+
+    /**
+     * Нижняя панель: сколько решено в «Готово», список выгрузки и его сумма, что выгружать.
+     *
+     * @return array{done:int, total:int, inList:int, sum:float, toExport:int, addable:Collection}
+     */
+    #[Computed]
+    public function bar(): array
+    {
+        $ready = $this->readyList;
+        $list = $this->positions->filter(fn (PricePosition $p) => $p->in_export_at !== null);
+        $choices = app(SupplierChoiceService::class)->forItems($list->pluck('catalog_item_id')->filter()->values()->all());
+        $sum = $list->sum(function (PricePosition $p) use ($choices) {
+            $c = $choices->get($p->catalog_item_id);
+            $rub = $c ? IqotCurrencyConverter::toRub($c->price !== null ? (float) $c->price : null, $c->currency) : null;
+
+            return $rub && $rub['known'] ? (float) $rub['rub'] : 0.0;
+        });
+
+        return [
+            'done' => $ready->filter(fn ($it) => $this->stateOf($it)['state'] !== 'open')->count(),
+            'total' => $ready->count(),
+            'inList' => $list->count(),
+            'sum' => $sum,
+            'toExport' => $list->whereNull('exported_at')->count(),
+            'addable' => $this->newItems->merge($ready)
+                ->filter(fn ($it) => $it['cid'] && $this->stateOf($it)['chosen'] !== null && ! ($this->positions->get($it['sku'])?->in_export_at))
+                ->values(),
+        ];
+    }
+
     /** Раскрытые карточки: позиция каталога и последнее изменение её цены. */
     #[Computed]
     public function openCards(): array
@@ -578,6 +801,7 @@ class PriceOffers extends Component
         return [
             'id' => $o->id,
             'at' => $o->remote_updated_at ?? $o->created_at,
+            'created' => $o->created_at,
             'request_id' => $o->request_id,
             'request' => $o->request,
             'rfq_tag' => $o->rfq_tag,

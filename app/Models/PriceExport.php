@@ -10,6 +10,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class PriceExport extends Model
 {
+    public const KIND_PERIOD = 'period';
+
+    public const KIND_POSITIONS = 'positions';
+
     protected $fillable = [
         'from_at',
         'to_at',
@@ -18,6 +22,7 @@ class PriceExport extends Model
         'skipped_count',
         'file_path',
         'created_by_user_id',
+        'kind',
     ];
 
     protected $casts = [
