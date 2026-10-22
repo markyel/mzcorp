@@ -138,7 +138,7 @@
                     <td class="px-3 py-1.5 whitespace-nowrap text-fg-3 text-[11.5px]">
                         {{-- Срок поставки — если поставщик его назвал; срок действия предложения — всегда, если есть. --}}
                         @if($r['lead'])<div title="Срок поставки">поставка {{ $r['lead'] }} дн.</div>@endif
-                        @if($r['valid'])<div title="Предложение действует до">цена до {{ $r['valid']->format('d.m.Y') }}</div>@elseif(! $r['lead'])<span class="text-fg-4">—</span>@endif
+                        @if($r['valid'])<div title="Цена действует до">до {{ $r['valid']->format('d.m.Y') }}</div>@elseif(! $r['lead'])<span class="text-fg-4">—</span>@endif
                     </td>
                     @if($showRequest)
                         <td class="px-3 py-1.5 whitespace-nowrap">
