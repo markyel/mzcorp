@@ -596,7 +596,8 @@ class PriceOffers extends Component
                 $itemDeclines = $declinesBySku->get($sku, collect())->values();
                 $first = $offers->first() ?? $itemDeclines->first();
                 $st = $this->readiness[$sku] ?? null;
-                $sorted = $offers->sortBy(fn ($r) => $r['rub'] ?? PHP_FLOAT_MAX)->values();
+                // Сначала оригиналы, потом копии и аналоги; внутри — дешевле выше.
+                $sorted = $offers->sortBy(fn ($r) => [($r['kind'] ?? 'original') === 'original' ? 0 : 1, $r['rub'] ?? PHP_FLOAT_MAX])->values();
 
                 return [
                     'sku' => $first['sku'],
