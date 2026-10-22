@@ -162,6 +162,9 @@ return [
         // длинным текстом и аккуратная правка — младшая модель здесь врёт
         // цитатами и переписывает смысл, поэтому старшая.
         'media_profile_model' => env('OPENAI_MEDIA_PROFILE_MODEL', 'gpt-4o'),
+        // Посты медиаплана — модель шлюза Beget (решение 2026-10-22: связнее gpt-4o, ~2 ₽ за пост);
+        // шлюз не ответил — пишет media_profile_model через основной канал. Пусто — только основной.
+        'media_gateway_model' => env('OPENAI_MEDIA_GATEWAY_MODEL', 'gpt-6.1-sol'),
         'attachment_relevance_enabled' => filter_var(env('OPENAI_ATTACHMENT_RELEVANCE_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         // Финальный LLM-консолидатор позиций split-пути (собирает один набор из
         // выдач разных парсеров одной заявки, склеивая дубли photo-vs-text).

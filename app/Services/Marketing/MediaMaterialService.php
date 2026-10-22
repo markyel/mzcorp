@@ -95,6 +95,34 @@ class MediaMaterialService
     }
 
     /**
+     * Материал моделью шлюза Beget (services.openai.media_gateway_model). Null — шлюза нет, он не ответил
+     * или ответил не по форме: тогда пишет основная модель.
+     *
+     * @param  list<array<string, mixed>>  $messages
+     * @return array{content: string}|null
+     */
+    private function viaGateway(array $messages, MediaTopic $topic, MediaChannel $channel): ?array
+    {
+        $model = (string) config('services.openai.media_gateway_model', '');
+        $gateway = app(\App\Services\AI\OpenAIFallbackGateway::class);
+        if ($model === '' || ! $gateway->enabled()) {
+            return null;
+        }
+        try {
+            $response = $gateway->chat($messages, $model, ['response_format' => ['type' => 'json_object']]);
+            $parsed = json_decode($response['content'], true);
+            if (is_array($parsed) && trim((string) ($parsed['body'] ?? '')) !== '') {
+                return $response;
+            }
+            Log::warning('MediaMaterialService: шлюз ответил не по форме — пишет основная модель', ['topic_id' => $topic->id, 'channel_id' => $channel->id, 'model' => $model]);
+        } catch (\Throwable $e) {
+            Log::warning('MediaMaterialService: шлюз не ответил — пишет основная модель', ['topic_id' => $topic->id, 'channel_id' => $channel->id, 'model' => $model, 'error' => mb_substr($e->getMessage(), 0, 300)]);
+        }
+
+        return null;
+    }
+
+    /**
      * @return array{ok: bool, publication: ?MediaPublication, message: string}
      */
     public function draft(MediaTopic $topic, MediaChannel $channel, ?User $author, ?string $note = null, bool $coverNow = true): array
@@ -148,24 +176,25 @@ class MediaMaterialService
         }
 
         $model = (string) config('services.openai.media_profile_model', 'gpt-4o');
+        $messages = [
+            ['role' => 'system', 'content' => WriteMaterialPrompt::systemMessage()],
+            ['role' => 'user', 'content' => WriteMaterialPrompt::userMessage(
+                $profile,
+                $channel->name.' ('.$channel->kindLabel().')',
+                (string) $channel->kind,
+                (string) $topic->title,
+                $topic->brief,
+                $data,
+                WriteMaterialPrompt::genreHint((string) $topic->source),
+            )],
+        ];
+
+        // Пишет модель шлюза (gpt-6.1-sol): связнее и не путает факты; не ответила или ответила
+        // не по форме — пишет основная, как раньше.
+        $response = $this->viaGateway($messages, $topic, $channel);
 
         try {
-            $response = $this->openai->chat(
-                [
-                    ['role' => 'system', 'content' => WriteMaterialPrompt::systemMessage()],
-                    ['role' => 'user', 'content' => WriteMaterialPrompt::userMessage(
-                        $profile,
-                        $channel->name.' ('.$channel->kindLabel().')',
-                        (string) $channel->kind,
-                        (string) $topic->title,
-                        $topic->brief,
-                        $data,
-                        WriteMaterialPrompt::genreHint((string) $topic->source),
-                    )],
-                ],
-                $model,
-                ['response_format' => ['type' => 'json_object'], 'temperature' => 0.4],
-            );
+            $response ??= $this->openai->chat($messages, $model, ['response_format' => ['type' => 'json_object'], 'temperature' => 0.4]);
         } catch (\Throwable $e) {
             Log::error('MediaMaterialService: модель не ответила', [
                 'topic_id' => $topic->id,

@@ -66,6 +66,37 @@ class OpenAIFallbackGateway
     }
 
     /**
+     * Запрос прямо в шлюз (не резерв): модели, которых нет у основного канала, — посты медиаплана
+     * пишет gpt-6.1-sol (решение 2026-10-22: связнее gpt-4o, ~2 ₽ за пост). Ответ — как у
+     * OpenAIChatService::chat; расход — в ai_usage_daily (канал «gateway»).
+     *
+     * @param  list<array<string, mixed>>  $messages
+     * @param  array<string, mixed>  $options  response_format и т.п.; temperature моделям шлюза не передаём
+     * @return array{content: string, usage: array<string, mixed>, raw: array<string, mixed>}
+     */
+    public function chat(array $messages, string $model, array $options = [], int $timeout = 180): array
+    {
+        unset($options['temperature']);
+        $payload = ['model' => $model, 'messages' => $messages] + $options;
+        // Рассуждающей модели нужен запас: при малом лимите ответ пустой; платим только за потраченное.
+        if (! isset($payload['max_tokens']) && ! isset($payload['max_completion_tokens'])) {
+            $payload['max_completion_tokens'] = 8000;
+        }
+
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer '.config('services.openai.fallback.api_key'),
+            'Content-Type' => 'application/json',
+        ])->timeout($timeout)->post(rtrim((string) config('services.openai.fallback.base_url'), '/').'/v1/chat/completions', $payload);
+        if ($response->failed()) {
+            throw new \RuntimeException('AI gateway: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+        $data = (array) $response->json();
+        AiUsageMeter::record((string) ($data['model'] ?? $model), (array) ($data['usage'] ?? []), 'gateway');
+
+        return ['content' => (string) data_get($data, 'choices.0.message.content', ''), 'usage' => (array) ($data['usage'] ?? []), 'raw' => $data];
+    }
+
+    /**
      * Тот же запрос через шлюз (path — «/v1/chat/completions», «/v1/embeddings»).
      *
      * @param  array<string, mixed>  $payload
