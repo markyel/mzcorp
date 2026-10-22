@@ -550,6 +550,10 @@ class MediaDataService
             ->distinct()
             ->limit(10)
             ->pluck('ci.name')
+            // Служебные пометки каталога («(ЗАМЕНЕНО НА M17280)», наши M-артикулы) — не для клиента:
+            // модель брала такую строку примером заявки (пост 22.10).
+            ->map(fn ($n) => trim((string) preg_replace(['/\((?:ЗАМЕНЕНО|ЗАМЕНЁН|ЗАМЕНА)[^)]*\)/iu', '/\bM\d{5}\b/u', '/\s{2,}/u'], ['', '', ' '], (string) $n)))
+            ->filter()
             ->map(fn ($n) => $this->short($n, 90))
             ->unique()
             ->values();
