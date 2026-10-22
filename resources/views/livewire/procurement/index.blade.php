@@ -1028,7 +1028,7 @@
                             <span class="flex-1">Наименование</span>
                             <span style="width:150px">Артикул / OEM</span>
                             <span style="width:96px">Кол-во</span>
-                            <span style="width:78px" title="M-артикул каталога — не вставляется в письмо">M-арт.</span>
+                            <span style="width:104px" title="M-артикул каталога — в письмо не идёт; «+» добавляет его в поле «Артикул / OEM»">M-арт.</span>
                         </div>
                         <div class="space-y-1.5">
                             @foreach($rows as $i => $r)
@@ -1048,10 +1048,20 @@
                                                class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] mono outline-none focus:border-sky-500" style="width:150px">
                                         <input type="text" wire:model.lazy="{{ $r['qty_model'] }}.{{ $r['cid'] }}" placeholder="—"
                                                class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] outline-none focus:border-sky-500" style="width:96px">
-                                        {{-- M-артикул: показываем рядом, НЕ вставляем в письмо; клик — попап OEM --}}
+                                        {{-- M-артикул: показываем рядом, сам в письмо не идёт; клик — попап OEM;
+                                             «+» — добавить его в поле «Артикул / OEM» письма (addOem: без дублей, через запятую). --}}
                                         <button type="button" @click="oem = !oem" style="width:78px"
                                                 class="chip chip-neutral mono text-[10px] truncate"
                                                 title="M-артикул каталога (не идёт в письмо) — показать OEM-артикулы">{{ $oem['sku'] ?: '—' }}</button>
+                                        @if($oem['sku'])
+                                            @php $skuInLetter = in_array(mb_strtolower($oem['sku']), array_map(fn ($p) => mb_strtolower(trim($p)), explode(',', (string) ($editedOem[$r['cid']] ?? ''))), true); @endphp
+                                            <button type="button" wire:click="addOem({{ $r['cid'] }}, @js($oem['sku']))" @disabled($skuInLetter)
+                                                    title="{{ $skuInLetter ? 'M-артикул уже в поле «Артикул / OEM» письма' : 'Добавить M-артикул '.$oem['sku'].' в письмо — в поле «Артикул / OEM»' }}"
+                                                    style="width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; flex:none; border-radius:6px; font-size:13px; font-weight:600; line-height:1;
+                                                           border:1px solid {{ $skuInLetter ? 'var(--border)' : 'var(--border-strong)' }}; background:var(--bg-surface); color:{{ $skuInLetter ? 'var(--status-ok-fg)' : 'var(--sky-700)' }}; cursor:{{ $skuInLetter ? 'default' : 'pointer' }}">{{ $skuInLetter ? '✓' : '+' }}</button>
+                                        @else
+                                            <span style="width:22px; flex:none"></span>
+                                        @endif
                                     </div>
                                     {{-- Превью позиции: название + все OEM-артикулы каталога с быстрым
                                          добавлением в поле «Артикул/OEM» письма. --}}
