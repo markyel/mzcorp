@@ -579,8 +579,12 @@ class MediaDataService
         $params = DB::table('identification_parameters')->where('is_active', true)->get()->keyBy('id');
         $lines = [];
         foreach (DB::table('identification_rules')->where('category_id', $categoryId)->where('is_active', true)->orderBy('priority')->get() as $rule) {
-            $brands = json_decode((string) $rule->applies_to_brands, true);
-            $lines[] = is_array($brands) && $brands !== []
+            // В правиле — id марок (manufacturer_brands), не названия: в пост уходило «Для марок 1:».
+            $brandIds = json_decode((string) $rule->applies_to_brands, true);
+            $brands = is_array($brandIds) && $brandIds !== []
+                ? \App\Models\Kb\ManufacturerBrand::query()->whereIn('id', $brandIds)->orderBy('name')->pluck('name')->all()
+                : [];
+            $lines[] = $brands !== []
                 ? 'Для марок '.implode(', ', $brands).':'
                 : 'В общем случае:';
             foreach (DB::table('identification_rule_alternatives')->where('rule_id', $rule->id)->orderBy('preference_order')->get() as $alt) {
