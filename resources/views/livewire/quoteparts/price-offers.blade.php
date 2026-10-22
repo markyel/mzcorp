@@ -62,6 +62,8 @@
         .pa-last{display:inline-flex;align-items:baseline;gap:6px;flex-wrap:wrap;min-width:0}
         .pa-export{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;border:1px solid var(--emerald-700);background:var(--emerald-600);color:#fff;box-shadow:var(--shadow-sm);transition:background 120ms}
         .pa-export:hover{background:var(--emerald-700)}
+        .pa-export[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none}
+        .pa-export[disabled]:hover{background:var(--emerald-600)}
         .pa-export.is-in{cursor:default;box-shadow:none;border-color:var(--emerald-600)}
         .pa-export.is-in:hover{background:var(--emerald-600)}
         .pa-reopen{padding:6px 20px;border-bottom:1px solid var(--border);font-size:12px;color:var(--fg-2);background:var(--bg-surface)}

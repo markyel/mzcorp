@@ -6,7 +6,6 @@ use App\Models\PriceExport;
 use App\Models\PricePosition;
 use App\Models\QuotePartsOffer;
 use App\Models\User;
-use App\Services\Iqot\IqotCurrencyConverter;
 use App\Services\Procurement\PriceExportService;
 use App\Services\Procurement\SupplierChoiceService;
 use Illuminate\Support\Collection;
@@ -16,7 +15,7 @@ use Illuminate\Support\Facades\DB;
  * Работа снабжения с позицией «Актуализации цен»: выбор поставщика («Закупаем здесь»), список
  * выгрузки 1С, выгрузка и завершение сбора цен.
  *
- * Два уровня: по позиции — только «+ В выгрузку» (в список); выгружает — нижняя панель:
+ * Два уровня: по позиции — выбрать предложение и «+ В выгрузку» (в список); выгружает — нижняя панель:
  * «Выгрузить в 1С» (позиции остаются на экране, сбор цен продолжается) или «Выгрузить и
  * завершить сбор цен» (позиция уходит с экрана и возвращается, только если придёт новое
  * предложение). Запросы QuoteParts и пул «В QuoteParts» это не трогает.
@@ -56,24 +55,16 @@ class PriceActualizationService
     }
 
     /**
-     * «+ В выгрузку». Поставщик ещё не выбран — выбирается самое дешёвое в рублях оригинальное
-     * предложение (нет оригиналов — самое дешёвое из всех).
+     * «+ В выгрузку» — только когда снабженец выбрал, где закупаем: в выгрузку идут все цены
+     * позиции, выбранная — с отметкой «закупаем здесь». Сами за него не выбираем.
      *
      * @param  Collection<int, QuotePartsOffer>  $offers  действующие предложения позиции на экране
-     * @return QuotePartsOffer|null выбранное автоматически
      */
-    public function add(string $sku, int $catalogItemId, Collection $offers, User $by): ?QuotePartsOffer
+    public function add(string $sku, int $catalogItemId, Collection $offers, User $by): void
     {
         $chosen = $this->choices->forItems([$catalogItemId])->get($catalogItemId);
-        $hasChoice = $chosen && $chosen->source === 'quoteparts' && $offers->contains('id', (int) $chosen->offer_ref);
-
-        $auto = null;
-        if (! $hasChoice) {
-            $auto = self::cheapest($offers);
-            if ($auto === null) {
-                throw new \DomainException('По позиции нет предложения, которое можно закупить.');
-            }
-            $this->choose($auto, $by);
+        if (! ($chosen && $chosen->source === 'quoteparts' && $offers->contains('id', (int) $chosen->offer_ref))) {
+            throw new \DomainException('Сначала выберите предложение — «Закупаем здесь».');
         }
 
         PricePosition::query()->updateOrCreate(['sku' => $sku], [
@@ -82,8 +73,6 @@ class PriceActualizationService
             'in_export_by_user_id' => $by->id,
             'exported_at' => null,
         ]);
-
-        return $auto;
     }
 
     public function remove(string $sku): void
@@ -126,20 +115,5 @@ class PriceActualizationService
         });
 
         return $export;
-    }
-
-    /**
-     * Самое дешёвое в рублях: среди оригиналов, нет их — среди всех.
-     *
-     * @param  Collection<int, QuotePartsOffer>  $offers
-     */
-    public static function cheapest(Collection $offers): ?QuotePartsOffer
-    {
-        $usable = $offers->filter(fn (QuotePartsOffer $o) => $o->ignored_at === null && $o->supplier_key !== null && $o->price !== null && (float) $o->price > 0)
-            ->map(fn (QuotePartsOffer $o) => [$o, IqotCurrencyConverter::toRub((float) $o->price, $o->currency)])
-            ->filter(fn ($x) => $x[1]['known']);
-        $originals = $usable->filter(fn ($x) => ($x[0]->kind ?? 'original') === 'original');
-
-        return ($originals->isNotEmpty() ? $originals : $usable)->sortBy(fn ($x) => $x[1]['rub'])->first()[0] ?? null;
     }
 }

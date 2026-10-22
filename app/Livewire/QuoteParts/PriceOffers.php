@@ -90,7 +90,7 @@ class PriceOffers extends Component
         $this->forget();
     }
 
-    /** «+ В выгрузку»: позиция — в список выгрузки 1С; поставщик не выбран — выбирается лучший оригинал. */
+    /** «+ В выгрузку»: позиция с выбранным предложением — в список выгрузки 1С. */
     public function addToExport(string $sku, PriceActualizationService $service): void
     {
         $it = $this->screenItems()->firstWhere('sku', $sku);
@@ -98,7 +98,7 @@ class PriceOffers extends Component
             return;
         }
         try {
-            $auto = $service->add($sku, (int) $it['cid'], self::liveOffers($it), auth()->user());
+            $service->add($sku, (int) $it['cid'], self::liveOffers($it), auth()->user());
         } catch (\DomainException $e) {
             $this->dispatch('toast', type: 'error', message: $e->getMessage());
 
@@ -106,9 +106,6 @@ class PriceOffers extends Component
         }
         $this->exportNote = null;
         $this->forget();
-        if ($auto) {
-            $this->dispatch('toast', type: 'success', message: 'В выгрузке '.$sku.': закупаем у '.($auto->supplier_name ?: $auto->supplier_key).' — самое дешёвое'.(($auto->kind ?? 'original') === 'original' ? ' оригинальное' : '').' предложение.');
-        }
     }
 
     public function removeFromExport(string $sku, PriceActualizationService $service): void

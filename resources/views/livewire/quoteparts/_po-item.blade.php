@@ -53,8 +53,8 @@
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{ $pos->exported_at ? 'выгружено '.$pos->exported_at->timezone($tz)->format('d.m H:i') : 'в выгрузке 1С' }}</span>
                     <button type="button" wire:click="removeFromExport('{{ $it['sku'] }}')" class="pa-btn pa-btn-link" style="align-self: flex-end; height: 20px">убрать</button>
                 @else
-                    <button type="button" wire:click="addToExport('{{ $it['sku'] }}')" wire:loading.attr="disabled" class="pa-export"
-                            title="{{ $chosen ? 'Добавить в общую выгрузку 1С' : 'Добавить в выгрузку — выберется лучшее предложение (оригинал)' }}">
+                    <button type="button" @if($chosen) wire:click="addToExport('{{ $it['sku'] }}')" wire:loading.attr="disabled" @else disabled @endif class="pa-export"
+                            title="{{ $chosen ? 'Добавить в выгрузку 1С: все цены позиции, выбранная — «закупаем здесь»' : 'Сначала выберите предложение — «Закупаем здесь»' }}">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>В выгрузку</button>
                 @endif
             @endif

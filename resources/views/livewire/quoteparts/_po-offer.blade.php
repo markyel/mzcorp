@@ -1,6 +1,6 @@
 {{-- Строка предложения в позиции «Актуализации цен» (дизайн «Актуализация цен», 10.2026). Ожидает $r (строка
      предложения), $it (позиция), $chosen (id выбранного предложения позиции), $best (id лучшего оригинала),
-     $only (у позиции одно годное предложение), $pos (PricePosition|null), $reopened (позиция вернулась с новым).
+     $only (у позиции одно годное предложение; не используется), $pos (PricePosition|null), $reopened (позиция вернулась с новым).
      Строки всегда белые: статус позиции — только в её шапке. --}}
 @php
     $sources = ['form' => 'форма запроса', 'email' => 'письмо', 'cabinet' => 'кабинет', 'price_list' => 'прайс', 'api' => 'API'];
@@ -24,7 +24,7 @@
         $r['lead'] !== null ? 'поставка '.$r['lead'].' дн.' : null,
         $moq > 1 ? 'мин. партия '.$num($moq) : null,
     ]));
-    $accent = ($best === $r['id'] || $only) && ! $r['stale'];
+
     $open = $dialog === $r['id'];
     $nLetters = $this->threadCounts[$r['id']] ?? null;
 @endphp
@@ -100,7 +100,7 @@
                 <button type="button" wire:click="clearClarification({{ $r['id'] }})" class="pa-btn pa-btn-link" title="Снять ожидание ответа и решить сейчас">вернуть</button>
             @else
                 @if($r['cid'] && $r['key'] && ! $r['stale'])
-                    <button type="button" wire:click="choose({{ $r['id'] }})" class="pa-btn {{ $accent ? 'pa-btn-accent' : 'pa-btn-secondary' }}"
+                    <button type="button" wire:click="choose({{ $r['id'] }})" class="pa-btn pa-btn-secondary"
                             title="Закупаем у этого поставщика — идёт в выгрузку 1С как выбранный{{ $kind !== 'original' ? '; '.mb_strtolower(\App\Models\QuotePartsOffer::kindLabel($kind)).' — как цена позиции, с примечанием' : '' }}">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Закупаем здесь</button>
                 @endif
