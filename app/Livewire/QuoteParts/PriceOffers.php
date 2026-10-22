@@ -313,7 +313,7 @@ class PriceOffers extends Component
     #[Computed]
     public function supplierNames(): array
     {
-        return app(QuotePartsRfqService::class)->supplierNames($this->windowRfqs);
+        return collect(app(QuotePartsRfqService::class)->supplierNames($this->windowRfqs))->all();
     }
 
     /** Отказы за выбранный период. */
