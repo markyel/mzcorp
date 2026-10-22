@@ -88,9 +88,10 @@ class QuotePartsRfqService
             // В теме письма, как у прямого запроса из mzCorp: «[M-2026-19835] / [370918] [QP-…]» —
             // поставщик и менеджер находят переписку по номеру заявки и запроса 1С.
             'subject_refs' => self::subjectRefs($request?->internal_code, $request?->onec_number),
-            // Дублирование переписки — настройка сотрудника (раздел QuoteParts → «Пилот»):
-            // ответы поставщиков — копией автору, ответ на копию уходит поставщику.
-            'mirror' => $by->quoteparts_mirror ? ['email' => $this->mirrorAddress($by), 'name' => $by->name] : null,
+            // Дублирование переписки (раздел QuoteParts → «Пилот»): личная настройка сотрудника или его ящик,
+            // отмеченный в «Сообщения поставщиков — в Почту», — ответы и вопросы поставщиков копией автору,
+            // ответ на копию уходит поставщику.
+            'mirror' => $this->wantsMirror($by) ? ['email' => $this->mirrorAddress($by), 'name' => $by->name] : null,
             'attachments' => $this->attachments($files),
         ];
         if ($letters !== []) {
@@ -152,6 +153,21 @@ class QuotePartsRfqService
     /**
      * Куда дублировать переписку: личный ящик автора (с него он и ответит), иначе адрес входа.
      */
+    /**
+     * Копии переписки по запросам автору: включено лично (users.quoteparts_mirror) или его ящик отмечен
+     * в «Сообщения поставщиков — в Почту» (тот же туннель, что у переписки вне запросов; кейс 22.10:
+     * вопрос поставщика по [QP-QBDURS] никуда не пришёл — ящик автора отмечен, личная настройка выключена).
+     */
+    public function wantsMirror(User $user): bool
+    {
+        if ($user->quoteparts_mirror) {
+            return true;
+        }
+        $tunnel = array_map(fn ($e) => mb_strtolower(trim((string) $e)), (array) app_setting(\App\Livewire\QuoteParts\Index::MIRROR_SETTING, ['info@myzip.ru']));
+
+        return in_array(mb_strtolower($this->mirrorAddress($user)), $tunnel, true);
+    }
+
     public function mirrorAddress(User $user): string
     {
         $personal = \App\Models\Mailbox::query()
