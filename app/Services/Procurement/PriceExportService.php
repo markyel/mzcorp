@@ -203,7 +203,7 @@ class PriceExportService
             $parts[] = 'цена по партиям: '.$tiers->map(fn ($t) => 'от '.$num($t['min_qty'] ?? 1).' — '.$num($t['price']))->implode('; ');
         }
         if ($o->lead_time_days !== null) {
-            $parts[] = 'срок '.(int) $o->lead_time_days.' дн.';
+            $parts[] = 'срок поставки '.(int) $o->lead_time_days.' дн.';
         }
         // Примечание поставщика — если его ещё нет в описании отклонения.
         $note = trim((string) $o->note);

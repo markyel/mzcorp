@@ -38,7 +38,7 @@
                     <th class="text-right px-3 py-2" title="Закупочная цена из каталога (1С) — с логистикой и таможней, с ценой поставщика напрямую не сравнивается">Закупка</th>
                     <th class="text-right px-3 py-2" title="Цена продажи в каталоге">Продажа</th>
                 @endif
-                <th class="text-left px-3 py-2">Срок · действует</th>
+                <th class="text-left px-3 py-2">Поставка · цена до</th>
                 @if($showRequest)<th class="text-left px-3 py-2">Заявка</th>@endif
                 <th class="text-left px-3 py-2">Решение</th>
             </tr>
@@ -137,8 +137,8 @@
                     @endif
                     <td class="px-3 py-1.5 whitespace-nowrap text-fg-3 text-[11.5px]">
                         {{-- Срок поставки — если поставщик его назвал; срок действия предложения — всегда, если есть. --}}
-                        @if($r['lead'])<div title="Срок поставки">{{ $r['lead'] }} дн.</div>@endif
-                        @if($r['valid'])<div title="Предложение действует до">до {{ $r['valid']->format('d.m.Y') }}</div>@elseif(! $r['lead'])<span class="text-fg-4">—</span>@endif
+                        @if($r['lead'])<div title="Срок поставки">поставка {{ $r['lead'] }} дн.</div>@endif
+                        @if($r['valid'])<div title="Предложение действует до">цена до {{ $r['valid']->format('d.m.Y') }}</div>@elseif(! $r['lead'])<span class="text-fg-4">—</span>@endif
                     </td>
                     @if($showRequest)
                         <td class="px-3 py-1.5 whitespace-nowrap">

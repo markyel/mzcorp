@@ -21,14 +21,14 @@ class PriceExportDeviationNoteTest extends TestCase
         $o = new QuotePartsOffer(['kind' => 'analog', 'brand' => 'Fermator', 'part_number' => 'FR-60', 'note' => 'подходит по размерам',
             'tiers' => [['min_qty' => 50, 'price' => 48.5], ['min_qty' => 10, 'price' => 52]], 'lead_time_days' => 30, 'valid_until' => '2026-12-31']);
 
-        $this->assertSame('аналог (не оригинал): Fermator FR-60 — подходит по размерам; мин. партия 10; цена по партиям: от 10 — 52; от 50 — 48,5; срок 30 дн.',
+        $this->assertSame('аналог (не оригинал): Fermator FR-60 — подходит по размерам; мин. партия 10; цена по партиям: от 10 — 52; от 50 — 48,5; срок поставки 30 дн.',
             PriceExportService::offerComment($o));
     }
 
     public function test_plain_original_offer_has_only_its_terms(): void
     {
         $this->assertNull(PriceExportService::offerComment(new QuotePartsOffer(['kind' => 'original', 'tiers' => [['min_qty' => 1, 'price' => 3]]])));
-        $this->assertSame('срок 7 дн.; уточнять наличие', PriceExportService::offerComment(new QuotePartsOffer(['tiers' => [['min_qty' => 1, 'price' => 3]], 'lead_time_days' => 7, 'note' => 'уточнять наличие'])));
+        $this->assertSame('срок поставки 7 дн.; уточнять наличие', PriceExportService::offerComment(new QuotePartsOffer(['tiers' => [['min_qty' => 1, 'price' => 3]], 'lead_time_days' => 7, 'note' => 'уточнять наличие'])));
     }
 
     public function test_mail_comment(): void
