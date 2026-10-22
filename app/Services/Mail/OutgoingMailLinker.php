@@ -80,6 +80,12 @@ class OutgoingMailLinker
             ? Request::find($matched->related_request_id)
             : null;
 
+        // L3.6: номер нашего документа в теме (КП / счёт / 1С), письмо — в компанию клиента этой заявки.
+        if (! $request) {
+            $request = $this->matchByDocumentNumber($message);
+            $matchedBy = $request ? 'subject_document_number' : $matchedBy;
+        }
+
         // L4: to_recipients + open Requests клиента (fuzzy, по subject-similarity).
         if (! $request && $allowFuzzyRecipientMatch) {
             $request = $this->matchByOpenRequestForRecipients($message);
@@ -165,6 +171,39 @@ class OutgoingMailLinker
      * L3.5: маркеры партнёрских систем — то же что в InboundReplyLinker.
      * См. config('services.mail.external_codes').
      */
+    /**
+     * Номер нашего документа в теме — КП, счёт или номер 1С (6–9 цифр): однозначно одна заявка, и письмо ушло
+     * в компанию её клиента (тот же корпоративный домен; на публичной почте — тот же адрес). Кейс M-2026-20320:
+     * счёт ушёл ответом на внутреннюю пересылку согласия клиента («Fwd: Согласовано КП №371218») другому
+     * сотруднику клиента — тред не сматчился, письмо со счётом осталось без заявки.
+     */
+    private function matchByDocumentNumber(EmailMessage $message): ?Request
+    {
+        $codes = array_values(array_filter(
+            \App\Services\Supplier\SupplierInquiryService::subjectCodes((string) $message->subject),
+            fn (string $c) => ctype_digit($c),
+        ));
+        if ($codes === []) {
+            return null;
+        }
+        $id = app(\App\Services\Supplier\SupplierInquiryService::class)->requestIdByCodes($codes);
+        $request = $id !== null ? Request::find($id) : null;
+        $client = mb_strtolower(trim((string) $request?->client_email));
+        if ($request === null || ! str_contains($client, '@')) {
+            return null;
+        }
+        $clientDomain = substr(strrchr($client, '@'), 1);
+        $free = array_map('mb_strtolower', (array) config('services.mail.free_mail_domains', []));
+        foreach (array_merge((array) ($message->to_recipients ?? []), (array) ($message->cc_recipients ?? [])) as $r) {
+            $email = mb_strtolower(trim((string) (is_array($r) ? ($r['email'] ?? '') : $r)));
+            if ($email === $client || (! in_array($clientDomain, $free, true) && str_ends_with($email, '@'.$clientDomain))) {
+                return $request;
+            }
+        }
+
+        return null;
+    }
+
     private function matchByExternalCode(EmailMessage $message): ?EmailMessage
     {
         $patterns = (array) config('services.mail.external_codes', []);

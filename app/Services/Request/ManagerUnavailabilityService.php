@@ -281,6 +281,26 @@ class ManagerUnavailabilityService
             ->id;
     }
 
+    /**
+     * Заявка оказалась на недоступном менеджере в обход autoAssign — дочерняя на счёт по выигранной
+     * сделке, наследник (M-2026-20542: письмо в ящик РОПа в отпуске, заявка на нём без acting) —
+     * открыть её коллеге, как при обычном назначении. Non-fatal.
+     */
+    public function delegateIfUnavailable(Request $request, ?User $byUser = null): ?int
+    {
+        $assignee = $request->assigned_user_id ? User::find($request->assigned_user_id) : null;
+        if ($assignee === null || ! $assignee->isUnavailable()) {
+            return null;
+        }
+        try {
+            return $this->delegateOne($request->fresh(), $assignee, $byUser);
+        } catch (\Throwable $e) {
+            Log::warning('ManagerUnavailabilityService: delegate on assignment failed (non-fatal)', ['request_id' => $request->id, 'assignee_id' => $assignee->id, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
+
     public function delegateOne(Request $req, User $unavailable, ?User $byUser = null): ?int
     {
         if (! $req->status->isOpenForAssignment()) {

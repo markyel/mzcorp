@@ -114,6 +114,9 @@ class RequestSuccessorService
             return $child;
         });
 
+        // Менеджер родителя в отпуске — заявку ведёт коллега (как при обычном назначении).
+        app(ManagerUnavailabilityService::class)->delegateIfUnavailable($child, $by);
+
         try {
             $this->activity->touch($child, RequestActivityType::RequestCreated);
             $this->attention->onAssigned($child->fresh());

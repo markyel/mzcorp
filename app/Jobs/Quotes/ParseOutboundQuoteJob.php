@@ -59,7 +59,8 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
 
     public function __construct(
         public readonly int $emailAttachmentId,
-        public readonly string $documentType,
+        // Не readonly: файл без говорящего имени, унаследовавший тип письма «КП», оказывается счётом (promoteToInvoice).
+        public string $documentType,
         public readonly bool $force = false,
     ) {
     }
@@ -205,6 +206,7 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
 
             $document = $parsed['document'] ?? [];
             $items = $parsed['items'] ?? [];
+            $promoted = $this->promoteToInvoice($attachment, $quote, $document, $items);
 
             DB::transaction(function () use ($quote, $document, $items) {
                 $quote->document_number = isset($document['number']) ? mb_substr((string) $document['number'], 0, 128) : null;
@@ -384,6 +386,13 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                 // есть номер, позиции, сумма → применяем отложенный AiDecision.
                 // Нет Invoice (не счёт / без номера / договор) — suggestion
                 // остаётся менеджеру на плашке.
+                if ($invoice !== null && $promoted) {
+                    app(AiDecisionService::class)->recordSuggestion(DetectorType::OutboundInvoice, $request, $message, 0.95, [
+                        'signals' => ['document_parsed_as_invoice'],
+                        'promoted_from' => DetectorType::OutboundQuotationFull->value,
+                        'attachment' => $attachment->filename,
+                    ]);
+                }
                 if ($invoice !== null) {
                     $this->applyDecisionAfterDocumentEvidence($request, $message, DetectorType::OutboundInvoice, [
                         'invoice_id' => $invoice->id,
@@ -593,6 +602,34 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
      *
      * @param  array<string, mixed>  $evidence
      */
+    /**
+     * Вложение без говорящего имени (Scan.pdf, «спецификация») унаследовало тип письма «КП», а разбор нашёл
+     * в нём счёт — номер, позиции, сумма (M-2026-20320: счёт 11135 сканом в ответе на согласие клиента;
+     * письмо «КП», документ записан КП, статус не сдвинулся). Тип документа — по содержимому. Файл, имя
+     * которого само говорит «КП» или «счёт», не трогаем.
+     *
+     * @param  array<string, mixed>  $document
+     * @param  array<int, mixed>  $items
+     */
+    private function promoteToInvoice(EmailAttachment $attachment, OutboundQuote $quote, array $document, array $items): bool
+    {
+        if ($this->documentType !== DetectorType::OutboundQuotationFull->value
+            || mb_strtolower((string) ($document['type'] ?? '')) !== 'invoice'
+            || trim((string) ($document['number'] ?? '')) === ''
+            || $items === []
+            || ! is_numeric($document['total_amount'] ?? null)
+            || app(\App\Services\DocumentDetector\OutboundDocumentDetector::class)->classifyAttachmentByFilename((string) $attachment->filename) !== null) {
+            return false;
+        }
+        $this->documentType = DetectorType::OutboundInvoice->value;
+        $quote->document_type = $this->documentType;
+        Log::info('ParseOutboundQuoteJob: the document is an invoice — type taken from its content', [
+            'quote_id' => $quote->id, 'attachment' => $attachment->filename, 'number' => $document['number'] ?? null,
+        ]);
+
+        return true;
+    }
+
     private function applyDecisionAfterDocumentEvidence(
         Request $request,
         EmailMessage $message,

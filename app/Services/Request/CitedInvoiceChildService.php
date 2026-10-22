@@ -174,6 +174,9 @@ class CitedInvoiceChildService
             ]);
         }
 
+        // Менеджер родителя в отпуске — заявку ведёт коллега (как при обычном назначении).
+        app(ManagerUnavailabilityService::class)->delegateIfUnavailable($child);
+
         Log::info('CitedInvoiceChildService: invoice child created from won parent', [
             'parent_request_id' => $parent->id,
             'child_request_id' => $child->id,
