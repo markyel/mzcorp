@@ -774,6 +774,28 @@ class Index extends Component
         $this->editedOem[$cid] = implode(', ', $parts);
     }
 
+    /**
+     * «+» у M-артикула: поставить его в начало названия позиции в письме (русского или английского —
+     * на языке поставщика). Уже стоит — ничего не делаем.
+     */
+    public function prependSku(int $cid, string $sku, string $model = 'editedNames'): void
+    {
+        $sku = trim($sku);
+        if ($sku === '' || ! in_array($model, ['editedNames', 'editedNamesEn'], true)) {
+            return;
+        }
+        $name = trim((string) ($this->{$model}[$cid] ?? ''));
+        if (self::startsWithSku($name, $sku)) {
+            return;
+        }
+        $this->{$model}[$cid] = trim($sku.' '.$name);
+    }
+
+    public static function startsWithSku(string $name, string $sku): bool
+    {
+        return $sku !== '' && preg_match('/^'.preg_quote($sku, '/').'(?![\p{L}\p{N}])/iu', trim($name)) === 1;
+    }
+
     /** Развернуть / свернуть карточку товара с историей поставщиков. */
     public function toggleCard(int $cid, string $where = 't'): void
     {
