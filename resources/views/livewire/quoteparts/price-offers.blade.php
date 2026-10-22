@@ -196,9 +196,9 @@
         @if($bar['addable']->isNotEmpty())
             <button type="button" wire:click="addAllChosen" wire:loading.attr="disabled" class="pa-bar-add">+ Добавить все с выбранным поставщиком · {{ $bar['addable']->count() }}</button>
         @endif
-        <button type="button" wire:click="exportList(false)" wire:loading.attr="disabled" @disabled($bar['toExport'] === 0) class="pa-bar-btn is-secondary"
-                title="Выгрузить позиции списка, ещё не выгруженные; они останутся на экране, сбор цен продолжается">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>Выгрузить в 1С{{ $bar['toExport'] ? ' · '.$bar['toExport'] : '' }}</button>
+        <button type="button" wire:click="exportList(false)" wire:loading.attr="disabled" @disabled($bar['inList'] === 0) class="pa-bar-btn is-secondary"
+                title="Выгрузить все позиции списка — сколько угодно раз; они останутся на экране, сбор цен продолжается">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>Выгрузить в 1С{{ $bar['inList'] ? ' · '.$bar['inList'] : '' }}</button>
         <button type="button" wire:click="exportList(true)" wire:loading.attr="disabled" @disabled($bar['inList'] === 0) class="pa-bar-btn is-primary"
                 wire:confirm="Выгрузить {{ $bar['inList'] }} поз. в 1С и убрать с экрана? Вернутся, если придёт новое предложение."
                 title="Выгрузить в 1С и убрать позиции с экрана. Вернутся, если придёт новое предложение.">Выгрузить и завершить сбор цен{{ $bar['inList'] ? ' · '.$bar['inList'] : '' }}</button>

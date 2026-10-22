@@ -126,16 +126,14 @@ class PriceOffers extends Component
     }
 
     /**
-     * «Выгрузить в 1С» — ещё не выгруженные позиции списка, они остаются на экране; «Выгрузить и
-     * завершить сбор цен» — весь список, позиции уходят с экрана. Файл сразу скачивается.
+     * «Выгрузить в 1С» — весь список, сколько угодно раз: позиции остаются на экране, сбор цен
+     * продолжается. «Выгрузить и завершить сбор цен» — весь список, и позиции уходят с экрана: работа
+     * по ним закончена до нового предложения. Файл сразу скачивается.
      */
     public function exportList(bool $finish, PriceActualizationService $service)
     {
         // В списке бывает и завершённая позиция: вернулась с новым предложением и выгружается снова.
         $list = PricePosition::query()->whereNotNull('in_export_at')->get();
-        if (! $finish) {
-            $list = $list->whereNull('exported_at')->values();
-        }
         if ($list->isEmpty()) {
             return null;
         }
@@ -748,7 +746,7 @@ class PriceOffers extends Component
     /**
      * Нижняя панель: сколько решено в «Готово», список выгрузки и его сумма, что выгружать.
      *
-     * @return array{done:int, total:int, inList:int, sum:float, toExport:int, addable:Collection}
+     * @return array{done:int, total:int, inList:int, sum:float, addable:Collection}
      */
     #[Computed]
     public function bar(): array
@@ -768,7 +766,6 @@ class PriceOffers extends Component
             'total' => $ready->count(),
             'inList' => $list->count(),
             'sum' => $sum,
-            'toExport' => $list->whereNull('exported_at')->count(),
             'addable' => $this->newItems->merge($ready)
                 ->filter(fn ($it) => $it['cid'] && $this->stateOf($it)['chosen'] !== null && ! ($this->positions->get($it['sku'])?->in_export_at))
                 ->values(),
