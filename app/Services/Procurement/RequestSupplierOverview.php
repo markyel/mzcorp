@@ -248,7 +248,7 @@ class RequestSupplierOverview
                     'thread' => collect($thread)->map(fn ($m) => [
                         'dir' => $m['direction'] === 'event' ? 'event' : ($m['direction'] === 'out' ? 'out' : 'in'),
                         'from' => $m['direction'] === 'event' ? 'QuoteParts' : ($m['direction'] === 'out' ? 'Мы'.(! empty($m['who']) ? ' · '.$m['who'] : '') : (string) ($this->supplierNames()[$key] ?? $key)),
-                        'subject' => $m['subject'] ?? null, 'text' => Str::limit(preg_replace('/\s+/u', ' ', (string) ($m['text'] ?? '')) ?? '', 220),
+                        'subject' => $m['subject'] ?? null, 'text' => $m['direction'] === 'event' ? (string) ($m['text'] ?? '') : QuotePartsThread::gist((string) ($m['text'] ?? '')),
                         'body' => (string) ($m['text'] ?? ''), 'at' => ! empty($m['at']) ? Carbon::parse($m['at'])->timezone($tz)->format('d.m H:i') : '',
                         'files' => collect($m['files'] ?? [])->map(fn ($f) => ['name' => (string) ($f['name'] ?? 'file'), 'mime' => $f['mime'] ?? null,
                             'url' => isset($f['message_id'], $f['index']) ? route('quoteparts.rfq-file', [$rfq->remote_id, $f['message_id'], $f['index']] + (! empty($f['relay']) ? ['relay' => 1] : [])) : null])->filter(fn ($f) => $f['url'])->values()->all(),

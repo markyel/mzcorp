@@ -6,7 +6,7 @@
     $isImage = fn ($f) => in_array($f['mime'] ?? '', ['image/jpeg', 'image/png', 'image/webp', 'image/gif'], true);
     $fileUrl = fn ($f) => route('quoteparts.rfq-file', [$rfq->remote_id, $f['message_id'], $f['index']] + (! empty($f['relay']) ? ['relay' => 1] : []));
 @endphp
-<div style="border-bottom: 1px solid var(--border-subtle)">
+<div style="padding-bottom: 4px">
     @foreach($thread as $m)
         @php
             $dir = $m['direction'] ?? 'event';
@@ -23,10 +23,14 @@
             $shot = 0;
         @endphp
         <div wire:key="qpc-{{ $rfq->id }}-{{ $si }}-{{ $loop->index }}" x-data="{ full: false }"
-             style="display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border-subtle); font-size: 12.5px">
+             style="display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; font-size: 12.5px; border-radius: 6px; border-left: 3px solid transparent; {{ match ($dir) {
+                 'in' => 'padding: 7px 10px; margin-top: 6px; background: var(--emerald-50); border-left-color: var(--emerald-600)',
+                 'out' => 'padding: 7px 10px; margin-top: 6px; background: var(--bg-surface-2); border-left-color: var(--sky-500)',
+                 default => 'padding: 2px 10px; margin-top: 2px; font-size: 12px; color: var(--fg-4)',
+             } }}">
             <span style="font-weight: 700; color: {{ $dir === 'out' ? 'var(--sky-700)' : ($dir === 'in' ? 'var(--emerald-700)' : 'var(--fg-4)') }}">{{ $dir === 'out' ? '→' : ($dir === 'in' ? '←' : '·') }}</span>
             <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
-                <span style="font-weight: 500; color: var(--fg-1)">{{ $who }}@if(! empty($m['auto']))<span style="color: var(--fg-4); font-weight: 400"> · автоответ</span>@endif @if(! empty($m['cc']))<span style="color: var(--fg-4); font-weight: 400"> · копия: {{ implode(', ', $m['cc']) }}</span>@endif</span>
+                <span style="font-weight: {{ $dir === 'event' ? 400 : ($dir === 'in' ? 600 : 500) }}; color: {{ $dir === 'event' ? 'var(--fg-4)' : 'var(--fg-1)' }}">{{ $who }}@if(! empty($m['auto']))<span style="color: var(--fg-4); font-weight: 400"> · автоответ</span>@endif @if(! empty($m['cc']))<span style="color: var(--fg-4); font-weight: 400"> · копия: {{ implode(', ', $m['cc']) }}</span>@endif</span>
                 @if(! empty($m['subject']))<span style="font-size: 12px; color: var(--fg-2)">{{ $m['subject'] }}</span>@endif
                 @if(! empty($m['error']))<span style="font-size: 11.5px; color: var(--red-700)">не отправлено: {{ $m['error'] }}</span>@endif
                 @if($dir !== 'event' && $gist !== trim(preg_replace('/\s+/u', ' ', $body) ?? ''))

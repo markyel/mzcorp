@@ -66,7 +66,13 @@
     .rs-srow{align-items:center;min-height:48px;padding:6px 20px;cursor:pointer;transition:background 120ms}
     .rs-srow:hover{background:var(--bg-hover)}
     .rs-srow.open{background:var(--bg-selected)}
-    .rs-tl{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;padding:8px 0;border-top:1px solid var(--border-subtle)}
+    /* Лента переписки: письма поставщика — зелёные, наши — серые с синей кромкой, события — мелкой строкой. */
+    .rs-tl{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;padding:8px 10px;margin-top:6px;border-radius:6px;border-left:3px solid transparent}
+    .rs-tl.in{background:var(--emerald-50);border-left-color:var(--emerald-600)}
+    .rs-tl.out{background:var(--bg-surface-2);border-left-color:var(--sky-500)}
+    .rs-tl.event{padding:2px 10px;margin-top:2px;font-size:12px;color:var(--fg-4)}
+    .rs-tl.event > div > span:first-child{font-weight:400 !important}
+    .rs-tl.in > div > span:first-child{font-weight:600 !important}
     .rs-q-bubble{background:var(--bg-surface-2);border-radius:0 8px 8px 8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;max-width:760px}
     .rs-ta{box-sizing:border-box;width:100%;border:1px solid var(--border-strong);border-radius:6px;padding:8px 10px;font-size:13px;resize:vertical;outline:none;background:var(--bg-surface)}
     .rs-ta:focus{border-color:var(--sky-500);box-shadow:0 0 0 2px var(--ring)}
@@ -285,7 +291,7 @@
                             </div>
                             <div x-show="open" x-cloak style="padding: 4px 20px 16px 52px">
                                 @forelse($s['thread'] as $m)
-                                    <div class="rs-tl" x-data="{ full: false }">
+                                    <div class="rs-tl {{ $m['dir'] }}" x-data="{ full: false }">
                                         <span style="font-weight: 700; color: {{ $m['dir'] === 'out' ? 'var(--sky-700)' : ($m['dir'] === 'in' ? 'var(--emerald-700)' : 'var(--fg-4)') }}">{{ $m['dir'] === 'out' ? '→' : ($m['dir'] === 'in' ? '←' : '·') }}</span>
                                         <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
                                             <span style="font-weight: 500">{{ $m['from'] }}</span>
