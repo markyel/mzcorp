@@ -153,9 +153,11 @@
                                 <td class="px-3 py-2 text-[11.5px]">
                                     @if($poolRow)
                                         <span class="chip {{ $poolRow->status === 'paused' ? 'chip-warn' : ($poolRow->status === 'error' ? 'chip-danger' : 'chip-neutral') }} text-[10.5px]">{{ $poolRow->statusLabel() }}</span>
-                                    @else
+                                    @elseif(empty($this->activity[$p['sku']]))
                                         <span class="text-fg-4">—</span>
                                     @endif
+                                    {{-- Движение — и у позиций, которые не в пуле, но запрашивались у поставщиков. --}}
+                                    @include('livewire.quoteparts._sku-activity', ['act' => $this->activity[$p['sku']] ?? null, 'sku' => $p['sku']])
                                 </td>
                             </tr>
                         @empty
@@ -405,6 +407,7 @@
                                 <td class="px-3 py-2">
                                     <span class="chip {{ $row->status === 'paused' ? 'chip-warn' : ($row->status === 'error' ? 'chip-danger' : ($row->status === 'active' ? 'chip-ok' : 'chip-neutral')) }} text-[10.5px]">{{ $row->statusLabel() }}</span>
                                     @if($row->remote_version > 1)<div class="text-[11px] text-fg-4 mt-0.5">версия {{ $row->remote_version }}</div>@endif
+                                    @include('livewire.quoteparts._sku-activity', ['act' => $this->activity[$row->sku] ?? null, 'sku' => $row->sku])
                                 </td>
                                 <td class="px-3 py-2 text-[11.5px] text-fg-3 whitespace-nowrap">{{ $row->synced_at?->format('d.m.Y H:i') ?? '—' }}</td>
                                 <td class="px-3 py-2 text-[11.5px] text-fg-3">{{ $row->addedBy?->name ?? '—' }}</td>

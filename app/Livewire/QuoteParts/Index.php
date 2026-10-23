@@ -85,6 +85,23 @@ class Index extends Component
         return QuotePartsPoolItem::query()->inPool()->whereIn('catalog_item_id', $cids)->get()->keyBy('catalog_item_id')->all();
     }
 
+    /**
+     * Движение по показанным позициям в QuoteParts: предложения, вопросы, отказы (артикул => сводка).
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    #[Computed]
+    public function activity(): array
+    {
+        $skus = match ($this->tab) {
+            'candidates' => array_column(array_slice($this->candidates, 0, $this->perPage), 'sku'),
+            'pool' => $this->poolItems->pluck('sku')->all(),
+            default => [],
+        };
+
+        return app(\App\Services\QuoteParts\QuotePartsSkuActivity::class)->for($skus);
+    }
+
     public function showMorePool(): void
     {
         $this->poolShown += 200;
