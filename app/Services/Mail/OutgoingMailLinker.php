@@ -86,6 +86,18 @@ class OutgoingMailLinker
             $matchedBy = $request ? 'subject_document_number' : $matchedBy;
         }
 
+        // Ответ на письмо, которое у нас есть, но без заявки (маршрутизатор оставил его во входящих —
+        // напр. постпродажа без надёжной привязки): угадывать заявку по клиенту и теме нельзя.
+        // 23.10.2026: ответ «Счёт неактуален, обновить?» на «Fwd: Запрос» про счёт 8757 (заявка
+        // M-2026-12768) лёг в свежую заявку того же клиента с темой «Запрос» — Jaccard 1.0.
+        if (! $request && $allowFuzzyRecipientMatch && ! empty($candidateIds)
+            && EmailMessage::query()->whereIn('message_id', $candidateIds)->whereNull('related_request_id')->where('is_draft', false)->exists()) {
+            $allowFuzzyRecipientMatch = false;
+            Log::info('OutgoingMailLinker: reply to a letter left without a request — no fuzzy L4', [
+                'email_message_id' => $message->id,
+            ]);
+        }
+
         // L4: to_recipients + open Requests клиента (fuzzy, по subject-similarity).
         if (! $request && $allowFuzzyRecipientMatch) {
             $request = $this->matchByOpenRequestForRecipients($message);
