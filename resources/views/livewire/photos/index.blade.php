@@ -44,10 +44,39 @@
     <section class="ph-card"
              x-data="{
                 over: false, total: 0, done: 0, busy: false, errors: [],
+                stage: '',
+                {{-- Zip распаковываем в браузере (JSZip) и грузим фото по одному: размер архива не упирается в лимит загрузки. --}}
+                async jszip() {
+                    if (! window.JSZip) {
+                        await new Promise((ok, fail) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'; s.onload = ok; s.onerror = fail; document.head.appendChild(s); });
+                    }
+                    return window.JSZip;
+                },
+                async unzip(file) {
+                    const JSZip = await this.jszip();
+                    {{-- Имена из Windows-архивов бывают в CP866: не UTF-8 — читаем как ibm866. --}}
+                    const decode = bytes => { try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (e) { return new TextDecoder('ibm866').decode(bytes); } };
+                    const zip = await JSZip.loadAsync(file, { decodeFileName: decode });
+                    const out = [];
+                    for (const entry of Object.values(zip.files)) {
+                        const name = entry.name.split('/').pop();
+                        if (entry.dir || entry.name.startsWith('__MACOSX/') || name.startsWith('.') || ! /\.(jpe?g|png|webp|bmp|gif|tiff?)$/i.test(name)) continue;
+                        out.push(new File([await entry.async('blob')], name));
+                    }
+                    return out;
+                },
                 async send(files) {
-                    const list = [...files].filter(f => /\.(jpe?g|png|webp|bmp|gif|tiff?|zip)$/i.test(f.name));
-                    if (! list.length) return;
-                    this.busy = true; this.total = list.length; this.done = 0; this.errors = [];
+                    const picked = [...files].filter(f => /\.(jpe?g|png|webp|bmp|gif|tiff?|zip)$/i.test(f.name));
+                    if (! picked.length) return;
+                    this.busy = true; this.done = 0; this.total = 0; this.errors = [];
+                    const list = [];
+                    for (const f of picked) {
+                        if (! /\.zip$/i.test(f.name)) { list.push(f); continue; }
+                        this.stage = 'Распаковываю ' + f.name + '…';
+                        try { list.push(...await this.unzip(f)); } catch (e) { this.errors.push(f.name + ' (не распаковался)'); }
+                    }
+                    this.stage = '';
+                    this.total = list.length;
                     for (const f of list) {
                         await new Promise(resolve => $wire.upload('upload', f, () => resolve(), () => { this.errors.push(f.name); resolve(); }));
                         this.done++;
@@ -69,9 +98,9 @@
                x-on:drop.prevent="over = false; send($event.dataTransfer.files)">
             <input type="file" multiple accept="image/*,.zip" class="hidden" style="display: none" x-on:change="send($event.target.files); $event.target.value = ''">
             <div style="font-size: 14px; color: var(--fg-1); font-weight: 500" x-show="! busy">Перетащите фото или zip сюда или нажмите, чтобы выбрать</div>
-            <div class="ph-hint" x-show="! busy" style="margin-top: 4px">jpg, png, webp, bmp, gif, tiff или zip · до 26 МБ на файл</div>
+            <div class="ph-hint" x-show="! busy" style="margin-top: 4px">jpg, png, webp, bmp, gif, tiff или zip любого размера · фото до 29 МБ</div>
             <div x-show="busy" x-cloak style="max-width: 360px; margin: 0 auto">
-                <div style="font-size: 13px; color: var(--fg-1); margin-bottom: 6px">Загружаю <span x-text="done"></span> из <span x-text="total"></span>…</div>
+                <div style="font-size: 13px; color: var(--fg-1); margin-bottom: 6px" x-text="stage || ('Загружаю ' + done + ' из ' + total + '…')"></div>
                 <div class="ph-bar"><div :style="'width:' + (total ? Math.round(done / total * 100) : 0) + '%'"></div></div>
             </div>
         </label>

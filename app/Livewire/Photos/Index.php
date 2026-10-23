@@ -21,8 +21,8 @@ class Index extends Component
 {
     use WithFileUploads;
 
-    /** Загружаемый файл (по одному): фото или zip, до 26 МБ (лимит загрузки Livewire). */
-    #[Validate('file|max:26000')]
+    /** Загружаемый файл (по одному): фото или zip, до 29 МБ (лимит загрузки PHP — 30 МБ). */
+    #[Validate('file|max:29696')]
     public $upload;
 
     public ?string $notice = null;

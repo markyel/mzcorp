@@ -49,9 +49,12 @@ return [
     */
     'temporary_file_upload' => [
         'disk' => null,
-        'rules' => null,
+        // null у Livewire = max:12288 (12 МБ) — ключ max_upload_size ниже Livewire не читает. Лимит — здесь,
+        // в пределах upload_max_filesize = 30M (zip фото «на удаление фона» в 12 МБ не влезал, 23.10.2026).
+        'rules' => ['required', 'file', 'max:29696'],
         'directory' => null,
-        'middleware' => null,
+        // null = throttle:60,1 — пачка фото (раздел «Фото») грузится по одному файлу, за минуту бывает больше 60.
+        'middleware' => 'throttle:600,1',
         'preview_mimes' => [
             'png', 'gif', 'bmp', 'svg', 'wav', 'mp4',
             'mov', 'avi', 'wmv', 'mp3', 'm4a',
