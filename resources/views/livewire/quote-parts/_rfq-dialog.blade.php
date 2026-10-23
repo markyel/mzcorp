@@ -24,7 +24,7 @@
     .qd-head b{color:var(--fg-1);font-weight:600;font-size:13px}
     .qd-sec{padding:10px 14px;border-bottom:1px solid var(--border-subtle)}
     .qd-ask{border:1px solid var(--amber-300);background:var(--amber-50, #fffbeb);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:12.5px}
-    .qd-ta{box-sizing:border-box;width:100%;border:1px solid var(--border-strong);border-radius:6px;padding:8px 10px;font-size:13px;resize:vertical;outline:none;background:var(--bg-surface)}
+    .qd-ta{box-sizing:border-box;width:100%;font:inherit;border:1px solid var(--border-strong);border-radius:6px;padding:8px 10px;font-size:13px;resize:vertical;outline:none;background:var(--bg-surface)}
     .qd-ta:focus{border-color:var(--sky-500)}
     .qd-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
     .qd-hint{font-size:11.5px;color:var(--fg-4)}
