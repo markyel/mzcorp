@@ -22,6 +22,22 @@ class QuotePartsThreadGistTest extends TestCase
         $this->assertSame('Price is 3.6 USD, quality OK.', QuotePartsThread::gist($text));
     }
 
+    public function test_split_keeps_line_breaks_and_moves_signature_to_the_tail(): void
+    {
+        $text = "Привет, Александр!\r\n\r\nХорошая копия — это высококачественная имитация.\r\n\r\n\r\n\r\n\r\nС уважением,\r\nСвета\r\nXi'an YuanQi Elevator Parts Co.,Ltd\r\n\r\n------------------ Original ------------------\r\nFrom: MyZip";
+
+        [$own, $tail] = QuotePartsThread::split($text);
+
+        $this->assertSame("Привет, Александр!\n\nХорошая копия — это высококачественная имитация.", $own);
+        $this->assertStringStartsWith('С уважением,', $tail);
+        $this->assertStringContainsString('Original', $tail);
+    }
+
+    public function test_split_without_signature_has_no_tail(): void
+    {
+        $this->assertSame(['Price is 3.6 USD.', ''], QuotePartsThread::split("Price is 3.6 USD.\n"));
+    }
+
     public function test_long_text_is_limited(): void
     {
         $gist = QuotePartsThread::gist(str_repeat('word ', 100));

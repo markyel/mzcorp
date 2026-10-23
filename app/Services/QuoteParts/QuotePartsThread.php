@@ -25,6 +25,26 @@ final class QuotePartsThread
     }
 
     /**
+     * Письмо на «суть» и «хвост» для пузыря ленты: суть — свой текст без подписи и цитаты, с
+     * переносами строк (свёрнутый пузырь показывает её начало); хвост — подпись и цитата,
+     * дописываются ниже при «весь текст». Так развёрнутый текст не перестраивается.
+     *
+     * @return array{0: string, 1: string} [суть, хвост]
+     */
+    public static function split(string $text): array
+    {
+        $text = trim(str_replace("\r\n", "\n", $text));
+        $cleaner = app(\App\Services\Mail\EmailTextCleanerService::class);
+        $own = $cleaner->removeSignature($cleaner->cutQuotedReplyTail($text));
+        $tidy = fn (string $s) => trim(preg_replace("/\n[ \t]*(\n[ \t]*){2,}/u", "\n\n", preg_replace('/[ \t]+$/mu', '', $s) ?? $s) ?? $s);
+        if ($own === '' || ! str_starts_with($text, $own)) {
+            return [$tidy($text), ''];
+        }
+
+        return [$tidy($own), $tidy(mb_substr($text, mb_strlen($own)))];
+    }
+
+    /**
      * Суть письма для компактной ленты: без цитаты прошлых писем и подписи, в одну строку,
      * не длиннее $limit. Если после чистки ничего не осталось — начало исходного текста.
      */

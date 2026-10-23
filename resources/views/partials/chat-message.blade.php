@@ -14,7 +14,10 @@
         .ct-in .ct-bubble{background:var(--bg-surface-2)}
         .ct-out .ct-bubble{background:var(--bg-surface);border:1px solid var(--border)}
         .ct-label{font-size:12px;color:var(--fg-2)}
-        .ct-more{color:var(--sky-700);font-size:12px}
+        .ct-more{color:var(--sky-700);font-size:12px;align-self:flex-start}
+        .ct-text{white-space:pre-line}
+        .ct-text.clamp{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+        .ct-tail{white-space:pre-line;color:var(--fg-3);font-size:12.5px;padding-top:6px;border-top:1px dashed var(--border);max-height:420px;overflow-y:auto}
         .ct-files{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px}
         .ct-thumb{display:block;width:56px;height:56px;border:1px solid var(--border);border-radius:6px;overflow:hidden;cursor:zoom-in;background:var(--bg-surface)}
         .ct-thumb img{width:100%;height:100%;object-fit:cover;display:block}
@@ -25,7 +28,8 @@
     $dir = $msg['dir'] ?? 'event';
     $body = (string) ($msg['body'] ?? '');
     $gist = (string) ($msg['gist'] ?? '');
-    $more = $dir !== 'event' && $body !== '' && trim(preg_replace('/\s+/u', ' ', $body) ?? '') !== $gist;
+    // Свёрнуто — первые строки сути; «весь текст» снимает ограничение и дописывает подпись и цитату ниже.
+    [$own, $tail] = $dir !== 'event' && trim($body) !== '' ? \App\Services\QuoteParts\QuotePartsThread::split($body) : [$gist, ''];
     $files = collect($msg['files'] ?? []);
     $gallery = $files->where('image', true)->values()->map(fn ($f) => ['src' => $f['url'], 'name' => $f['name'], 'dl' => $f['dl'] ?? $f['url']])->all();
     $shot = 0;
@@ -33,7 +37,8 @@
 @if($dir === 'event')
     <div class="ct-ev"><span>{{ $gist }}@if(! empty($msg['at'])) · {{ $msg['at'] }}@endif</span></div>
 @else
-    <div class="{{ $dir === 'in' ? 'ct-in' : 'ct-out' }}" x-data="{ full: false }">
+    <div class="{{ $dir === 'in' ? 'ct-in' : 'ct-out' }}" x-data="{ full: false, over: {{ $tail !== '' || substr_count($own, "
+") >= 4 || mb_strlen($own) > 300 ? 'true' : 'false' }} }">
         @if($dir === 'in')
             <span class="ct-av">{{ mb_substr(preg_replace('/[^\p{L}\p{N}]/u', '', (string) $msg['name']) ?: '?', 0, 2) }}</span>
         @endif
@@ -48,12 +53,11 @@
             <div class="ct-bubble">
                 @if(! empty($msg['error']))<span style="font-size: 12px; color: var(--red-700)">не отправлено: {{ $msg['error'] }}</span>@endif
                 @if(! empty($msg['subject']))<span class="ct-label">{{ $msg['subject'] }}</span>@endif
-                @if($more)
-                    <span x-show="! full">{{ $gist }} <button type="button" x-on:click="full = true" class="ct-more">весь текст</button></span>
-                    <span x-show="full" x-cloak style="white-space: pre-wrap; max-height: 420px; overflow-y: auto">{{ $body }}</span>
-                    <button type="button" x-show="full" x-cloak x-on:click="full = false" class="ct-more" style="align-self: flex-start">свернуть</button>
-                @elseif($gist !== '')
-                    <span>{{ $gist }}</span>
+                @if($own !== '')
+                    <span class="ct-text clamp" x-ref="t" :class="{ clamp: ! full }"
+                          x-intersect.once="if ($refs.t.scrollHeight > $refs.t.clientHeight + 2) over = true">{{ $own }}</span>
+                    @if($tail !== '')<span class="ct-tail" x-show="full" x-cloak>{{ $tail }}</span>@endif
+                    <button type="button" x-show="over" x-cloak x-on:click="full = ! full" class="ct-more" x-text="full ? 'свернуть' : 'весь текст'"></button>
                 @endif
                 @if($files->isNotEmpty())
                     <div class="ct-files">
