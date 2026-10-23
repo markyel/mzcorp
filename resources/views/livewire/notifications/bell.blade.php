@@ -45,6 +45,7 @@
                                 'bot_message' => '💬',
                                 'quoteparts_reply' => '📨',
                                 'quoteparts_question' => '❓',
+                                'quoteparts_ready' => '✅',
                                 'quoteparts_conversation' => '🗂',
                                 'quoteparts_price_list' => '📋',
                                 default => '🔔',
@@ -61,6 +62,7 @@
                                 'bot_message' => 'Клиент написал в ' . ($data['channel'] ?? 'бот') . ' · ' . ($data['internal_code'] ?? ''),
                                 'quoteparts_reply' => 'Поставщик ответил · ' . ($data['tag'] ?? 'QuoteParts') . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
                                 'quoteparts_question' => 'Поставщик спрашивает · ' . ($data['tag'] ?? 'QuoteParts') . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
+                                'quoteparts_ready' => 'Цены собраны, можно выбирать · ' . ($data['tag'] ?? 'QuoteParts') . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
                                 'quoteparts_price_list' => 'Прайс поставщика' . (! empty($data['supplier']) ? ' · ' . $data['supplier'] : ''),
                                 'quoteparts_conversation' => ($data['started_by'] ?? '') === 'supplier' ? 'Поставщик написал: ' . ($data['subject'] ?? '') : 'Ответ в обращении: ' . ($data['subject'] ?? ''),
                                 default => 'Уведомление',
@@ -76,6 +78,7 @@
                                 'outgoing_send_failed' => ($data['recipient'] ?? '') . ' · ' . ($data['subject'] ?? '') . ' · осталось черновиком',
                                 'bot_message' => ($data['client_name'] ?? '') . ' · ' . ($data['preview'] ?? ''),
                                 'quoteparts_price_list' => 'цен записано: ' . ($data['offers'] ?? 0) . ' · на проверку: ' . ($data['check'] ?? 0) . ' · не найдено: ' . ($data['none'] ?? 0),
+                                'quoteparts_ready' => ! empty($data['request_id']) ? 'выберите предложение во вкладке «Поставщики»' : 'выберите предложение в «Актуализации цен»',
                                 'quoteparts_reply', 'quoteparts_question', 'quoteparts_conversation' => ($data['supplier'] ?? 'поставщик') . (! empty($data['preview']) ? ' · ' . $data['preview'] : ''),
                                 default => '',
                             };
@@ -87,10 +90,10 @@
                                 'outgoing_send_failed' => $reqId
                                     ? route('requests.show', $reqId)
                                     : route('mail.inbox', ['mbox' => $data['mailbox_id'] ?? null, 'folder' => 'drafts', 'open' => $data['draft_id'] ?? null]),
-                                // Ответ / вопрос поставщика через QuoteParts разбирают в разделе QuoteParts: «Актуализация цен» /
-                                // «Вопросы поставщиков», найдено по номеру запроса; «Чьи запросы» — все, чтобы фильтр не спрятал.
-                                'quoteparts_reply' => route('quoteparts.index', array_filter(['tab' => 'offers', 'pq' => trim((string) ($data['tag'] ?? ''), '[]'), 'au' => 'all'])),
-                                'quoteparts_question' => route('quoteparts.index', array_filter(['tab' => 'questions', 'q' => trim((string) ($data['tag'] ?? ''), '[]'), 'au' => 'all'])),
+                                // Ответ / вопрос поставщика через QuoteParts — туда, откуда запрос отправлен: из заявки — её вкладка
+                                // «Поставщики», из «Снабжения» — «Актуализация цен» / «Вопросы поставщиков» по номеру запроса.
+                                'quoteparts_reply', 'quoteparts_ready' => \App\Models\QuotePartsRfq::authorUrl($data['request_id'] ?? null, $data['tag'] ?? null, 'offers'),
+                                'quoteparts_question' => \App\Models\QuotePartsRfq::authorUrl($data['request_id'] ?? null, $data['tag'] ?? null, 'question'),
                                 'quoteparts_price_list' => route('procurement.index', ['tab' => 'pricelists', 'pl' => $data['price_list_id'] ?? null]),
                                 'quoteparts_conversation' => ! empty($data['supplier_id']) ? route('suppliers.registry-edit', $data['supplier_id']) : route('procurement.index'),
                                 'organization_link_pending' => isset($data['link_request_id']) ? route('clients.link-requests.show', $data['link_request_id']) : '#',

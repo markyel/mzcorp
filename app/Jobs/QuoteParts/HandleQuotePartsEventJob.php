@@ -15,7 +15,8 @@ use Throwable;
 
 /**
  * Событие QuoteParts по нашему запросу: обновить снимок (ответы видны в заявке сразу),
- * а если поставщик ответил или спросил — сказать автору запроса в «колокольчике».
+ * а если поставщик ответил или спросил — сказать автору запроса в «колокольчике»; вопрос — ещё
+ * и письмом, а набралась выборка цен — письмо «можно выбирать» (QuotePartsRfqReadiness).
  */
 class HandleQuotePartsEventJob implements ShouldQueue
 {
@@ -89,7 +90,20 @@ class HandleQuotePartsEventJob implements ShouldQueue
             return;
         }
 
-        $rfq->createdBy?->notify(new QuotePartsSupplierNotification($rfq, $this->event, $supplierName, $this->questions));
+        $author = $rfq->createdBy;
+        if ($author === null || $author->archived_at !== null) {
+            return;
+        }
+        $author->notify(new QuotePartsSupplierNotification($rfq, $this->event, $supplierName, $this->questions));
+        if ($this->event === 'supplier.question' && $author->email) {
+            app(\App\Services\Mail\SystemNotificationMailer::class)->sendMailable(
+                $author->email,
+                \App\Mail\QuotePartsAuthorMail::question($rfq, $supplierName ?: $this->supplierKey, $this->questions),
+            );
+        }
+        if ($this->event === 'supplier.replied') {
+            app(\App\Services\QuoteParts\QuotePartsRfqReadiness::class)->notifyReady(collect([$rfq->fresh(['createdBy', 'request'])]));
+        }
     }
 
     /**

@@ -40,6 +40,12 @@ class SyncQuotePartsRfqsJob implements ShouldBeUnique, ShouldQueue
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\Log::warning('QuoteParts declines sync failed', ['error' => $e->getMessage()]);
             }
+            // Набралась выборка цен (в т.ч. потому что вышел срок ожидания) — письмо автору запроса.
+            try {
+                app(\App\Services\QuoteParts\QuotePartsRfqReadiness::class)->notifyReady();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('QuoteParts ready notifications failed', ['error' => $e->getMessage()]);
+            }
         }
     }
 }

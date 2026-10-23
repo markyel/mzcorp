@@ -22,12 +22,14 @@ class QuotePartsRfq extends Model
         'status',
         'snapshot',
         'synced_at',
+        'ready_notified_at',
     ];
 
     protected $casts = [
         'reply_by' => 'date',
         'snapshot' => 'array',
         'synced_at' => 'datetime',
+        'ready_notified_at' => 'datetime',
     ];
 
     public function request(): BelongsTo
@@ -38,6 +40,31 @@ class QuotePartsRfq extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    /**
+     * Куда вести автора запроса (письмо, «колокольчик»): запрос из заявки — во вкладку
+     * «Поставщики» этой заявки; запрос снабжения — в раздел QuoteParts: вопросы — «Вопросы
+     * поставщиков», ответы и готовые цены — «Актуализация цен», с поиском по номеру запроса.
+     *
+     * @param  'question'|'offers'  $what
+     */
+    public static function authorUrl(?int $requestId, ?string $tag, string $what): string
+    {
+        if ($requestId) {
+            return route('requests.show', $requestId).'?tab=suppliers';
+        }
+        $tag = trim((string) $tag, '[] ');
+
+        return $what === 'question'
+            ? route('quoteparts.index', array_filter(['tab' => 'questions', 'q' => $tag, 'au' => 'all']))
+            : route('quoteparts.index', array_filter(['tab' => 'offers', 'pq' => $tag, 'au' => 'all']));
+    }
+
+    /** @param  'question'|'offers'  $what */
+    public function authorLink(string $what): string
+    {
+        return self::authorUrl($this->request_id, $this->tag, $what);
     }
 
     /** Запрос открыл поставщик вопросом по позиции из своей номенклатуры (её у него не запрашивали). */
