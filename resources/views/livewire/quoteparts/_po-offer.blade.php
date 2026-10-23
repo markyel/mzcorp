@@ -119,8 +119,7 @@
     @if($open)
         <div class="pa-thread">
             @if($rfq = $this->dialogRfq)
-                <div class="pa-meta" style="margin-bottom: 6px">Переписка с поставщиком по запросу <span class="mono">{{ $rfq->tag }}</span> — ответ уйдёт в его ветку письмом от MyZip. Отправка отмечает предложение «запрошено уточнение».</div>
-                @include('livewire.quote-parts._rfq-card', ['rfq' => $rfq, 'supplierNames' => app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames([$rfq]), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $r['key'], 'compact' => true])
+                @include('livewire.quote-parts._rfq-dialog', ['rfq' => $rfq, 'supplierNames' => app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames([$rfq]), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $r['key']])
             @elseif($sup = $this->dialogSupplier)
                 <div class="pa-meta" style="margin-bottom: 6px">Предложение не по запросу ({{ $sources[$r['source']] ?? $r['source'] }}) — уточнить можно обращением к поставщику через QuoteParts.</div>
                 <livewire:suppliers.quote-parts-conversations :supplier="$sup" :key="'po-conv-'.$r['id']" />

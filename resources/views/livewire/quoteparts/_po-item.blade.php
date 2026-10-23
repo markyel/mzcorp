@@ -96,8 +96,7 @@
             @if($declineDialog === $d['id'])
                 <div class="pa-thread">
                     @if($rfq = $this->declineRfq)
-                        <div class="pa-meta" style="margin-bottom: 6px">Переписка с поставщиком по запросу <span class="mono">{{ $rfq->tag }}</span> — ответ уйдёт в его ветку письмом от MyZip.</div>
-                        @include('livewire.quote-parts._rfq-card', ['rfq' => $rfq, 'supplierNames' => app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames([$rfq]), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $d['key'], 'compact' => true])
+                        @include('livewire.quote-parts._rfq-dialog', ['rfq' => $rfq, 'supplierNames' => app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames([$rfq]), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $d['key']])
                     @else
                         <div class="pa-meta">Запрос не найден.</div>
                     @endif

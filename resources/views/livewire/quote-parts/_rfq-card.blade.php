@@ -178,9 +178,6 @@
                                     {{ $thread !== [] ? 'Переписка ('.$letterCount.')' : 'Написать поставщику' }}{{ $canAnswer && $thread !== [] ? ' и ответ' : '' }}
                                 </button>
                                 <div x-show="open" x-cloak class="mt-1.5 space-y-1.5">
-                                    @if(! empty($compact))
-                                        @include('livewire.quote-parts._rfq-thread-compact')
-                                    @else
                                     @foreach($thread as $m)
                                         @if($m['direction'] === 'event')
                                             <div wire:key="qpt-{{ $rfq->id }}-{{ $si }}-{{ $loop->index }}" class="text-center text-[11px] text-fg-4">· {{ $m['text'] }} · {{ $m['at'] ? \Illuminate\Support\Carbon::parse($m['at'])->timezone(config('app.timezone'))->format('d.m.Y H:i') : '' }} ·</div>
@@ -226,7 +223,6 @@
                                             @endif
                                         </div>
                                     @endforeach
-                                    @endif
                                     @if($canAnswer)
                                         @php $supLang = $this->quotePartsSupplierLanguage($s['external_id'] ?? null); @endphp
                                         <div class="text-[11.5px] {{ $supLang === 'ru' ? 'text-fg-3' : 'text-amber-800' }}">
