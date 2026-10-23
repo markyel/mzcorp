@@ -16,6 +16,8 @@
     $statusChip = ['priced' => ['дал цену', 'ok'], 'priced_question' => ['дал цену · есть вопрос', 'attn'], 'question' => ['есть вопрос', 'attn'],
         'no_price' => ['ответил без цены', 'attn'], 'refused' => ['отказ', 'over'], 'waiting' => ['ждём ответа', 'neutral'], 'loose' => ['копии на rfq@', 'neutral']];
     $qpUrl = rtrim((string) config('services.quoteparts.url'), '/');
+    // Русские окончания: 1 поставщик, 2 поставщика, 5 поставщиков.
+    $plural = fn (int $n, string $one, string $few, string $many) => $n % 10 === 1 && $n % 100 !== 11 ? $one : ($n % 10 >= 2 && $n % 10 <= 4 && ($n % 100 < 10 || $n % 100 >= 20) ? $few : $many);
 @endphp
 <style>
     .rs{display:flex;flex-direction:column;gap:16px;font-size:13px;color:var(--fg-1)}
@@ -76,8 +78,8 @@
     {{-- A. Сводка. --}}
     @if($sups->isNotEmpty())
         <section class="rs-card rs-stats">
-            <div class="rs-stat"><span class="l">Запрошено</span><span class="v">{{ $sum['asked'] }} {{ trans_choice('поставщик|поставщика|поставщиков', $sum['asked']) }} <small>· {{ $sum['positions'] }} {{ trans_choice('позиция|позиции|позиций', $sum['positions']) }}</small></span></div>
-            <div class="rs-stat"><span class="l">Дали цену</span><span class="v">{{ $sum['answered'] }} из {{ $sum['asked'] }} <small>· {{ $sum['offers'] }} {{ trans_choice('предложение|предложения|предложений', $sum['offers']) }}</small></span></div>
+            <div class="rs-stat"><span class="l">Запрошено</span><span class="v">{{ $sum['asked'] }} {{ $plural($sum['asked'], 'поставщик', 'поставщика', 'поставщиков') }} <small>· {{ $sum['positions'] }} {{ $plural($sum['positions'], 'позиция', 'позиции', 'позиций') }}</small></span></div>
+            <div class="rs-stat"><span class="l">Дали цену</span><span class="v">{{ $sum['answered'] }} из {{ $sum['asked'] }} <small>· {{ $sum['offers'] }} {{ $plural($sum['offers'], 'предложение', 'предложения', 'предложений') }}</small></span></div>
             @if($sum['cheapest'])
                 <div class="rs-stat"><span class="l">Дешевле всего</span><span class="v">{{ $money($sum['cheapest']['price']) }} {{ $sum['cheapest']['currency'] }} <small>· {{ $sum['cheapest']['supplier'] }}@if($sum['copy']) · копия от {{ $money($sum['copy']['price']) }}@endif</small></span></div>
             @endif

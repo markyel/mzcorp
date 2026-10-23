@@ -94,7 +94,7 @@ class RequestSupplierOverview
                 $rows[$x->request_item_id][] = $base + [
                     'id' => 'e'.$o->id, 'source' => 'email', 'ref' => (int) $o->id, 'state' => 'priced',
                     'kind' => 'unknown', 'price' => (float) $o->price, 'currency' => $o->currency ?: 'RUB', 'rub' => $rub['known'] ? $rub['rub'] : null,
-                    'terms' => array_values(array_filter([$o->valid_until_text ? Str::limit((string) $o->valid_until_text, 40) : null, 'письмо '.$o->created_at?->timezone(config('app.timezone'))->format('d.m H:i')])),
+                    'terms' => array_values(array_filter([$o->valid_until_text ? Str::limit((string) $o->valid_until_text, 60) : null])),
                     'review' => false, 'at' => $o->created_at, 'when' => 'ответ '.$o->created_at?->timezone(config('app.timezone'))->format('d.m H:i'),
                 ];
             } elseif ($o && $o->outcome === 'refused') {
@@ -175,7 +175,9 @@ class RequestSupplierOverview
                 'cid' => $it->catalog_item_id ? (int) $it->catalog_item_id : null,
                 'sku' => $it->catalogItem?->sku ?: $it->quoteparts_code,
                 'name' => (string) ($it->catalogItem?->name ?: $it->parsed_name ?: '—'),
-                'oem' => $it->parsed_article,
+                'oem' => collect(preg_split('/\s*[,;]\s*/u', (string) $it->parsed_article) ?: [])->map(fn ($a) => trim($a))->filter()
+                    ->reject(fn ($a) => mb_strtoupper($a) === mb_strtoupper((string) $it->catalogItem?->sku) || preg_match('/^M\d{4,6}$/iu', $a))
+                    ->unique(fn ($a) => mb_strtoupper($a))->implode(', ') ?: null,
                 'brand' => $it->brand?->name ?: $it->parsed_brand,
                 'qty' => $it->parsed_qty !== null ? rtrim(rtrim(number_format((float) $it->parsed_qty, 3, ',', ''), '0'), ',') : null,
                 'asked' => $list->pluck('supplier')->unique()->count(),
