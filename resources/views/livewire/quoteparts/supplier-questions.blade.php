@@ -8,6 +8,7 @@
         <label class="inline-flex items-center gap-1.5 cursor-pointer text-fg-2">
             <input type="checkbox" wire:model.live="withAnswered" class="w-4 h-4 accent-sky-600"> и отвеченные за {{ \App\Livewire\QuoteParts\SupplierQuestions::ANSWERED_DAYS }} дн.
         </label>
+        @include('livewire.quoteparts._author-filter')
         <span class="text-fg-4">Вопросы поставщиков по запросам QuoteParts и по позициям из их номенклатуры. Сверху — где вопрос ждёт ответа дольше всего.</span>
     </div>
 

@@ -2,6 +2,7 @@
 
 namespace App\Livewire\QuoteParts;
 
+use App\Livewire\Concerns\FiltersByRfqAuthor;
 use App\Livewire\Concerns\AnswersQuotePartsSuppliers;
 use App\Models\CatalogItem;
 use App\Models\QuotePartsRfq;
@@ -24,6 +25,7 @@ use Throwable;
 class SupplierQuestions extends Component
 {
     use AnswersQuotePartsSuppliers;
+    use FiltersByRfqAuthor;
     use WithFileUploads;
 
     public const ANSWERED_DAYS = 14;
@@ -128,6 +130,10 @@ class SupplierQuestions extends Component
 
         $rows = $rows->when(! $this->withAnswered, fn ($c) => $c->where('open', true))
             ->filter(fn ($r) => $r['open'] || ($r['at'] && $r['at']->gte(now()->subDays(self::ANSWERED_DAYS))));
+        // «Чьи запросы»: вопросы по запросам выбранного сотрудника (менеджеру и снабжению по умолчанию — свои).
+        if (($authorId = $this->authorId()) !== null) {
+            $rows = $rows->filter(fn ($r) => (int) $r['rfq']->created_by_user_id === $authorId);
+        }
         $catalog = CatalogItem::query()->whereIn('sku', $rows->pluck('code')->filter()->unique())->get(['id', 'sku', 'name'])->keyBy('sku');
 
         // Поиск раздела: артикул, наименование, поставщик, запрос QP-…, заявка, текст вопроса.

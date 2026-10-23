@@ -3,6 +3,7 @@
 namespace App\Livewire\QuoteParts;
 
 use App\Livewire\Concerns\AnswersQuotePartsSuppliers;
+use App\Livewire\Concerns\FiltersByRfqAuthor;
 use App\Models\CatalogItem;
 use App\Models\PricePosition;
 use App\Models\QuotePartsOffer;
@@ -35,6 +36,7 @@ use Throwable;
 class PriceOffers extends Component
 {
     use AnswersQuotePartsSuppliers;
+    use FiltersByRfqAuthor;
     use WithFileUploads;
 
     public const DAYS = [3, 7, 30, 90];
@@ -683,9 +685,42 @@ class PriceOffers extends Component
             ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))
             ->get()->pipe(fn (Collection $offers) => self::rowsOf($offers));
 
-        return $this->itemsFrom($rows)
+        return $this->byAuthor($this->itemsFrom($rows)
             ->filter(fn ($it) => $it['offers']->contains(fn ($r) => $r['created'] && $r['created']->gt($closed[$it['sku']]->closed_at)))
-            ->values();
+            ->values());
+    }
+
+    /**
+     * Кто запрашивал позицию у поставщиков: артикул => авторы запросов QuoteParts за окно.
+     *
+     * @return array<string, list<int>>
+     */
+    #[Computed]
+    public function skuAuthors(): array
+    {
+        $out = [];
+        foreach ($this->windowRfqs as $rfq) {
+            if ($rfq->created_by_user_id === null) {
+                continue;
+            }
+            foreach ((array) ($rfq->snapshot['suppliers'] ?? []) as $s) {
+                foreach ((array) ($s['lines'] ?? []) as $line) {
+                    if (! empty($line['code'])) {
+                        $out[(string) $line['code']][(int) $rfq->created_by_user_id] = true;
+                    }
+                }
+            }
+        }
+
+        return array_map('array_keys', $out);
+    }
+
+    /** Фильтр «Чьи запросы»: позиции, которые запрашивал выбранный сотрудник (без запроса — только во «Всех»). */
+    private function byAuthor(Collection $items): Collection
+    {
+        $id = $this->authorId();
+
+        return $id === null ? $items : $items->filter(fn ($it) => in_array($id, $this->skuAuthors[(string) $it['sku']] ?? [], true))->values();
     }
 
     /** «Готово к актуализации» без завершённых позиций; фильтр по решению, порядок вида. */
@@ -694,7 +729,7 @@ class PriceOffers extends Component
     {
         $closed = $this->closedSkus();
 
-        return $this->readyItems->reject(fn ($it) => in_array($it['sku'], $closed, true))->values();
+        return $this->byAuthor($this->readyItems->reject(fn ($it) => in_array($it['sku'], $closed, true))->values());
     }
 
     /** «Ждём ответа и отказы»: остальные позиции периода — мало цен, ждём или все отказали. */
@@ -703,7 +738,7 @@ class PriceOffers extends Component
     {
         $closed = $this->closedSkus();
 
-        return $this->sorted($this->items->reject(fn ($it) => in_array($it['sku'], $closed, true))->values());
+        return $this->sorted($this->byAuthor($this->items->reject(fn ($it) => in_array($it['sku'], $closed, true))->values()));
     }
 
     /** Все позиции на экране: новое, готово, ждём. */

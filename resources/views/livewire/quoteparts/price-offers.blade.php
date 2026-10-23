@@ -148,6 +148,7 @@
         <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-2); white-space: nowrap; cursor: pointer" title="Предложения, заменённые новыми, и с истёкшим сроком действия">
             <input type="checkbox" wire:model.live="withStale" style="margin: 0; accent-color: var(--sky-600)">и устаревшие
         </label>
+        @include('livewire.quoteparts._author-filter')
         <div style="flex: 1"></div>
         <span style="font-size: 12px; color: var(--fg-3); white-space: nowrap">Предложений <b class="tnum" style="color: var(--fg-1)">{{ $offersN }}{{ $offersN >= 500 ? '+' : '' }}</b> · отказов <b class="tnum" style="color: var(--fg-1)">{{ $this->declines->count() }}</b>@if($usd) · ₽ по курсу ЦБ {{ number_format($usd, 2, ',', ' ') }}@endif</span>
     </div>
