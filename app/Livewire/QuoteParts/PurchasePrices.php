@@ -17,7 +17,8 @@ class PurchasePrices extends Component
 {
     public function mount(): void
     {
-        abort_unless(auth()->user()?->hasAnyRole(['director', 'admin']), 403);
+        // Раздел QuoteParts открыт всем (23.10.2026).
+        abort_unless(auth()->check(), 403);
     }
 
     // Сам файл принимает PurchasePriceUploadController (обычная форма, без загрузки Livewire).

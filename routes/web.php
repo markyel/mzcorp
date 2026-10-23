@@ -415,9 +415,9 @@ Route::middleware('auth')->group(function () {
             ->name('marketing-blocks.image');
     });
 
-    // QuoteParts — передача пула позиций на платформу работы с поставщиками.
-    // На время тестирования — директорат и админ; потом, возможно, переедет в «Снабжение».
-    Route::middleware('role:director,admin')->group(function () {
+    // QuoteParts — передача пула позиций на платформу работы с поставщиками. Открыт всем
+    // (23.10.2026, решение заказчика); вход в кабинет поставщика — только директорат и админ (Index::accessLink).
+    Route::group([], function () {
         Route::get('/dashboard/quoteparts', function () {
             return view('quoteparts.index');
         })->name('quoteparts.index');

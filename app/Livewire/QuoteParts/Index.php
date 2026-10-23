@@ -40,7 +40,8 @@ class Index extends Component
 
     public function mount(): void
     {
-        abort_unless(auth()->user()?->hasAnyRole(['director', 'admin']), 403);
+        // Раздел открыт всем (23.10.2026); вход в кабинет поставщика — отдельно, директорат и админ.
+        abort_unless(auth()->check(), 403);
     }
 
     public function setTab(string $tab): void

@@ -93,7 +93,9 @@
         $navLinks[] = ['route' => 'usage-stats.index', 'label' => 'Использование', 'pattern' => 'usage-stats.*'];
         // Рекламные блоки в письмах клиентам (директорат / админ).
         $navLinks[] = ['route' => 'marketing-blocks.index', 'label' => 'Реклама', 'pattern' => 'marketing-blocks.*'];
-        // Передача пула позиций в QuoteParts (тестирование платформы поставщиков).
+    }
+    // QuoteParts — платформа работы с поставщиками: всем (23.10.2026).
+    if ($user) {
         $navLinks[] = ['route' => 'quoteparts.index', 'label' => 'QuoteParts', 'pattern' => 'quoteparts.*'];
     }
     // «IQOT» — анализ цен конкурентов (РОП / директорат / админ).
