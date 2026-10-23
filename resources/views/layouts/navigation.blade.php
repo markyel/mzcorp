@@ -98,6 +98,10 @@
     if ($user) {
         $navLinks[] = ['route' => 'quoteparts.index', 'label' => 'QuoteParts', 'pattern' => 'quoteparts.*'];
     }
+    // «Фото» — очистка фона фото каталога пачкой: всем (23.10.2026).
+    if ($user) {
+        $navLinks[] = ['route' => 'photos.index', 'label' => 'Фото', 'pattern' => 'photos.*'];
+    }
     // «IQOT» — анализ цен конкурентов (РОП / директорат / админ).
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'iqot.index', 'label' => 'IQOT', 'pattern' => 'iqot.*'];

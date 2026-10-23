@@ -62,6 +62,9 @@ class CatalogItem extends Model
         // «СвободноВПути» → [{qty:int, date:'Y-m-d'}] (кол-во + дата прихода).
         'stock_in_transit',
         'photo_url',
+        // Фото без водяного знака: обработанное в разделе «Фото» (белый фон), файл у нас — импорт его не трогает.
+        'clean_photo_path',
+        'clean_photo_at',
         'description',
         'comment',
         'source_hash',
@@ -73,6 +76,7 @@ class CatalogItem extends Model
     protected function casts(): array
     {
         return [
+            'clean_photo_at' => 'datetime',
             'is_active' => 'boolean',
             'is_price_actual' => 'boolean',
             'brands' => 'array',

@@ -242,6 +242,15 @@ Route::middleware('auth')->group(function () {
             [QuotationPdfController::class, 'download'])
             ->name('quotations.download');
 
+        // «Фото»: пачка фото → очистка фона (Clipping Magic) → архив; фото позиций — в каталог без водяного знака.
+        // Всем сотрудникам (23.10.2026).
+        Route::get('/dashboard/photos', fn () => view('photos.index'))->name('photos.index');
+        Route::get('/dashboard/photos/{batch}/archive', [\App\Http\Controllers\PhotoController::class, 'archive'])->name('photos.archive');
+        Route::get('/dashboard/photos/item/{item}', [\App\Http\Controllers\PhotoController::class, 'item'])->name('photos.item');
+        Route::get('/img/catalog-clean/{id}', [\App\Http\Controllers\PhotoController::class, 'catalogClean'])
+            ->where('id', '\d+')
+            ->name('catalog.clean-photo');
+
         // Standalone-поиск по каталогу (без привязки к заявке) —
         // тот же hybrid pipeline (code + trgm + vector), что в
         // ItemCatalogLinkDialog «Похожие из каталога». Доступен всем

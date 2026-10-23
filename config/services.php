@@ -1093,6 +1093,19 @@ return [
         'queue' => env('SUPPLIER_DISPATCH_QUEUE', 'default'),
     ],
 
+    // Очистка фона фото каталога (раздел «Фото»): Clipping Magic, HTTP Basic — id и секрет ключа API.
+    // test=true — бесплатно, но результат с водяным знаком сервиса (в каталог такие не пишем).
+    'clippingmagic' => [
+        'url' => env('CLIPPINGMAGIC_URL', 'https://clippingmagic.com/api/v1'),
+        'id' => env('CLIPPINGMAGIC_API_ID', ''),
+        'secret' => env('CLIPPINGMAGIC_API_SECRET', ''),
+        'test' => (bool) env('CLIPPINGMAGIC_TEST', false),
+        'timeout' => (int) env('CLIPPINGMAGIC_TIMEOUT', 35),
+        // Белый фон, JPEG (решение 23.10.2026).
+        'background' => env('CLIPPINGMAGIC_BACKGROUND', '#FFFFFF'),
+        'jpeg_quality' => (int) env('CLIPPINGMAGIC_JPEG_QUALITY', 90),
+    ],
+
     'quoteparts' => [
         'url' => env('QUOTEPARTS_URL', 'https://quoteparts.ru'),
         // Ящик внесистемных поставщиков: запросы им QuoteParts шлёт с него; подключается входом через Яндекс
