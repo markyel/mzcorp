@@ -23,4 +23,17 @@ final class QuotePartsThread
             ->when(! empty($s['sent_at']), fn ($c) => $c->push(['direction' => 'event', 'at' => $s['sent_at'], 'text' => 'Запрос отправлен через QuoteParts']))
             ->sortBy(fn ($m) => $m['at'] ?? '')->values()->all();
     }
+
+    /**
+     * Суть письма для компактной ленты: без цитаты прошлых писем и подписи, в одну строку,
+     * не длиннее $limit. Если после чистки ничего не осталось — начало исходного текста.
+     */
+    public static function gist(string $text, int $limit = 220): string
+    {
+        $cleaner = app(\App\Services\Mail\EmailTextCleanerService::class);
+        $own = $cleaner->removeSignature($cleaner->cutQuotedReplyTail($text));
+        $line = trim(preg_replace('/\s+/u', ' ', $own !== '' ? $own : $text) ?? '');
+
+        return \Illuminate\Support\Str::limit($line, $limit);
+    }
 }
