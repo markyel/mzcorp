@@ -335,7 +335,21 @@ class RequestSupplierOverview
             'sum' => (float) $chosen->sum(fn ($p) => (float) (collect($p['rows'])->firstWhere('id', $p['chosen'])['rub'] ?? 0)),
             // В 1С — позиции из каталога (с M-артикулом).
             'exportable' => $chosen->filter(fn ($p) => $p['cid'] !== null && $p['sku'])->count(),
+            // Из них сбор цен в «Актуализации цен» уже завершён (и с тех пор нового предложения не было).
+            'finished' => \App\Models\PricePosition::query()->whereIn('sku', array_values($this->chosenPositions()))->whereNotNull('closed_at')->count(),
         ];
+    }
+
+    /**
+     * Позиции каталога с выбранной ценой — то, что выгружается в 1С и чей сбор цен можно завершить.
+     *
+     * @return array<int, string> catalog_item_id => артикул
+     */
+    public function chosenPositions(): array
+    {
+        return collect($this->comparison())
+            ->filter(fn ($p) => $p['chosen'] !== null && $p['cid'] !== null && $p['sku'])
+            ->mapWithKeys(fn ($p) => [(int) $p['cid'] => (string) $p['sku']])->all();
     }
 
     /**

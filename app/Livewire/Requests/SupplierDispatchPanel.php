@@ -336,7 +336,7 @@ class SupplierDispatchPanel extends Component
      * «Выгрузить в 1С»: позиции заявки с выбранной ценой — все цены поставщиков по ним, выбранная — 1
      * в колонке «Выбор» (тот же формат, что «Актуализация цен»). Файл сразу скачивается и остаётся в истории.
      */
-    public function exportPrices(\App\Services\Procurement\PriceExportService $exports)
+    public function exportPrices(\App\Services\Procurement\PriceExportService $exports, bool $finish = false)
     {
         abort_unless($this->canDispatch, 403);
         $rows = $this->overview->exportPrices();
@@ -354,8 +354,31 @@ class SupplierDispatchPanel extends Component
             return null;
         }
         $this->exportNote = 'Выгружено в 1С: '.$rows->pluck('sku')->unique()->count().' поз., '.$rows->count().' цен · '.now()->timezone(config('app.timezone'))->format('H:i');
+        if ($finish) {
+            $n = app(\App\Services\QuoteParts\PriceActualizationService::class)->finish($this->overview->chosenPositions(), auth()->user(), $export);
+            $this->exportNote = 'Выгружено в 1С и сбор цен завершён: '.$n.' поз. · '.now()->timezone(config('app.timezone'))->format('H:i');
+            unset($this->overview);
+        }
 
         return Storage::disk(config('procurement.price_export.disk', 'local'))->download($export->file_path, basename($export->file_path));
+    }
+
+    /**
+     * «Завершить сбор цен» без выгрузки: позиции с выбранной ценой уходят из «Актуализации цен»
+     * (вернутся с новым предложением). В заявке цены остаются.
+     */
+    public function finishPrices(\App\Services\QuoteParts\PriceActualizationService $service): void
+    {
+        abort_unless($this->canDispatch, 403);
+        $positions = $this->overview->chosenPositions();
+        if ($positions === []) {
+            $this->dispatch('toast', type: 'error', message: 'Нет позиций с выбранной ценой — нажмите «Выбрать» в сравнении цен.');
+
+            return;
+        }
+        $n = $service->finish($positions, auth()->user());
+        $this->exportNote = 'Сбор цен завершён: '.$n.' поз. убрано из «Актуализации цен» · '.now()->timezone(config('app.timezone'))->format('H:i');
+        unset($this->overview);
     }
 
     /** «Обновить» у поставщика QuoteParts: свежий снимок запроса. */

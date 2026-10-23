@@ -116,4 +116,35 @@ class PriceActualizationService
 
         return $export;
     }
+
+    /**
+     * Завершить сбор цен по позициям из заявки (вкладка «Поставщики»): позиции уходят из
+     * «Актуализации цен», как после «Выгрузить и завершить», и вернутся с новым предложением.
+     * В самой заявке цены остаются. $export — если перед этим выгрузили в 1С.
+     *
+     * @param  array<int, string>  $positions  catalog_item_id => артикул
+     */
+    public function finish(array $positions, User $by, ?PriceExport $export = null): int
+    {
+        $choices = $this->choices->forItems(array_keys($positions));
+
+        DB::transaction(function () use ($positions, $choices, $by, $export) {
+            foreach ($positions as $cid => $sku) {
+                $c = $choices->get($cid);
+                PricePosition::query()->updateOrCreate(['sku' => $sku], [
+                    'catalog_item_id' => $cid,
+                    'in_export_at' => null,
+                    'in_export_by_user_id' => null,
+                    'closed_at' => now(),
+                    'closed_by_user_id' => $by->id,
+                    'closed_offer' => $c ? [
+                        'offer_id' => $c->source === 'quoteparts' ? (int) $c->offer_ref : null, 'supplier' => $c->supplier_name,
+                        'price' => $c->price !== null ? (float) $c->price : null, 'currency' => $c->currency,
+                    ] : null,
+                ] + ($export ? ['exported_at' => now(), 'price_export_id' => $export->id] : []));
+            }
+        });
+
+        return count($positions);
+    }
 }
