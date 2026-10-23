@@ -37,191 +37,35 @@
         </div>
     @endif
 
-    {{-- 0. Уже отправленные запросы (кому + сколько позиций) --}}
-    @php $qpSent = $this->quotePartsSent; @endphp
-    @if($this->sentInquiries->isNotEmpty() || $qpSent->isNotEmpty())
-        <div class="ds-card">
-            <div class="ds-card-header"><h3>Запросы отправлены</h3><span class="text-[12px] text-fg-3 ml-2">{{ $this->sentInquiries->count() + $qpSent->count() }} поставщ.</span></div>
-            <div class="ds-card-body overflow-x-auto">
-                <table class="w-full text-[12.5px]">
-                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
-                        <tr>
-                            <th class="text-left px-3 py-1.5">Поставщик</th>
-                            <th class="text-right px-3 py-1.5">Позиций</th>
-                            <th class="text-right px-3 py-1.5">Писем</th>
-                            <th class="text-left px-3 py-1.5">Статус</th>
-                            <th class="text-left px-3 py-1.5">Кто</th>
-                            <th class="text-left px-3 py-1.5">Дата</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach($this->sentInquiries as $si)
-                            <tr wire:key="sent-{{ $si->id }}" class="border-b border-border-subtle hover:bg-hover">
-                                <td class="px-3 py-1.5"><a href="{{ route('suppliers.show', $si->id) }}" wire:navigate class="text-sky-700 hover:underline">{{ $si->supplier_name ?: $si->supplier_email }}</a></td>
-                                <td class="px-3 py-1.5 text-right mono text-fg-1 font-medium">{{ $si->items_count }}</td>
-                                <td class="px-3 py-1.5 text-right mono text-fg-2">{{ $si->messages_count }}</td>
-                                <td class="px-3 py-1.5"><span class="chip {{ $si->status === 'closed' ? 'chip-neutral' : 'chip-sky' }} text-[10.5px]">{{ $si->status === 'closed' ? 'закрыт' : 'открыт' }}</span></td>
-                                <td class="px-3 py-1.5 text-fg-3 whitespace-nowrap">{{ $si->createdBy?->name ?? '—' }}</td>
-                                <td class="px-3 py-1.5 text-fg-3 mono whitespace-nowrap">{{ $si->created_at?->format('d.m.Y H:i') }}</td>
-                            </tr>
-                        @endforeach
-                        {{-- Через QuoteParts: переписка и ответ — в блоке «QuoteParts» заявки. --}}
-                        @foreach($qpSent as $q)
-                            <tr wire:key="sent-qp-{{ $q['key'] }}" class="border-b border-border-subtle hover:bg-hover">
-                                <td class="px-3 py-1.5">
-                                    <span class="text-fg-1">{{ $q['supplier'] }}</span>
-                                    <span class="chip chip-info text-[10px] ml-1" title="Запрос через QuoteParts {{ $q['tag'] }} — переписка и ответ в блоке «QuoteParts» заявки">QuoteParts</span>
-                                </td>
-                                <td class="px-3 py-1.5 text-right mono text-fg-1 font-medium">{{ $q['items'] }}</td>
-                                <td class="px-3 py-1.5 text-right mono text-fg-2">{{ $q['letters'] }}</td>
-                                <td class="px-3 py-1.5">
-                                    @php $st = ['closed' => ['закрыт', 'chip-neutral'], 'answered' => ['ответил', 'chip-ok'], 'partial' => ['ответил частично', 'chip-warn']][$q['status']] ?? ['ждём ответа', 'chip-info']; @endphp
-                                    <span class="chip {{ $st[1] }} text-[10.5px]">{{ $st[0] }}</span>
-                                    @if($q['asked'])<span class="chip chip-warn text-[10.5px]" title="Поставщик задал вопрос — ждёт нашего ответа">вопрос к нам</span>@endif
-                                </td>
-                                <td class="px-3 py-1.5 text-fg-3 whitespace-nowrap">{{ $q['by'] ?? '—' }}</td>
-                                <td class="px-3 py-1.5 text-fg-3 mono whitespace-nowrap">{{ $q['at']?->timezone(config('app.timezone'))->format('d.m.Y H:i') }}</td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    @endif
-
-    {{-- 0.3 Переписка с поставщиками — вся, включая копии на rfq@ без запроса.
-         В клиентский тред («Переписка») письма поставщиков не попадают. --}}
-    @php $corr = $this->supplierCorrespondence; @endphp
-    @if($corr !== [])
-        <div class="ds-card">
-            <div class="ds-card-header"><h3>Переписка с поставщиками</h3><span class="text-[12px] text-fg-3 ml-2">писем: {{ count($corr) }}</span></div>
-            <div class="ds-card-body p-0">
-                @foreach($corr as $mail)
-                    <div wire:key="corr-{{ $mail['id'] }}" x-data="{ open: false }" class="border-b border-border-subtle last:border-b-0">
-                        <button type="button" x-on:click="open = !open"
-                                class="w-full text-left px-3 py-2 hover:bg-hover flex items-start gap-3">
-                            <span class="shrink-0 text-[11px] font-semibold mt-0.5 {{ $mail['ours'] ? 'text-sky-700' : 'text-emerald-700' }}"
-                                  title="{{ $mail['ours'] ? 'Наше письмо поставщику' : 'Письмо от поставщика' }}">{{ $mail['ours'] ? '→' : '←' }}</span>
-                            <span class="min-w-0 flex-1">
-                                <span class="flex items-baseline gap-2">
-                                    <span class="text-[12.5px] font-medium text-fg-1 truncate">{{ $mail['ours'] ? 'Кому: ' : '' }}{{ $mail['who'] }}</span>
-                                    @if($mail['inquiry_id'])
-                                        <a href="{{ route('suppliers.show', $mail['inquiry_id']) }}" wire:navigate x-on:click.stop
-                                           class="shrink-0 text-[11px] text-sky-700 hover:underline">запрос #{{ $mail['inquiry_id'] }}</a>
-                                    @else
-                                        <span class="shrink-0 text-[11px] text-fg-3" title="Письмо пришло копией на rfq@ и не привязано к запросу поставщику">без запроса</span>
-                                    @endif
-                                    @if($mail['attachments'] !== [])<span class="shrink-0 text-[11px] text-fg-3">📎 {{ count($mail['attachments']) }}</span>@endif
-                                    <span class="ml-auto shrink-0 mono text-[11px] text-fg-3">{{ $mail['at']?->format('d.m H:i') }}</span>
-                                </span>
-                                <span class="block text-[12px] text-fg-2 truncate">{{ $mail['subject'] }}</span>
-                                <span class="block text-[11.5px] text-fg-3 truncate" x-show="!open">{{ $mail['snippet'] }}</span>
-                            </span>
-                        </button>
-                        <div x-show="open" x-cloak class="px-3 pb-3 pl-9">
-                            <div class="text-[12.5px] text-fg-1 whitespace-pre-wrap break-words max-h-[420px] overflow-y-auto border border-border-subtle rounded-md p-2.5 bg-[var(--bg-app)]">{{ $mail['body'] !== '' ? $mail['body'] : '(текст письма не загружен)' }}</div>
-                            @if($mail['attachments'] !== [])
-                                {{-- Фото — в общем просмотрщике (листание по фото письма), PDF — в
-                                     окне предпросмотра, остальное — скачать. Окна общие для
-                                     страницы заявки (partials/image-lightbox, partials/pdf-preview). --}}
-                                @php
-                                    $mailImgs = collect($mail['attachments'])->where('kind', 'image')->values();
-                                    $mailGallery = $mailImgs->map(fn ($a) => [
-                                        'src' => route('attachments.preview', $a['id']),
-                                        'name' => $a['name'],
-                                        'dl' => route('attachments.download', $a['id']),
-                                    ])->all();
-                                    $imgIdx = 0;
-                                @endphp
-                                <div class="mt-2 flex flex-wrap items-start gap-2" x-data="{ items: @js($mailGallery) }">
-                                    @foreach($mail['attachments'] as $att)
-                                        @if($att['kind'] === 'image')
-                                            <button type="button" x-on:click="$dispatch('open-image', { items: items, index: {{ $imgIdx }} })"
-                                                    class="block border border-border rounded-md overflow-hidden bg-surface hover:border-border-strong text-left"
-                                                    title="Открыть — {{ $att['name'] }}">
-                                                <img src="{{ route('attachments.preview', $att['id']) }}" alt="{{ $att['name'] }}" loading="lazy"
-                                                     class="w-[120px] h-[86px] object-cover block bg-app">
-                                                <span class="block px-1.5 py-0.5 max-w-[120px] truncate text-[11px] text-fg-2">{{ $att['name'] }}</span>
-                                            </button>
-                                            @php $imgIdx++; @endphp
-                                        @elseif($att['kind'] === 'pdf')
-                                            <button type="button"
-                                                    x-on:click="$dispatch('open-pdf', { src: @js(route('attachments.preview', $att['id'])), name: @js($att['name']), dl: @js(route('attachments.download', $att['id'])) })"
-                                                    class="inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover text-left"
-                                                    title="Открыть предпросмотр — {{ $att['name'] }}">
-                                                <span class="inline-block w-4 h-5 bg-red-50 border border-red-300 rounded-sm text-red-700 text-[7px] font-bold text-center leading-5">PDF</span>
-                                                <span class="truncate max-w-[240px]">{{ $att['name'] }}</span>
-                                                <span class="text-sky-700 text-[11px]">👁 просмотр</span>
-                                            </button>
-                                        @else
-                                            @include('partials.file-link', ['url' => route('attachments.preview', $att['id']), 'fileDl' => route('attachments.download', $att['id']), 'name' => (string) $att['name'], 'mime' => $att['mime'] ?? null, 'fileClass' => 'inline-flex items-center gap-1.5 px-2.5 py-1.5 border border-border rounded-md bg-surface text-[12px] text-fg-1 hover:bg-hover'])
-                                        @endif
-                                    @endforeach
-                                </div>
-                            @endif
-                        </div>
-                    </div>
-                @endforeach
-            </div>
-        </div>
-    @endif
-
-    {{-- 0.5 Расценки от поставщиков (полученные предложения по позициям) --}}
-    @php
-        $offerRows = $this->offersByPosition;
-        $offersTotal = collect($offerRows)->sum('received');
-    @endphp
-    @if($offersTotal > 0)
-        <div class="ds-card">
-            <div class="ds-card-header"><h3>Расценки от поставщиков</h3><span class="text-[12px] text-fg-3 ml-2">получено предложений: {{ $offersTotal }}</span></div>
-            <div class="ds-card-body space-y-2">
-                @foreach($offerRows as $row)
-                    @if($row['received'] > 0)
-                        <div class="border border-border-subtle rounded-md px-3 py-2" wire:key="offers-{{ $row['id'] }}">
-                            <div class="flex items-start gap-2 flex-wrap">
-                                <div class="flex-1 min-w-[240px]">
-                                    <span class="text-[12.5px] text-fg-1 font-medium">{{ \Illuminate\Support\Str::limit($row['name'], 70) }}</span>
-                                    @if($row['oem'])<span class="text-[11px] text-fg-4 mono ml-1">арт. {{ $row['oem'] }}</span>@endif
-                                </div>
-                                @if($row['best'] !== null)
-                                    <span class="chip chip-ok text-[10.5px]" title="Лучшее предложение">от {{ number_format((float) $row['best'], 2, '.', ' ') }} {{ $row['currency'] ?: '₽' }}</span>
-                                @endif
-                            </div>
-                            <div class="mt-1.5 flex flex-wrap gap-1.5">
-                                @foreach($row['offers'] as $of)
-                                    <div class="inline-flex items-center gap-1.5 border border-border-subtle rounded-md px-2 py-1 bg-surface text-[11.5px]">
-                                        <a href="{{ route('suppliers.show', $of['inquiry_id']) }}" wire:navigate class="text-sky-700 hover:underline">{{ $of['supplier'] }}</a>
-                                        @if($of['outcome'] === 'quoted')
-                                            <span class="text-emerald-700 font-medium">{{ number_format((float) $of['price'], 2, '.', ' ') }} {{ $of['currency'] ?: '₽' }}</span>
-                                            @if($of['lead'])<span class="text-fg-4">· {{ \Illuminate\Support\Str::limit($of['lead'], 24) }}</span>@endif
-                                        @elseif($of['outcome'] === 'refused')
-                                            <span class="text-red-700">отказ{{ $of['refusal'] ? ': '.\Illuminate\Support\Str::limit($of['refusal'], 28) : '' }}</span>
-                                        @else
-                                            <span class="text-fg-4">ждём</span>
-                                        @endif
-                                    </div>
-                                @endforeach
-                            </div>
-                        </div>
-                    @endif
-                @endforeach
-                <div class="text-[11px] text-fg-4 pt-1">Выбранную цену вносят в корп. базу (1С); после импорта каталога статус цены позиции станет «актуальная».</div>
-            </div>
-        </div>
-    @endif
-
-    {{-- QuoteParts: канал для участников пилота при включённом рубильнике и ответы по
-         уже отправленным через платформу запросам. Форма ниже не меняется. --}}
-    <livewire:requests.quote-parts-panel :request-id="$requestId" :key="'qp-panel-'.$requestId" />
+    {{-- Сводка, вопросы поставщиков, сравнение цен, поставщики и переписка (письма и QuoteParts вместе). --}}
+    @include('livewire.requests._supplier-overview')
 
     {{-- Форма нового запроса — только тем, кто может отправить (см. send()).
          Менеджер по рекламациям и другие «читатели» видят выше отправленные
          запросы, переписку и расценки. --}}
     @if($this->canDispatch)
+    @php $letterReady = $selItems > 0 && $selSups > 0; @endphp
+    <style>
+        #rs-new .ds-card{border:0;border-radius:0;box-shadow:none;border-bottom:1px solid var(--border);margin:0}
+        #rs-new .ds-card:last-child{border-bottom:0}
+        #rs-new .ds-card-header{border:0;padding:14px 20px 6px;background:transparent}
+        #rs-new .ds-card-header h3{font-size:13px;font-weight:600}
+        #rs-new .ds-card-body{padding:6px 20px 14px}
+    </style>
+    <section id="rs-new" class="rs-card" style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden">
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 20px; border-bottom: 1px solid var(--border)">
+            <h2 style="margin: 0; font-size: 15px; font-weight: 600">Новый запрос цен</h2>
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 12px">
+                @foreach([[1, 'Позиции', $selItems > 0], [2, 'Поставщики', $selSups > 0], [3, 'Письмо', $letterReady]] as [$n, $label, $done])
+                    <span style="display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: {{ $done ? 'var(--fg-1)' : 'var(--fg-3)' }}">
+                        <span style="width: 18px; height: 18px; border-radius: 999px; display: grid; place-items: center; font-size: 11px; font-weight: 600; background: {{ $done ? 'var(--fg-1)' : 'var(--bg-surface-2)' }}; color: {{ $done ? '#fff' : 'var(--fg-3)' }}">{{ $n }}</span>{{ $label }}@if($n < 3)<span style="color: var(--fg-4)">—</span>@endif</span>
+                @endforeach
+            </div>
+        </div>
     {{-- 1. Позиции --}}
     <div class="ds-card">
         <div class="ds-card-header">
-            <h3>Позиции для запроса цен</h3>
+            <h3>1. Позиции</h3>
             <span class="text-[12px] text-fg-3 ml-2">выбрано {{ $selItems }} из {{ count($items) }}</span>
             <span class="flex-1"></span>
             @if($staleCount > 0)
@@ -290,9 +134,9 @@
     </div>
 
     {{-- 2. Поставщики --}}
-    <div class="ds-card">
+    <div class="ds-card" style="opacity: {{ $selItems > 0 ? 1 : .55 }}">
         <div class="ds-card-header">
-            <h3>Поставщики</h3>
+            <h3>2. Поставщики</h3>
             <span class="text-[12px] text-fg-3 ml-2">подобраны по матрице под выбранные позиции · отмечено {{ $selSups }}</span>
         </div>
         <div class="ds-card-body space-y-3">
@@ -376,8 +220,8 @@
     </div>
 
     {{-- 3. Превью письма + вложения --}}
-    <div class="ds-card">
-        <div class="ds-card-header"><h3>Письмо запроса</h3></div>
+    <div class="ds-card" style="opacity: {{ $letterReady ? 1 : .55 }}">
+        <div class="ds-card-header"><h3>3. Письмо</h3></div>
         <div class="ds-card-body space-y-3">
             {{-- Превью письма НА ТОМ ЯЗЫКЕ, на котором улетит. Если выбраны
                  поставщики из разных языковых групп — несколько блоков. --}}
@@ -629,6 +473,8 @@
         </div>
     </div>
 
+    </section>
+
     {{-- ─────────── МОДАЛКА «Предпросмотр письма» ───────────
          Рендерит РОВНО то, что уйдёт (та же view emails.supplier-rfq, те же
          правки/язык/обращение) — по табу на каждого отмеченного поставщика.
@@ -695,4 +541,7 @@
         </template>
     @endif
     @endif {{-- canDispatch --}}
+
+    {{-- Пилот QuoteParts: отдельная отправка через платформу (участникам пилота при включённом рубильнике). --}}
+    <livewire:requests.quote-parts-panel :request-id="$requestId" :key="'qp-panel-'.$requestId" />
 </div>

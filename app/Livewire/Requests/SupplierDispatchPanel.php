@@ -2,6 +2,9 @@
 
 namespace App\Livewire\Requests;
 
+use App\Livewire\Concerns\AnswersQuotePartsSuppliers;
+use App\Models\QuotePartsRfq;
+use App\Services\Procurement\RequestSupplierOverview;
 use App\Services\Supplier\SupplierOrganizationService;
 use App\Enums\Role;
 use App\Models\CatalogItem;
@@ -25,6 +28,7 @@ use Livewire\WithFileUploads;
  */
 class SupplierDispatchPanel extends Component
 {
+    use AnswersQuotePartsSuppliers;
     use WithFileUploads;
 
     public int $requestId;
@@ -281,6 +285,83 @@ class SupplierDispatchPanel extends Component
         $active = in_array($run['status'], ['queued', 'running'], true);
 
         return $active || \Illuminate\Support\Carbon::parse($run['updated_at'])->gt(now()->subHours(2)) ? $run + ['active' => $active] : null;
+    }
+
+    /* -------------- Обзор вкладки (дизайн «Request — Поставщики») -------------- */
+
+    /** Сводка, сравнение цен, поставщики и переписка, вопросы — письма и QuoteParts вместе. */
+    #[Computed]
+    public function overview(): RequestSupplierOverview
+    {
+        return RequestSupplierOverview::for($this->requestId);
+    }
+
+    /**
+     * «Выбрать» в сравнении цен: цена этой строки — для 1С (выбор снабжения по позиции, общий с
+     * «Актуализацией цен»). Повторное нажатие на выбранную — снять. Копия / аналог из QuoteParts
+     * при выборе принимаются как цена позиции.
+     */
+    public function pickPrice(int $itemId, string $rowId): void
+    {
+        abort_unless($this->canDispatch, 403);
+        $pos = collect($this->overview->comparison())->firstWhere('item_id', $itemId);
+        $row = $pos ? collect($pos['rows'])->firstWhere('id', $rowId) : null;
+        if ($pos === null || $row === null || ($row['state'] ?? '') !== 'priced' || ! $pos['cid'] || ! ($row['key'] ?? null)) {
+            return;
+        }
+        $choices = app(\App\Services\Procurement\SupplierChoiceService::class);
+        if ($pos['chosen'] === $rowId) {
+            $choices->clear((int) $pos['cid']);
+        } elseif ($row['source'] === 'quoteparts' && $row['ref']) {
+            try {
+                app(\App\Services\QuoteParts\PriceActualizationService::class)->choose(\App\Models\QuotePartsOffer::query()->findOrFail($row['ref']), auth()->user());
+            } catch (\DomainException $e) {
+                $this->dispatch('toast', type: 'error', message: $e->getMessage());
+
+                return;
+            }
+        } else {
+            $choices->choose((int) $pos['cid'], (string) $row['key'], [
+                'supplier' => (string) $row['supplier'], 'price' => (float) $row['price'], 'currency' => $row['currency'],
+                'source' => 'email', 'ref' => (int) $row['ref'],
+            ], auth()->user());
+        }
+        unset($this->overview);
+    }
+
+    /** «Обновить» у поставщика QuoteParts: свежий снимок запроса. */
+    public function refreshQuotePartsRfq(int $id, \App\Services\QuoteParts\QuotePartsRfqService $service): void
+    {
+        try {
+            $service->refresh($this->quotePartsRfqForAnswer($id));
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: 'QuoteParts не ответил: '.mb_substr($e->getMessage(), 0, 150));
+        }
+        unset($this->overview);
+    }
+
+    /** «Спросить клиента»: черновик письма клиенту с открытыми вопросами поставщиков — в редакторе. */
+    public function askClientAboutQuotePartsQuestions(int $rfqId, \App\Services\QuoteParts\QuotePartsRfqService $service): void
+    {
+        abort_unless($this->canAnswerQuoteParts(), 403);
+        try {
+            $draft = $service->clientDraft($this->quotePartsRfqForAnswer($rfqId), [], auth()->user());
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
+
+            return;
+        }
+        $this->dispatch('open-draft', draftId: $draft->id, requestId: $this->requestId);
+    }
+
+    protected function quotePartsRfqForAnswer(int $id): QuotePartsRfq
+    {
+        return QuotePartsRfq::query()->where('request_id', $this->requestId)->findOrFail($id);
+    }
+
+    protected function afterQuotePartsAnswer(): void
+    {
+        unset($this->overview);
     }
 
     /* ----------------------- Уже отправленные запросы --------------------- */

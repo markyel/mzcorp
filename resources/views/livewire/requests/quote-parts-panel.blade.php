@@ -1,5 +1,7 @@
 <div>
-@if($this->enabled || $this->rfqs->isNotEmpty())
+{{-- Запросы QuoteParts по заявке (ответы, вопросы, переписка) — во вкладке выше: сравнение цен, вопросы,
+     поставщики и переписка. Здесь — только отдельная отправка через платформу для участников пилота. --}}
+@if($this->enabled)
     <div class="ds-card">
         <div class="ds-card-header">
             <h3>QuoteParts</h3>
@@ -9,9 +11,6 @@
             @endif
         </div>
         <div class="ds-card-body space-y-3 text-[13px]">
-            @foreach($this->rfqs as $rfq)
-                @include('livewire.quote-parts._rfq-card', ['rfq' => $rfq, 'supplierNames' => $supplierNames])
-            @endforeach
 
             @if($this->enabled && $open)
                 @php $inputCls = 'h-[28px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500'; @endphp
