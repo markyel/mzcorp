@@ -9,7 +9,8 @@ use Illuminate\Notifications\Notification;
 /**
  * In-app уведомление автору запроса через QuoteParts: поставщик ответил (формой или
  * письмом) или задал вопрос. kind=quoteparts_reply / quoteparts_question показывается в
- * bell-dropdown; клик ведёт в заявку, а запрос из «Снабжения» — в «Снабжение».
+ * bell-dropdown; клик ведёт в раздел QuoteParts — «Актуализация цен» / «Вопросы поставщиков»
+ * с поиском по номеру запроса.
  */
 class QuotePartsSupplierNotification extends Notification
 {

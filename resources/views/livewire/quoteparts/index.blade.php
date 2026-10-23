@@ -1,4 +1,4 @@
-<div class="space-y-3">
+<div class="space-y-3" x-data="{ hist: false }">
     {{-- Шапка раздела (дизайн «Актуализация цен», 10.2026): заголовок вкладки, вкладки с подчёркиванием и счётчиками. --}}
     @php
         $counts = $this->poolCounts;
@@ -26,8 +26,8 @@
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap">
                 @if($tab === 'offers')
-                    {{-- Файлы прошлых выгрузок и выгрузка за период — в «Снабжении». --}}
-                    <a href="{{ url('/dashboard/procurement') }}?tab=exports" class="btn btn-sm">Выгрузка в 1С · история</a>
+                    {{-- История выгрузок в 1С — здесь же, раскрывается под шапкой. --}}
+                    <button type="button" x-on:click="hist = ! hist" class="btn btn-sm" :class="hist && 'btn-primary'">Выгрузка в 1С · история</button>
                 @endif
                 <a href="https://quoteparts.ru/items" target="_blank" rel="noopener" class="btn btn-sm">Открыть QuoteParts ↗</a>
             </div>
@@ -44,6 +44,50 @@
             @endforeach
         </div>
     </div>
+
+    {{-- История выгрузок цен в 1С: последние файлы, скачать. --}}
+    @if($tab === 'offers')
+        @php $exports = \App\Models\PriceExport::query()->with('createdBy:id,name')->latest('id')->limit(20)->get(); @endphp
+        <div x-show="hist" x-cloak class="ds-card">
+            <div class="ds-card-header">
+                <h3>Выгрузки цен в 1С</h3>
+                <span class="text-[12px] text-fg-3 ml-2">последние {{ $exports->count() }} · «по списку» — из «Актуализации цен», «за период» — из «Снабжения»</span>
+                <button type="button" x-on:click="hist = false" class="ml-auto text-[12px] text-fg-3 hover:text-fg-1">✕ свернуть</button>
+            </div>
+            @if($exports->isEmpty())
+                <div class="ds-card-body text-[13px] text-fg-3">Выгрузок ещё не было.</div>
+            @else
+                <div class="overflow-x-auto">
+                    <table class="w-full text-[12.5px]">
+                        <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-b border-border">
+                            <tr>
+                                <th class="text-left px-3 py-2">Когда</th>
+                                <th class="text-left px-3 py-2">Вид</th>
+                                <th class="text-right px-3 py-2">Позиций</th>
+                                <th class="text-right px-3 py-2">Поставщиков</th>
+                                <th class="text-left px-3 py-2">Кто</th>
+                                <th class="text-left px-3 py-2">Файл</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach($exports as $e)
+                                <tr class="border-b border-border-subtle" wire:key="pex-{{ $e->id }}">
+                                    <td class="px-3 py-1.5 whitespace-nowrap tnum">{{ $e->created_at?->timezone(config('app.timezone'))->format('d.m.Y H:i') }}</td>
+                                    <td class="px-3 py-1.5 whitespace-nowrap">{{ ($e->kind ?? 'period') === 'positions' ? 'по списку' : 'за период '.$e->from_at?->format('d.m').'–'.$e->to_at?->format('d.m') }}</td>
+                                    <td class="px-3 py-1.5 text-right tnum">{{ $e->rows_count }}</td>
+                                    <td class="px-3 py-1.5 text-right tnum">{{ $e->suppliers_count }}</td>
+                                    <td class="px-3 py-1.5 text-fg-2">{{ $e->createdBy?->name ?? '—' }}</td>
+                                    <td class="px-3 py-1.5">
+                                        @if($e->file_path)<a href="{{ route('quoteparts.price-exports.download', $e->id) }}" class="text-sky-700 hover:underline">скачать</a>@else<span class="text-fg-4">—</span>@endif
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            @endif
+        </div>
+    @endif
 
     @unless($this->configured)
         <div class="ds-card"><div class="ds-card-body text-[13px] text-amber-800">

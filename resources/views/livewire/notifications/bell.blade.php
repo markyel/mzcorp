@@ -87,7 +87,10 @@
                                 'outgoing_send_failed' => $reqId
                                     ? route('requests.show', $reqId)
                                     : route('mail.inbox', ['mbox' => $data['mailbox_id'] ?? null, 'folder' => 'drafts', 'open' => $data['draft_id'] ?? null]),
-                                'quoteparts_reply', 'quoteparts_question' => $reqId ? route('requests.show', $reqId) : route('procurement.index'),
+                                // Ответ / вопрос поставщика через QuoteParts разбирают в разделе QuoteParts: «Актуализация цен» /
+                                // «Вопросы поставщиков», найдено по номеру запроса; «Чьи запросы» — все, чтобы фильтр не спрятал.
+                                'quoteparts_reply' => route('quoteparts.index', array_filter(['tab' => 'offers', 'pq' => trim((string) ($data['tag'] ?? ''), '[]'), 'au' => 'all'])),
+                                'quoteparts_question' => route('quoteparts.index', array_filter(['tab' => 'questions', 'q' => trim((string) ($data['tag'] ?? ''), '[]'), 'au' => 'all'])),
                                 'quoteparts_price_list' => route('procurement.index', ['tab' => 'pricelists', 'pl' => $data['price_list_id'] ?? null]),
                                 'quoteparts_conversation' => ! empty($data['supplier_id']) ? route('suppliers.registry-edit', $data['supplier_id']) : route('procurement.index'),
                                 'organization_link_pending' => isset($data['link_request_id']) ? route('clients.link-requests.show', $data['link_request_id']) : '#',

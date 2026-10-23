@@ -423,6 +423,13 @@ Route::middleware('auth')->group(function () {
         })->name('quoteparts.index');
         Route::post('/dashboard/quoteparts/purchase-prices', \App\Http\Controllers\QuoteParts\PurchasePriceUploadController::class)
             ->name('quoteparts.purchase-prices.upload');
+        // Файл выгрузки цен в 1С из истории «Актуализации цен».
+        Route::get('/dashboard/quoteparts/price-exports/{export}/download', function (\App\Models\PriceExport $export) {
+            $disk = \Illuminate\Support\Facades\Storage::disk(config('procurement.price_export.disk', 'local'));
+            abort_unless($export->file_path && $disk->exists($export->file_path), 404);
+
+            return $disk->download($export->file_path, basename($export->file_path));
+        })->whereNumber('export')->name('quoteparts.price-exports.download');
     });
 
     // Файл из обращения к поставщику через QuoteParts (доступ проверяет контроллер: QuotePartsPilot::canConverse).
