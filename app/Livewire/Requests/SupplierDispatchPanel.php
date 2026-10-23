@@ -654,11 +654,9 @@ class SupplierDispatchPanel extends Component
                 // (менеджер переведёт в превью English).
                 'en_name' => (string) ($catNameEn ?: $it->parsed_name ?: '—'),
                 'client_name' => $catName && $catName !== $it->parsed_name ? $it->parsed_name : null,
-                // Артикул для письма: сначала распознанный у клиента (parsed_article),
-                // а если его нет — берём OEM из каталога (первый внешний, не M-код).
-                // Кейс M-2026-10844: OEM «есть в каталоге», но клиент его не прислал —
-                // раньше поле оставалось пустым, теперь подтягивается автоматически.
-                'oem' => $svc->itemOem($it) ?: $it->catalogItem?->oemForExternal(),
+                // Артикул для письма: позиция сматчена с каталогом — OEM из нашей базы (первый
+                // внешний, не M-код), иначе распознанный у клиента (SupplierDispatchService::itemOem).
+                'oem' => $svc->itemOem($it),
                 'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
                 'qty' => $svc->itemQty($it, [], 'ru'),
                 'qty_en' => $svc->itemQty($it, [], 'en'),

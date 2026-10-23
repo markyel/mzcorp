@@ -306,7 +306,7 @@ class SupplierDispatchService
             ->where('request_id', $request->id)
             ->where('is_active', true)
             ->when($itemIds !== [], fn ($q) => $q->whereIn('id', $itemIds))
-            ->with(['brand:id,name', 'kbCategory:id,name,synonyms', 'catalogItem:id,name,name_en,brand,equipment_category_id,is_price_actual', 'catalogItem.equipmentCategory:id,name,synonyms'])
+            ->with(['brand:id,name', 'kbCategory:id,name,synonyms', 'catalogItem:id,sku,name,name_en,brand,brand_article,articles,equipment_category_id,is_price_actual', 'catalogItem.equipmentCategory:id,name,synonyms'])
             ->orderBy('position')
             ->get();
     }
@@ -370,9 +370,11 @@ class SupplierDispatchService
      */
     public function itemOem(RequestItem $it, array $oemOverrides = []): ?string
     {
+        // Позиция сматчена с каталогом — OEM из нашей базы (проверенный артикул производителя),
+        // а не то, что парсер увидел в письме клиента; без каталожного OEM — артикул клиента.
         $raw = isset($oemOverrides[$it->id])
             ? trim((string) $oemOverrides[$it->id])
-            : (string) ($it->parsed_article ?? '');
+            : (string) (($it->catalog_item_id ? $it->catalogItem?->oemForExternal() : null) ?: ($it->parsed_article ?? ''));
 
         // Наш внутренний M-артикул не уходит поставщику, даже если клиент прислал
         // его в parsed_article (use-case A матчит именно M-код) или менеджер
