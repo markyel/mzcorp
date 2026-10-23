@@ -74,11 +74,25 @@ class PriceExportService
     }
 
     /**
+     * Цены по заявке (вкладка «Поставщики»): строки готовит RequestSupplierOverview::exportPrices —
+     * письма и QuoteParts, по позициям с выбранной ценой.
+     *
+     * @param  Collection<int, array{cid:int, sku:string, key:?string, fallback:string, price:float, currency:?string, date:Carbon, comment:?string}>  $prices
+     */
+    public function exportRequestPrices(Collection $prices, string $requestCode, ?User $by): PriceExport
+    {
+        $from = $prices->min('date');
+
+        return $this->write($prices, 0, $from ? Carbon::parse($from) : now(), now(), $by, PriceExport::KIND_REQUEST, $requestCode);
+    }
+
+    /**
      * @param  Collection<int, array<string, mixed>>  $prices
      */
-    private function write(Collection $prices, int $skipped, Carbon $from, Carbon $to, ?User $by, string $kind): PriceExport
+    private function write(Collection $prices, int $skipped, Carbon $from, Carbon $to, ?User $by, string $kind, ?string $requestCode = null): PriceExport
     {
-        $positions = $kind === PriceExport::KIND_POSITIONS;
+        // По списку «Актуализации» и по заявке — одинаково: позиции с выбранной ценой, не период.
+        $positions = in_array($kind, [PriceExport::KIND_POSITIONS, PriceExport::KIND_REQUEST], true);
         $keys = $prices->pluck('key')->filter()->unique()->values()->all();
         $names = $this->names1c($keys);
         $codes = app(SupplierOnecCodeService::class);
@@ -131,7 +145,7 @@ class PriceExportService
         $notes->fromArray([
             ['Выгрузка новых цен поставщиков', ''],
             $positions
-                ? ['Позиции', 'Список выгрузки «Актуализация цен»: позиции с выбранным предложением — все действующие цены поставщиков по ним, выбранное — 1 в колонке «Выбор».']
+                ? ['Позиции', ($requestCode !== null ? 'Заявка '.$requestCode : 'Список выгрузки «Актуализация цен»').': позиции с выбранным предложением — все действующие цены поставщиков по ним, выбранное — 1 в колонке «Выбор».']
                 : ['Период', $from->format('d.m.Y H:i').' – '.$to->format('d.m.Y H:i').' (по дате письма / предложения поставщика)'],
             ['Сформировано', now()->format('d.m.Y H:i').($by ? ' · '.$by->name : '')],
             ['', ''],
@@ -151,7 +165,11 @@ class PriceExportService
         $book->setActiveSheetIndex(0);
 
         $disk = config('procurement.price_export.disk', 'local');
-        $path = trim(config('procurement.price_export.directory', 'exports/prices'), '/').'/Цены поставщиков '.($positions ? 'актуализация '.now()->format('d.m.Y His') : $from->format('d.m').'-'.$to->format('d.m.Y').' '.now()->format('His')).'.xlsx';
+        $path = trim(config('procurement.price_export.directory', 'exports/prices'), '/').'/Цены поставщиков '.match (true) {
+            $requestCode !== null => $requestCode.' '.now()->format('d.m.Y His'),
+            $positions => 'актуализация '.now()->format('d.m.Y His'),
+            default => $from->format('d.m').'-'.$to->format('d.m.Y').' '.now()->format('His'),
+        }.'.xlsx';
         $tmp = tempnam(sys_get_temp_dir(), 'px');
         (new Xlsx($book))->save($tmp);
         Storage::disk($disk)->put($path, (string) file_get_contents($tmp));

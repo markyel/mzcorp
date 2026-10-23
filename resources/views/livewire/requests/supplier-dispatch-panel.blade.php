@@ -544,4 +544,6 @@
 
     {{-- Пилот QuoteParts: отдельная отправка через платформу (участникам пилота при включённом рубильнике). --}}
     <livewire:requests.quote-parts-panel :request-id="$requestId" :key="'qp-panel-'.$requestId" />
+
+    @include('livewire.requests._supplier-bar')
 </div>

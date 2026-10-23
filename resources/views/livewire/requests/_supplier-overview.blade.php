@@ -256,6 +256,7 @@
         </section>
     @endif
 
+
     {{-- D. Поставщики и переписка. --}}
     @if($sups->isNotEmpty())
         <section class="rs-card">

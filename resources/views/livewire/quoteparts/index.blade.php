@@ -73,7 +73,7 @@
                             @foreach($exports as $e)
                                 <tr class="border-b border-border-subtle" wire:key="pex-{{ $e->id }}">
                                     <td class="px-3 py-1.5 whitespace-nowrap tnum">{{ $e->created_at?->timezone(config('app.timezone'))->format('d.m.Y H:i') }}</td>
-                                    <td class="px-3 py-1.5 whitespace-nowrap">{{ ($e->kind ?? 'period') === 'positions' ? 'по списку' : 'за период '.$e->from_at?->format('d.m').'–'.$e->to_at?->format('d.m') }}</td>
+                                    <td class="px-3 py-1.5 whitespace-nowrap">{{ match ($e->kind ?? 'period') { 'positions' => 'по списку', 'request' => 'по заявке', default => 'за период '.$e->from_at?->format('d.m').'–'.$e->to_at?->format('d.m') } }}</td>
                                     <td class="px-3 py-1.5 text-right tnum">{{ $e->rows_count }}</td>
                                     <td class="px-3 py-1.5 text-right tnum">{{ $e->suppliers_count }}</td>
                                     <td class="px-3 py-1.5 text-fg-2">{{ $e->createdBy?->name ?? '—' }}</td>

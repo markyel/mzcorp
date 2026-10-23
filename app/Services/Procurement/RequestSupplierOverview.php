@@ -320,6 +320,68 @@ class RequestSupplierOverview
     }
 
     /**
+     * Нижняя панель: сколько позиций с выбранной ценой и на какую сумму.
+     *
+     * @return array{chosen:int, total:int, sum:float, exportable:int}
+     */
+    public function bar(): array
+    {
+        $cmp = collect($this->comparison());
+        $chosen = $cmp->filter(fn ($p) => $p['chosen'] !== null);
+
+        return [
+            'chosen' => $chosen->count(),
+            'total' => $cmp->count(),
+            'sum' => (float) $chosen->sum(fn ($p) => (float) (collect($p['rows'])->firstWhere('id', $p['chosen'])['rub'] ?? 0)),
+            // В 1С — позиции из каталога (с M-артикулом).
+            'exportable' => $chosen->filter(fn ($p) => $p['cid'] !== null && $p['sku'])->count(),
+        ];
+    }
+
+    /**
+     * Строки выгрузки в 1С по заявке: позиции с выбранной ценой — все цены поставщиков по ним, строка
+     * на поставщика (его выбранное предложение, иначе оригинал, иначе самое дешёвое). Копия или аналог
+     * на разборе — только если их выбрали.
+     *
+     * @return Collection<int, array{cid:int, sku:string, key:?string, fallback:string, price:float, currency:?string, date:Carbon, comment:?string}>
+     */
+    public function exportPrices(): Collection
+    {
+        $out = collect();
+        $positions = collect($this->comparison())->filter(fn ($p) => $p['chosen'] !== null && $p['cid'] !== null && $p['sku']);
+        $rows = $positions->flatMap(fn ($p) => collect($p['rows'])->where('state', 'priced')->map(fn ($r) => $r + ['_p' => $p]));
+        $mail = \App\Models\SupplierOffer::query()->whereIn('id', $rows->where('source', 'email')->pluck('ref'))->get()->keyBy('id');
+        $qp = QuotePartsOffer::query()->whereIn('id', $rows->where('source', 'quoteparts')->pluck('ref')->filter())->get()->keyBy('id');
+
+        foreach ($positions as $p) {
+            $groups = collect($p['rows'])->where('state', 'priced')
+                ->reject(fn ($r) => $r['review'] && $r['id'] !== $p['chosen'])
+                ->groupBy(fn ($r) => $r['key'] ?? 'name:'.$r['supplier']);
+            foreach ($groups as $g) {
+                $r = $g->firstWhere('id', $p['chosen'])
+                    ?? $g->filter(fn ($x) => in_array($x['kind'], ['original', 'unknown'], true))->sortBy('rub')->first()
+                    ?? $g->sortBy('rub')->first();
+                if ($r === null) {
+                    continue;
+                }
+                $comment = null;
+                if ($r['source'] === 'email' && ($so = $mail[$r['ref']] ?? null)) {
+                    $comment = PriceExportService::mailComment($so->valid_until_text, $so->raw_quote);
+                } elseif ($r['source'] === 'quoteparts' && ($o = $qp[$r['ref']] ?? null)) {
+                    $comment = $o->export_comment ?? PriceExportService::offerComment($o);
+                }
+                $out->push([
+                    'cid' => (int) $p['cid'], 'sku' => (string) $p['sku'], 'key' => $r['key'] ?? null,
+                    'fallback' => (string) $r['supplier'], 'price' => (float) $r['price'], 'currency' => $r['currency'] ?: 'RUB',
+                    'date' => $r['at'] instanceof Carbon ? $r['at'] : now(), 'comment' => $comment,
+                ]);
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * Сводка сверху: кого спросили, кто дал цену, самое дешёвое, вопросы.
      *
      * @param  list<array<string, mixed>>  $suppliers

@@ -14,6 +14,9 @@ class PriceExport extends Model
 
     public const KIND_POSITIONS = 'positions';
 
+    /** Цены по одной заявке (вкладка «Поставщики»): позиции с выбранной ценой. */
+    public const KIND_REQUEST = 'request';
+
     protected $fillable = [
         'from_at',
         'to_at',

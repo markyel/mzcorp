@@ -329,6 +329,35 @@ class SupplierDispatchPanel extends Component
         unset($this->overview);
     }
 
+    /** Итог последней выгрузки в 1С — в нижней панели. */
+    public ?string $exportNote = null;
+
+    /**
+     * «Выгрузить в 1С»: позиции заявки с выбранной ценой — все цены поставщиков по ним, выбранная — 1
+     * в колонке «Выбор» (тот же формат, что «Актуализация цен»). Файл сразу скачивается и остаётся в истории.
+     */
+    public function exportPrices(\App\Services\Procurement\PriceExportService $exports)
+    {
+        abort_unless($this->canDispatch, 403);
+        $rows = $this->overview->exportPrices();
+        if ($rows->isEmpty()) {
+            $this->dispatch('toast', type: 'error', message: 'Нет позиций с выбранной ценой — нажмите «Выбрать» в сравнении цен.');
+
+            return null;
+        }
+        try {
+            $export = $exports->exportRequestPrices($rows, (string) RequestModel::query()->whereKey($this->requestId)->value('internal_code'), auth()->user());
+        } catch (\Throwable $e) {
+            report($e);
+            $this->dispatch('toast', type: 'error', message: 'Не удалось сформировать выгрузку: '.mb_substr($e->getMessage(), 0, 300));
+
+            return null;
+        }
+        $this->exportNote = 'Выгружено в 1С: '.$rows->pluck('sku')->unique()->count().' поз., '.$rows->count().' цен · '.now()->timezone(config('app.timezone'))->format('H:i');
+
+        return Storage::disk(config('procurement.price_export.disk', 'local'))->download($export->file_path, basename($export->file_path));
+    }
+
     /** «Обновить» у поставщика QuoteParts: свежий снимок запроса. */
     public function refreshQuotePartsRfq(int $id, \App\Services\QuoteParts\QuotePartsRfqService $service): void
     {
