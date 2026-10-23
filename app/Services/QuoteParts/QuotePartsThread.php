@@ -36,7 +36,8 @@ final class QuotePartsThread
         $text = trim(str_replace("\r\n", "\n", $text));
         $cleaner = app(\App\Services\Mail\EmailTextCleanerService::class);
         $own = $cleaner->removeSignature($cleaner->cutQuotedReplyTail($text));
-        $tidy = fn (string $s) => trim(preg_replace("/\n[ \t]*(\n[ \t]*){2,}/u", "\n\n", preg_replace('/[ \t]+$/mu', '', $s) ?? $s) ?? $s);
+        // Пустые строки у почтовиков бывают из неразрывных пробелов (\h их ловит): хвосты строк и лишние пустые — вон.
+        $tidy = fn (string $s) => preg_replace('/^\s+|\s+$/u', '', preg_replace("/\n{3,}/u", "\n\n", preg_replace('/\h+$/mu', '', $s) ?? $s) ?? $s) ?? $s;
         if ($own === '' || ! str_starts_with($text, $own)) {
             return [$tidy($text), ''];
         }

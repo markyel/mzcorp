@@ -24,7 +24,7 @@ class QuotePartsThreadGistTest extends TestCase
 
     public function test_split_keeps_line_breaks_and_moves_signature_to_the_tail(): void
     {
-        $text = "Привет, Александр!\r\n\r\nХорошая копия — это высококачественная имитация.\r\n\r\n\r\n\r\n\r\nС уважением,\r\nСвета\r\nXi'an YuanQi Elevator Parts Co.,Ltd\r\n\r\n------------------ Original ------------------\r\nFrom: MyZip";
+        $text = "Привет, Александр!\r\n\r\nХорошая копия — это высококачественная имитация.\r\n\u{00A0}\r\n\r\n\u{00A0}\r\n\r\nС уважением,\r\nСвета\r\nXi'an YuanQi Elevator Parts Co.,Ltd\r\n\r\n------------------ Original ------------------\r\nFrom: MyZip";
 
         [$own, $tail] = QuotePartsThread::split($text);
 
