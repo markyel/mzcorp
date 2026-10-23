@@ -14,7 +14,7 @@
         .ph-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:12px 16px;border-bottom:1px solid var(--border-subtle)}
         .ph-head h2{margin:0;font-size:15px;font-weight:600;color:var(--fg-1)}
         .ph-hint{font-size:12px;color:var(--fg-3)}
-        .ph-drop{margin:16px;border:1.5px dashed var(--border-strong);border-radius:10px;padding:28px 16px;text-align:center;cursor:pointer;transition:background 120ms,border-color 120ms}
+        .ph-drop{display:block;margin:16px;border:1.5px dashed var(--border-strong);border-radius:10px;padding:28px 16px;text-align:center;cursor:pointer;transition:background 120ms,border-color 120ms}
         .ph-drop.over{background:var(--bg-selected);border-color:var(--sky-500)}
         .ph-row{display:grid;grid-template-columns:minmax(0,1.3fr) 90px minmax(0,2fr) 28px;gap:12px;align-items:center;padding:7px 16px;border-top:1px solid var(--border-subtle);font-size:13px}
         .ph-mono{font-family:var(--font-mono, ui-monospace, monospace);font-size:12.5px}
