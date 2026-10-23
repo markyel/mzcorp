@@ -66,13 +66,6 @@
     .rs-srow{align-items:center;min-height:48px;padding:6px 20px;cursor:pointer;transition:background 120ms}
     .rs-srow:hover{background:var(--bg-hover)}
     .rs-srow.open{background:var(--bg-selected)}
-    /* Лента переписки: письма поставщика — зелёные, наши — серые с синей кромкой, события — мелкой строкой. */
-    .rs-tl{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;padding:8px 10px;margin-top:6px;border-radius:6px;border-left:3px solid transparent}
-    .rs-tl.in{background:var(--emerald-50);border-left-color:var(--emerald-600)}
-    .rs-tl.out{background:var(--bg-surface-2);border-left-color:var(--sky-500)}
-    .rs-tl.event{padding:2px 10px;margin-top:2px;font-size:12px;color:var(--fg-4)}
-    .rs-tl.event > div > span:first-child{font-weight:400 !important}
-    .rs-tl.in > div > span:first-child{font-weight:600 !important}
     .rs-q-bubble{background:var(--bg-surface-2);border-radius:0 8px 8px 8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;max-width:760px}
     .rs-ta{box-sizing:border-box;width:100%;border:1px solid var(--border-strong);border-radius:6px;padding:8px 10px;font-size:13px;resize:vertical;outline:none;background:var(--bg-surface)}
     .rs-ta:focus{border-color:var(--sky-500);box-shadow:0 0 0 2px var(--ring)}
@@ -291,37 +284,24 @@
                             </div>
                             <div x-show="open" x-cloak style="padding: 4px 20px 16px 52px">
                                 @forelse($s['thread'] as $m)
-                                    <div class="rs-tl {{ $m['dir'] }}" x-data="{ full: false }">
-                                        <span style="font-weight: 700; color: {{ $m['dir'] === 'out' ? 'var(--sky-700)' : ($m['dir'] === 'in' ? 'var(--emerald-700)' : 'var(--fg-4)') }}">{{ $m['dir'] === 'out' ? '→' : ($m['dir'] === 'in' ? '←' : '·') }}</span>
-                                        <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
-                                            <span style="font-weight: 500">{{ $m['from'] }}</span>
-                                            @if(! empty($m['subject']))<span style="font-size: 12px; color: var(--fg-2)">{{ $m['subject'] }}</span>@endif
-                                            @if($m['dir'] !== 'event' && mb_strlen((string) $m['body']) > mb_strlen((string) $m['text']) + 3)
-                                                <span class="rs-hint" x-show="! full" style="text-wrap: pretty">{{ $m['text'] }} <button type="button" x-on:click="full = true" style="color: var(--sky-700)">весь текст</button></span>
-                                                <span x-show="full" x-cloak style="font-size: 12px; color: var(--fg-2); white-space: pre-wrap; max-height: 420px; overflow-y: auto">{{ $m['body'] }}</span>
-                                            @else
-                                                <span class="rs-hint" style="text-wrap: pretty">{{ $m['text'] }}</span>
-                                            @endif
-                                            {{-- Вложения: фото — в просмотрщике, PDF — встроенным просмотром, остальное — скачать. --}}
-                                            @php
-                                                $files = collect($m['files'] ?? [])->map(fn ($f) => ['url' => $f['url'], 'name' => $f['name'], 'mime' => $f['mime'], 'image' => str_starts_with((string) $f['mime'], 'image/')])
-                                                    ->concat(collect($m['attachments'] ?? [])->map(fn ($a) => ['url' => route('attachments.preview', $a['id']), 'dl' => route('attachments.download', $a['id']), 'name' => $a['name'], 'mime' => $a['kind'] === 'pdf' ? 'application/pdf' : null, 'image' => $a['kind'] === 'image']))->values();
-                                                $gal = $files->where('image', true)->values()->map(fn ($f) => ['src' => $f['url'], 'name' => $f['name'], 'dl' => $f['dl'] ?? $f['url']])->all();
-                                                $gi = 0;
-                                            @endphp
-                                            @if($files->isNotEmpty())
-                                                <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 4px">
-                                                    @foreach($files as $f)
-                                                        @if($f['image'])
-                                                            <a href="{{ $f['url'] }}" class="rs-thumb" title="{{ $f['name'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $gal, 'index' => $gi++]) }})"><img src="{{ $f['url'] }}" alt="" loading="lazy"></a>
-                                                        @else
-                                                            @include('partials.file-link', ['url' => $f['url'], 'fileDl' => $f['dl'] ?? null, 'name' => $f['name'], 'mime' => $f['mime'], 'fileClass' => 'rs-file'])
-                                                        @endif
-                                                    @endforeach
-                                                </div>
-                                            @endif
-                                        </div>
-                                        <span class="rs-hint tnum" style="white-space: nowrap">{{ $m['at'] }}</span>
+                                    @php
+                                        $from = (string) ($m['from'] ?? '');
+                                        $whoOut = preg_match('/^Мы\s*(→|·)?\s*(.*)$/u', $from, $mm) ? (($mm[1] ?? '') === '→' && $mm[2] !== '' ? 'кому: '.$mm[2] : ($mm[2] ?? '')) : $from;
+                                        $nameIn = ! empty($s['loose']) ? $from : $s['name'];
+                                    @endphp
+                                    <div wire:key="rst-{{ $s['id'] }}-{{ $loop->index }}">
+                                        @include('partials.chat-message', ['msg' => [
+                                            'dir' => $m['dir'],
+                                            'name' => $m['dir'] === 'out' ? 'Мы' : $nameIn,
+                                            'who' => $m['dir'] === 'out' ? $whoOut : ($from !== $nameIn ? $from : null),
+                                            'subject' => $m['subject'] ?? null,
+                                            'gist' => (string) $m['text'],
+                                            'body' => (string) ($m['body'] ?? ''),
+                                            'at' => $m['at'],
+                                            // Вложения: фото — в просмотрщике, PDF — встроенным просмотром, остальное — скачать.
+                                            'files' => collect($m['files'] ?? [])->map(fn ($f) => ['url' => $f['url'], 'name' => $f['name'], 'mime' => $f['mime'], 'image' => str_starts_with((string) $f['mime'], 'image/')])
+                                                ->concat(collect($m['attachments'] ?? [])->map(fn ($a) => ['url' => route('attachments.preview', $a['id']), 'dl' => route('attachments.download', $a['id']), 'name' => $a['name'], 'mime' => $a['kind'] === 'pdf' ? 'application/pdf' : null, 'image' => $a['kind'] === 'image']))->values()->all(),
+                                        ]])
                                     </div>
                                 @empty
                                     <div class="rs-hint" style="padding: 8px 0; border-top: 1px solid var(--border-subtle)">Писем пока нет.</div>
