@@ -191,7 +191,13 @@ class OutboundQuoteItemMatcher
             return;
         }
 
-        if ($orphans->count() === 1 && $free->count() === 1) {
+        // Одна строка ↔ одна позиция связываются напрямую, только если в них видно один
+        // товар (общие слова названия или артикул). «Одна на одну» само по себе не
+        // довод: M-2026-20451 — в КП 371525 одна строка «Ролик замка дверей AMD» M32178,
+        // в заявке единственная позиция без каталога — «Канатоведущий шкив KM755995H07»;
+        // слепая пара дала шкиву каталог ролика, и черновик в QuoteParts промоутнулся
+        // в чужой товар. Без такого сходства решает LLM — он может сказать «нет».
+        if ($orphans->count() === 1 && $free->count() === 1 && $this->looksLikeSameItem($orphans->first(), $free->first())) {
             $qi = $orphans->first();
             $ri = $free->first();
             $qi->matched_request_item_id = $ri->id;
@@ -204,6 +210,35 @@ class OutboundQuoteItemMatcher
         }
 
         $this->matchByLlm($orphans, $request);
+    }
+
+    /**
+     * Строка КП и позиция заявки похожи на один товар: два и больше общих значащих
+     * слова в названии (строки КП или нашего каталожного товара) либо общий артикул
+     * производителя у каталожного товара и клиента.
+     */
+    private function looksLikeSameItem(OutboundQuoteItem $qi, RequestItem $ri): bool
+    {
+        $reqName = (string) $ri->parsed_name;
+        $catalog = $qi->relationLoaded('catalogItem') ? $qi->catalogItem : CatalogItem::find($qi->matched_catalog_item_id);
+
+        foreach ([(string) $qi->raw_name, (string) $catalog?->name] as $name) {
+            if ($name !== '' && $reqName !== '' && $this->nameSimilarity($name, $reqName) > 0) {
+                return true;
+            }
+        }
+
+        $reqArticle = CatalogImportService::normalizeArticle($ri->parsed_article);
+        if ($reqArticle === null || $reqArticle === '' || $catalog === null) {
+            return false;
+        }
+        foreach ([$catalog->brand_article, ...(array) ($catalog->articles ?? [])] as $article) {
+            if (CatalogImportService::normalizeArticle($article) === $reqArticle) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
