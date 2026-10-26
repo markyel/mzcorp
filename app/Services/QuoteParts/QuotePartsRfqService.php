@@ -408,13 +408,19 @@ class QuotePartsRfqService
     /**
      * Обновить снимки запросов, по которым ещё могут прийти ответы (открытые и
      * закрытые за последние 30 дней — поздние ответы письмом тоже становятся офферами).
+     * Сначала давно не обновлённые; $budgetSeconds — сколько обновлять за раз (остальные —
+     * следующим прогоном): 190 запросов идут ~4 минуты и растут.
      */
-    public function refreshRecent(): int
+    public function refreshRecent(?int $budgetSeconds = null): int
     {
         $n = 0;
+        $until = $budgetSeconds !== null ? microtime(true) + $budgetSeconds : null;
         foreach (QuotePartsRfq::query()->where('created_at', '>=', now()->subDays(60))
             ->where(fn ($q) => $q->where('status', 'open')->orWhere('synced_at', '>=', now()->subDays(30)))
             ->orderBy('synced_at')->limit(200)->get() as $rfq) {
+            if ($until !== null && microtime(true) >= $until) {
+                break;
+            }
             try {
                 $this->refresh($rfq);
                 $n++;
