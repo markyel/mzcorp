@@ -116,7 +116,7 @@ class QuotePartsSupplierService
 
     /**
      * Контакты поставщика в QuoteParts (кто ведёт расценку, финансы, логистику, рекламации)
-     * и как рассылать запросы: всем сразу или последовательно.
+     * и куда идёт автоматический перезапрос: главному ящику или по очереди.
      *
      * @return array<string, mixed>|null  связь из QuoteParts или null, если поставщик не приглашён
      */
@@ -129,11 +129,10 @@ class QuotePartsSupplierService
      * @param  list<array{email:string, name:?string, topics:list<string>, position:int}>  $contacts
      * @return array<string, mixed>
      */
-    public function saveContacts(Supplier $supplier, array $contacts, string $mode, int $escalateAfterHours): array
+    public function saveContacts(Supplier $supplier, array $contacts, string $mode): array
     {
         return $this->client->setContacts($supplier->quotepartsKey(), [
             'dispatch_mode' => $mode,
-            'escalate_after_hours' => $escalateAfterHours,
             'contacts' => $contacts,
         ]);
     }

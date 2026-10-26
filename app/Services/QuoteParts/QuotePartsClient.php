@@ -177,7 +177,7 @@ class QuotePartsClient
     }
 
     /**
-     * @param  array{dispatch_mode:string, escalate_after_hours:int, contacts: list<array{email:string, name:?string, topics:list<string>, position:int}>}  $payload
+     * @param  array{dispatch_mode:string, contacts: list<array{email:string, name:?string, topics:list<string>, position:int}>}  $payload
      * @return array<string, mixed> the link as QuoteParts returns it
      */
     public function setContacts(string $key, array $payload): array
@@ -211,7 +211,7 @@ class QuotePartsClient
     }
 
     /**
-     * @param  array{items: list<array{code:string, quantity:float, note:?string}>, suppliers: list<string>, reply_by:?string, message:?string, external_ref:?string, subject_refs?:list<string>}  $payload
+     * @param  array{items: list<array{code:string, quantity:float, note:?string}>, suppliers: list<string>, addresses?: ?array<string, list<string>>, reply_by:?string, message:?string, external_ref:?string, subject_refs?:list<string>}  $payload
      * @return array<string, mixed>
      */
     public function createRfq(array $payload): array

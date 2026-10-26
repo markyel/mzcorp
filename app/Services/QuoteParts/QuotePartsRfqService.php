@@ -41,8 +41,10 @@ class QuotePartsRfqService
      *         (supplier_id => письмо по старому алгоритму, SupplierDispatchService/SupplierProcurementDispatchService::composeLetter):
      *         QuoteParts шлёт его как есть с ящика внесистемных (orders@) от имени автора, с его подписью, без формы
      *         и кабинета; ответы поставщиков — копией автору (решение 2026-10-21)
+     * @param  bool  $automatic  автоматический перезапрос (мониторинг цен): ящик поставщика выбирает QuoteParts по его
+     *                           режиму (главный / по очереди); иначе запрос уходит только на отмеченные адреса
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = [], array $letters = []): QuotePartsRfq
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = [], array $letters = [], bool $automatic = false): QuotePartsRfq
     {
         // routed — поставщики, принявшие приглашение, из обычной рассылки (QuotePartsRouting): у любого сотрудника.
         if ($routed ? ! QuotePartsRouting::enabled() : ! QuotePartsPilot::enabledFor($by)) {
@@ -52,7 +54,7 @@ class QuotePartsRfqService
         $catalog = CatalogItem::query()->whereIn('id', array_keys($quantities))->get(['id', 'sku'])->keyBy('id');
         // Любой поставщик из справочника (решение 15.10): кто ещё не в QuoteParts — заводится
         // в режиме переписки, без письма-приглашения. Поставщик в QuoteParts — организация:
-        // несколько её адресов дают одного получателя; кому писать — решает режим рассылки.
+        // несколько её адресов дают одного получателя; письмо — на отмеченные адреса (addresses).
         $rows = Supplier::query()->with('organization:id,name')->whereIn('id', $supplierIds)->whereNotNull('email')->get();
         if (($catalog->isEmpty() && $draftQuantities === []) || $rows->isEmpty()) {
             throw new RuntimeException('Нужны позиции и хотя бы один поставщик с адресом.');
@@ -82,6 +84,9 @@ class QuotePartsRfqService
         $payload = [
             'items' => $items,
             'suppliers' => $suppliers->all(),
+            // Один запрос — один ящик (решение 26.10.2026): отмеченный менеджером адрес, напоминания — туда же.
+            // Автоматический перезапрос адресов не передаёт — ящик выбирает режим поставщика в QuoteParts.
+            'addresses' => $automatic ? null : self::addresses($rows),
             'reply_by' => $replyBy,
             'message' => $message ?: null,
             'external_ref' => $request?->internal_code,
@@ -115,6 +120,20 @@ class QuotePartsRfqService
             'snapshot' => $result,
             'synced_at' => now(),
         ]);
+    }
+
+    /**
+     * Отмеченные адреса по ключу поставщика в QuoteParts: два адреса одной организации — оба её получателя.
+     *
+     * @param  \Illuminate\Support\Collection<int, Supplier>  $rows
+     * @return array<string, list<string>>
+     */
+    public static function addresses(\Illuminate\Support\Collection $rows): array
+    {
+        return $rows->filter(fn (Supplier $s) => trim((string) $s->email) !== '')
+            ->groupBy(fn (Supplier $s) => $s->quotepartsKey())
+            ->map(fn ($group) => $group->map(fn (Supplier $s) => mb_strtolower(trim((string) $s->email)))->unique()->values()->all())
+            ->all();
     }
 
     /**

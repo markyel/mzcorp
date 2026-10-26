@@ -99,11 +99,10 @@
                 </table>
 
                 <div class="flex flex-wrap items-center gap-4">
-                    <label class="flex items-center gap-1.5"><input type="radio" wire:model.live="dispatchMode" value="all"> Запрос — всем контактам по расценке сразу</label>
-                    <label class="flex items-center gap-1.5"><input type="radio" wire:model.live="dispatchMode" value="sequential"> Последовательно: по порядку, при молчании — следующему через</label>
-                    <input type="number" min="1" max="720" wire:model="escalateAfterHours" @disabled($dispatchMode !== 'sequential') class="{{ $inputCls }} !w-[70px]"> ч
+                    <label class="flex items-center gap-1.5"><input type="radio" wire:model.live="dispatchMode" value="primary"> Главный ящик — первый по порядку, остальные вторичные</label>
+                    <label class="flex items-center gap-1.5"><input type="radio" wire:model.live="dispatchMode" value="rotation"> По очереди — каждый новый запрос следующему ящику</label>
                 </div>
-                <div class="text-[11.5px] text-fg-4">Последовательно: если письмо не доставлено, следующий получает запрос сразу. Напоминания начинаются, когда пройдены все по порядку. Ответ любого сотрудника засчитывается ответом поставщика.</div>
+                <div class="text-[11.5px] text-fg-4">Один запрос уходит на один ящик и на другой не пересылается; напоминания — туда же. Запрос, отправленный менеджером на отмеченный адрес, уходит только на него — режим действует для автоматического перезапроса цен. Ответ любого сотрудника засчитывается ответом поставщика.</div>
 
                 @if($contactsError)<div class="text-red-700 text-[12.5px]">{{ $contactsError }}</div>@endif
                 <div class="flex gap-2">

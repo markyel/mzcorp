@@ -153,9 +153,10 @@ class QuotePartsInvite extends Component
     /** @var list<array{topic:string, email:?string, name:?string, position:int}> как поставщик сам распределил людей (его страница «Команда») */
     public array $supplierOwnContacts = [];
 
-    public string $dispatchMode = 'all';
+    /** Куда QuoteParts шлёт автоматический перезапрос цен: главному ящику или по очереди (ручной запрос — на отмеченный адрес). */
+    public const DISPATCH_MODES = ['primary', 'rotation'];
 
-    public int $escalateAfterHours = 48;
+    public string $dispatchMode = 'primary';
 
     public ?string $contactsError = null;
 
@@ -171,8 +172,7 @@ class QuotePartsInvite extends Component
         }
 
         $current = collect($link['contacts'] ?? [])->keyBy(fn ($c) => mb_strtolower($c['email']));
-        $this->dispatchMode = $link['dispatch_mode'] ?? 'all';
-        $this->escalateAfterHours = (int) ($link['escalate_after_hours'] ?? 48);
+        $this->dispatchMode = in_array($link['dispatch_mode'] ?? null, self::DISPATCH_MODES, true) ? $link['dispatch_mode'] : 'primary';
         $this->supplierOwnContacts = array_values((array) ($link['supplier_contacts'] ?? []));
 
         // Адреса фирмы из справочника + контакты, которые уже есть в QuoteParts.
@@ -205,10 +205,9 @@ class QuotePartsInvite extends Component
     public function saveContacts(QuotePartsSupplierService $service): void
     {
         $this->validate([
-            'dispatchMode' => ['required', 'in:all,sequential'],
-            'escalateAfterHours' => ['required', 'integer', 'min:1', 'max:720'],
+            'dispatchMode' => ['required', 'in:'.implode(',', self::DISPATCH_MODES)],
             'contactRows.*.position' => ['nullable', 'integer', 'min:1', 'max:100'],
-        ], [], ['escalateAfterHours' => 'часы до следующего', 'contactRows.*.position' => 'порядок']);
+        ], [], ['contactRows.*.position' => 'порядок']);
 
         $contacts = [];
         foreach ($this->contactRows as $row) {
@@ -232,7 +231,7 @@ class QuotePartsInvite extends Component
         }
 
         try {
-            $service->saveContacts($this->supplier, $contacts, $this->dispatchMode, $this->escalateAfterHours);
+            $service->saveContacts($this->supplier, $contacts, $this->dispatchMode);
         } catch (Throwable $e) {
             $this->contactsError = mb_substr($e->getMessage(), 0, 400);
 
