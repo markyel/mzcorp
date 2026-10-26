@@ -21,5 +21,19 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [\App\Http\Middleware\LogoutArchivedUser::class]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Временный сбой Яндекса (NO [UNAVAILABLE], обрыв на входе) задача переживает повтором — WARNING, не ERROR.
+        // Отказ во входе и прочие ошибки — ERROR как раньше; провал после всех повторов — ERROR (AppServiceProvider, JobFailed).
+        $exceptions->report(function (\Throwable $e) {
+            $cause = \App\Exceptions\Mail\TransientImapException::yandexOutage($e);
+            if ($cause === null) {
+                return;
+            }
+            \Illuminate\Support\Facades\Log::warning('IMAP: transient Yandex failure, the job will retry', [
+                'cause' => $cause,
+                'exception' => $e::class,
+                'at' => collect($e->getTrace())->first(fn (array $f) => str_starts_with($f['class'] ?? '', 'App\\'))['class'] ?? null,
+            ]);
+
+            return false;
+        });
     })->create();

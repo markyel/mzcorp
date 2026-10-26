@@ -35,5 +35,17 @@ class AppServiceProvider extends ServiceProvider
 
         // Переход статуса заявки из бота — уведомление клиенту в мессенджер.
         \App\Models\RequestStateChange::observe(\App\Observers\RequestStateChangeObserver::class);
+
+        // Временный сбой Яндекса пишется WARNING (bootstrap/app.php), пока задача повторяется;
+        // не прошла и после всех повторов — это уже ERROR.
+        \Illuminate\Support\Facades\Event::listen(function (\Illuminate\Queue\Events\JobFailed $event) {
+            $cause = \App\Exceptions\Mail\TransientImapException::yandexOutage($event->exception);
+            if ($cause !== null) {
+                \Illuminate\Support\Facades\Log::error('IMAP: job failed after all retries on a transient Yandex failure', [
+                    'job' => $event->job->resolveName(),
+                    'cause' => $cause,
+                ]);
+            }
+        });
     }
 }
