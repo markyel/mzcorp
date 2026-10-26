@@ -84,6 +84,20 @@ class ClassifyOutboundDocumentPromptTest extends TestCase
         $this->assertStringContainsString('Прошу выставить счет', $user);
     }
 
+    public function test_the_number_of_positions_and_partial_refusal_rules_reach_the_model(): void
+    {
+        // Отказ по одной позиции из нескольких / в одном варианте с альтернативой — не отказ по заявке (M-2026-20979).
+        $r = new Request();
+        $r->internal_code = 'M-2026-20979';
+        $r->status = RequestStatus::AwaitingClientClarification;
+        $r->client_email = 'client@example.com';
+        $messages = $this->prompt->build($this->message("к сожалению, не предложим такой в сборе\nготовы рассматривать поставку по-элементно?", 'Re: Указатель'), $r, 3);
+
+        $this->assertStringContainsString('Позиций в заявке: 3', (string) $messages[1]['content']);
+        $this->assertStringContainsString('ПО ВСЕЙ ЗАЯВКЕ', (string) $messages[0]['content']);
+        $this->assertStringContainsString('по-элементно', (string) $messages[1]['content']);
+    }
+
     public function test_empty_body_falls_back_to_placeholder(): void
     {
         $user = $this->userPrompt($this->message("   \r\n ", 'КП'));

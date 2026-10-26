@@ -35,6 +35,34 @@ class OutboundDocumentDetectionService
     ) {
     }
 
+    /** Отказ по заявке из нескольких позиций — ниже порога автоприменения: решает менеджер по плашке. */
+    public const MULTI_ITEM_DECLINE_CONFIDENCE = 0.8;
+
+    /** Отказ с продолжением — уточнение у клиента, как у rule-based (не авто, плашка). */
+    public const FOLLOWUP_CLARIFICATION_CONFIDENCE = 0.65;
+
+    /**
+     * «Отказ» (правила или LLM) — проверка, прежде чем закрыть заявку потерей:
+     *  - в своём тексте менеджера есть продолжение (вопрос, альтернатива, «если устроит…») — это
+     *    уточнение у клиента, а не отказ (M-2026-20979: «не предложим в сборе, готовы по-элементно?»);
+     *  - в заявке несколько позиций — отказ обычно по одной («башмаки не поставим», 3 позиции):
+     *    уверенность ниже порога, автозакрытия нет, менеджер подтверждает плашкой.
+     * За 60 дней до 26.10.2026 из 142 автозакрытий «отказом» 15 менеджеры откатили вручную.
+     *
+     * @return array{type: DetectorType, confidence: float, guard: ?string}
+     */
+    public static function guardDecline(float $confidence, ?string $followup, int $activeItems): array
+    {
+        if ($followup !== null) {
+            return ['type' => DetectorType::OutboundClarification, 'confidence' => min($confidence, self::FOLLOWUP_CLARIFICATION_CONFIDENCE), 'guard' => 'followup: '.$followup];
+        }
+        if ($activeItems > 1) {
+            return ['type' => DetectorType::OutboundDeclined, 'confidence' => min($confidence, self::MULTI_ITEM_DECLINE_CONFIDENCE), 'guard' => 'positions: '.$activeItems];
+        }
+
+        return ['type' => DetectorType::OutboundDeclined, 'confidence' => $confidence, 'guard' => null];
+    }
+
     public function run(EmailMessage $message, Request $request): void
     {
         try {
@@ -70,6 +98,22 @@ class OutboundDocumentDetectionService
                     && ($detected === null || $llm['confidence'] > $detected['confidence'])
                 ) {
                     $detected = $llm;
+                }
+            }
+            if ($detected !== null && $detected['type'] === DetectorType::OutboundDeclined) {
+                $guarded = self::guardDecline((float) $detected['confidence'], $this->outboundDetector->declineFollowup($message),
+                    $request->items()->where('is_active', true)->count());
+                if ($guarded['guard'] !== null) {
+                    Log::info('MailRouter: outbound decline guarded', [
+                        'email_message_id' => $message->id, 'request_id' => $request->id,
+                        'guard' => $guarded['guard'], 'type' => $guarded['type']->value, 'confidence' => $guarded['confidence'],
+                    ]);
+                    $detected['type'] = $guarded['type'];
+                    $detected['confidence'] = $guarded['confidence'];
+                    $detected['signals']['decline_guard'] = $guarded['guard'];
+                    if ($guarded['type'] !== DetectorType::OutboundDeclined) {
+                        unset($detected['suggested_closed_lost_reason'], $detected['cited_phrase']);
+                    }
                 }
             }
             if ($detected !== null) {

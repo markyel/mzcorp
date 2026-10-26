@@ -36,9 +36,10 @@ class ClassifyOutboundDocumentPrompt
     }
 
     /**
+     * @param  ?int  $positions  сколько позиций в заявке: отказ по одной из нескольких — не отказ по заявке
      * @return array<int, array{role: string, content: string}>
      */
-    public function build(EmailMessage $message, Request $request): array
+    public function build(EmailMessage $message, Request $request, ?int $positions = null): array
     {
         $body = $this->ownText($message);
         $body = mb_substr(trim($body), 0, self::MAX_BODY_CHARS);
@@ -62,6 +63,7 @@ class ClassifyOutboundDocumentPrompt
             . "Internal code: {$request->internal_code}\n"
             . "Текущий статус: {$request->status->value} ({$request->status->label()})\n"
             . "Клиент: " . ($request->client_name ?: $request->client_email) . "\n"
+            . ($positions !== null ? "Позиций в заявке: {$positions}\n" : '')
             . "\n"
             . "## ИСХОДЯЩЕЕ ПИСЬМО МЕНЕДЖЕРА\n"
             . "Subject: {$subject}\n"
@@ -159,7 +161,18 @@ class ClassifyOutboundDocumentPrompt
    ВАЖНО: если менеджер пишет «не наша номенклатура, но я могу уточнить
    у поставщика» / «пришлите фото — попробую найти» — это НЕ decline,
    это clarification (продолжение работы).
-   Decline = безусловный отказ + закрытие темы.
+   Decline = безусловный отказ ПО ВСЕЙ ЗАЯВКЕ + закрытие темы. Это НЕ decline:
+   • Отказ в одном варианте + другой вариант / вопрос клиенту: «к сожалению,
+     не предложим такой в сборе, готовы рассматривать поставку по-элементно?»,
+     «крышку отдельно не предложим, если вас устроит — тормоз в сборе»,
+     «с таким разъёмом нет, устроит с другим из наличия? <ссылка>»
+     → clarification (ждём решения клиента).
+   • Отказ по ОДНОЙ позиции, когда в заявке их несколько («башмаки не
+     поставим», «катушек под 15 мм нет») → other: остальное в работе.
+   • Отказ не в товаре, а в способе / условиях: доставка («со СДЭК не
+     работаем»), переделка счёта, дополнительная проверка, сроки → other
+     или clarification, если менеджер спрашивает («Так делаем?»).
+   Любой вопрос клиенту («?») после фразы отказа — НЕ decline.
 
 5. other — обычная переписка, не вызывающая авто-перехода статуса.
    • «Добрый день, мы получили ваш запрос, в работе», «уведомление о
@@ -188,7 +201,8 @@ class ClassifyOutboundDocumentPrompt
 • declined > clarification: если есть и фраза отказа, и просьба прислать
   что-то — приоритет clarification (продолжение).
 • Decline confidence ≤ 0.85 для НЕОДНОЗНАЧНЫХ случаев (содержит «но»,
-  предложение, follow-up). Чёткий короткий отказ — 0.9+.
+  предложение, follow-up, «если устроит», ссылку на наш товар). Чёткий
+  короткий отказ по всей заявке («не наш профиль») — 0.9+.
 • Confidence < 0.6 → принудительно other.
 • Empty body + PDF/XLSX без явного имени → если статус заявки
   assigned/in_progress, скорее всего quotation, conf 0.65-0.75.

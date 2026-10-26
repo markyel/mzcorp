@@ -49,8 +49,9 @@ class OutboundDocumentClassifier
         }
 
         $message->loadMissing('attachments');
+        $activeItems = $request->items()->where('is_active', true)->count();
 
-        $messages = $this->prompt->build($message, $request);
+        $messages = $this->prompt->build($message, $request, $activeItems);
         $model = (string) config('services.openai.outbound_classifier_model', 'gpt-4o-mini');
 
         try {

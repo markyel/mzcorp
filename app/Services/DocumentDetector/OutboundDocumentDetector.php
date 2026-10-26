@@ -109,6 +109,13 @@ class OutboundDocumentDetector
      * Если в письме рядом с decline-фразой есть один из этих маркеров —
      * это НЕ отказ (менеджер просит дополнительную информацию или предлагает
      * альтернативу). Возвращаем clarification / other вместо declined.
+     *
+     * Единый источник и для LLM-ветки (declineFollowup): модель закрывала заявки
+     * по «к сожалению, не предложим такой в сборе», не заметив «готовы
+     * рассматривать по-элементно?» + ссылку на наш товар (M-2026-20979, 26.10.2026;
+     * за 60 дней 15 таких закрытий менеджеры откатили вручную: «крышку отдельно
+     * не предложим, если вас устроит…», «устроит из наличия с другим разъёмом»,
+     * «со СДЭК не работаем… Так делаем?»). Вопрос клиенту («?») — тоже продолжение.
      */
     private const DECLINE_FOLLOWUP_KEYWORDS = [
         'но я',
@@ -124,6 +131,19 @@ class OutboundDocumentDetector
         'альтернатив',
         'предложить аналог',
         'попробую найти',
+        'аналог',
+        'устроит',
+        'готовы',
+        'предлагаю',
+        'можем предложить',
+        'только это',
+        'в сборе',
+        'по-элементно',
+        'поэлементно',
+        'с другим',
+        'из наличия',
+        'вместо',
+        '?',
     ];
 
     /**
@@ -352,6 +372,34 @@ class OutboundDocumentDetector
         foreach (self::QUOTATION_FILENAME_RE as $re) {
             if (preg_match($re, $filename) === 1) {
                 return DetectorType::OutboundQuotationFull;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Продолжение в собственном тексте менеджера (без цитаты клиента, подписи и темы):
+     * вопрос клиенту, альтернатива, просьба. Есть — письмо не отказ, даже если LLM
+     * так решила (OutboundDocumentClassifier). Возвращает найденный маркер или null.
+     */
+    public function declineFollowup(EmailMessage $message): ?string
+    {
+        $raw = (string) ($message->body_plain ?: strip_tags((string) $message->body_html));
+        $own = trim($raw) !== '' ? $this->cleaner->cutQuotedReplyTail($raw) : '';
+        $clean = $own !== '' ? $this->cleaner->cleanInboundReferenceText($own) : '';
+
+        return self::followupIn($clean !== '' ? $clean : $own);
+    }
+
+    /** То же по готовому тексту (для проверки без письма). */
+    public static function followupIn(string $text): ?string
+    {
+        $text = str_replace('ё', 'е', mb_strtolower($text));
+        foreach (self::DECLINE_FOLLOWUP_KEYWORDS as $kw) {
+            $normalized = str_replace('ё', 'е', mb_strtolower($kw));
+            if ($normalized !== '' && str_contains($text, $normalized)) {
+                return $kw;
             }
         }
 
