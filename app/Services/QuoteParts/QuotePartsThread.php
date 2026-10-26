@@ -5,6 +5,9 @@ namespace App\Services\QuoteParts;
 /**
  * Лента переписки с одним поставщиком по запросу QuoteParts из снимка запроса: наши письма
  * (запрос, напоминания), его ответы и наши ответы ему, события — по времени.
+ *
+ * Единственный источник ленты: её показывают «Актуализация цен», «Вопросы поставщиков», вкладка
+ * «Поставщики» заявки и «Снабжение» — одним диалогом (quote-parts._rfq-dialog).
  */
 final class QuotePartsThread
 {
@@ -15,12 +18,14 @@ final class QuotePartsThread
     public static function of(array $supplier): array
     {
         $s = $supplier;
+        $letters = collect($s['letters'] ?? []);
 
-        return collect($s['letters'] ?? [])->map(fn ($l) => ['direction' => 'out', 'kind' => 'letter', 'at' => $l['at'] ?? null, 'who' => ! empty($l['to']) ? 'кому: '.$l['to'] : null, 'subject' => $l['subject'] ?? null, 'text' => (string) ($l['text'] ?? ''), 'restored' => $l['restored'] ?? false, 'error' => $l['error'] ?? null, 'files' => []])
+        return $letters->map(fn ($l) => ['direction' => 'out', 'kind' => 'letter', 'at' => $l['at'] ?? null, 'who' => ! empty($l['to']) ? 'кому: '.$l['to'] : null, 'subject' => $l['subject'] ?? null, 'text' => (string) ($l['text'] ?? ''), 'restored' => $l['restored'] ?? false, 'error' => $l['error'] ?? null, 'files' => []])
             ->concat($s['thread'] ?? [])
             ->when(! empty($s['reminders_sent']), fn ($c) => $c->push(['direction' => 'event', 'at' => $s['last_reminder_at'] ?? null, 'text' => 'QuoteParts отправил напоминание'.($s['reminders_sent'] > 1 ? ' (всего '.$s['reminders_sent'].')' : '').' по позициям без ответа']))
             ->when(! empty($s['opened_at']), fn ($c) => $c->push(['direction' => 'event', 'at' => $s['opened_at'], 'text' => 'Поставщик открыл форму запроса']))
-            ->when(! empty($s['sent_at']), fn ($c) => $c->push(['direction' => 'event', 'at' => $s['sent_at'], 'text' => 'Запрос отправлен через QuoteParts']))
+            // Само письмо запроса и есть «отправлено»; событие — только если его копии в снимке нет.
+            ->when(! empty($s['sent_at']) && $letters->isEmpty(), fn ($c) => $c->push(['direction' => 'event', 'at' => $s['sent_at'], 'text' => 'Запрос отправлен через QuoteParts']))
             ->sortBy(fn ($m) => $m['at'] ?? '')->values()->all();
     }
 

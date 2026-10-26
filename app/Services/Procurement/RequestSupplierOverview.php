@@ -253,7 +253,7 @@ class RequestSupplierOverview
                         'files' => collect($m['files'] ?? [])->map(fn ($f) => ['name' => (string) ($f['name'] ?? 'file'), 'mime' => $f['mime'] ?? null,
                             'url' => isset($f['message_id'], $f['index']) ? route('quoteparts.rfq-file', [$rfq->remote_id, $f['message_id'], $f['index']] + (! empty($f['relay']) ? ['relay' => 1] : [])) : null])->filter(fn ($f) => $f['url'])->values()->all(),
                     ])->all(),
-                    'rfq_id' => (int) $rfq->id, 'tag' => $rfq->tag, 'remote_id' => $rfq->remote_id,
+                    'rfq_id' => (int) $rfq->id, 'tag' => $rfq->tag, 'remote_id' => $rfq->remote_id, 'supplier_key' => $key,
                 ];
             }
         }

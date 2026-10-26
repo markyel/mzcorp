@@ -1,6 +1,7 @@
-{{-- Диалог с одним поставщиком по запросу QuoteParts («Актуализация цен»): шапка одной строкой, открытые
-     вопросы с ответом, переписка чатом, поле ответа. Цены по позициям здесь не повторяем — они в карточке
-     позиции выше; отвеченные вопросы видны в переписке. Ждёт $rfq, $supplierNames, $onlySupplier, $refreshAction. --}}
+{{-- Диалог с одним поставщиком по запросу QuoteParts — единый вид переписки везде: «Актуализация цен», «Вопросы
+     поставщиков», вкладка «Поставщики» заявки, «Снабжение». Шапка одной строкой, открытые вопросы с ответом, переписка
+     чатом (QuotePartsThread::of), поле ответа. Цены по позициям здесь не повторяем — они в карточке позиции / строке
+     поставщика; отвеченные вопросы видны в переписке. Ждёт $rfq, $supplierNames, $onlySupplier, $refreshAction. --}}
 @php
     $snap = $rfq->snapshot ?? [];
     $tz = config('app.timezone');
@@ -12,11 +13,7 @@
     $openGroups = collect($snap['question_groups'] ?? [])->where('status', 'open')
         ->filter(fn ($g) => collect($g['questions'] ?? [])->contains('supplier', $onlySupplier))->values();
     $loose = $s ? collect($s['questions'] ?? [])->whereNull('group_id')->values() : collect();
-    $thread = $s ? collect($s['letters'] ?? [])->map(fn ($l) => ['direction' => 'out', 'kind' => 'letter', 'at' => $l['at'], 'who' => $l['to'] ? 'кому: '.$l['to'] : null, 'subject' => $l['subject'], 'text' => $l['text'], 'error' => $l['error'] ?? null, 'files' => []])
-        ->concat($s['thread'] ?? [])
-        ->when(! empty($s['reminders_sent']), fn ($c) => $c->push(['direction' => 'event', 'at' => $s['last_reminder_at'], 'text' => 'QuoteParts отправил напоминание'.($s['reminders_sent'] > 1 ? ' (всего '.$s['reminders_sent'].')' : '')]))
-        ->when(! empty($s['opened_at']), fn ($c) => $c->push(['direction' => 'event', 'at' => $s['opened_at'], 'text' => 'Поставщик открыл форму запроса']))
-        ->sortBy(fn ($m) => $m['at'] ?? '')->values()->all() : [];
+    $thread = $s ? \App\Services\QuoteParts\QuotePartsThread::of($s) : [];
 @endphp
 <style>
     .qd{border:1px solid var(--border);border-radius:8px;background:var(--bg-surface)}
@@ -47,6 +44,12 @@
         {{-- Открытые вопросы — то, что ждёт нашего ответа. --}}
         @if($openGroups->isNotEmpty() || $loose->isNotEmpty())
             <div class="qd-sec" style="display: flex; flex-direction: column; gap: 8px">
+                @if($openGroups->isNotEmpty() && $canAnswer && $rfq->request_id && method_exists($this, 'askClientAboutQuotePartsQuestions'))
+                    <div class="qd-row">
+                        <span class="qd-hint">Не знаете ответа — спросите клиента: черновик письма с вопросами по-русски, без имён поставщиков.</span>
+                        <button type="button" wire:click="askClientAboutQuotePartsQuestions({{ $rfq->id }})" class="btn btn-sm" style="margin-left: auto">✉ Спросить клиента</button>
+                    </div>
+                @endif
                 @foreach($openGroups as $g)
                     @php $askers = collect($g['questions'] ?? [])->pluck('supplier')->unique()->count(); $mine = collect($g['questions'] ?? [])->where('supplier', $onlySupplier); @endphp
                     <div wire:key="qpdg-{{ $rfq->id }}-{{ $g['id'] }}" class="qd-ask">

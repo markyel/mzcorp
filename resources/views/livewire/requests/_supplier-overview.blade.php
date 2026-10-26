@@ -94,14 +94,15 @@
         </section>
     @endif
 
-    {{-- B. Вопросы поставщиков (QuoteParts): открытые — карточкой с ответом, отвеченные — строкой. --}}
+    {{-- B. Вопросы поставщиков (QuoteParts): открытые — вопросом и кнопкой к переписке поставщика (ответ — там, тем же
+         диалогом, что в «Актуализации цен»), отвеченные — строкой. --}}
     @if($qs->isNotEmpty())
         @php $openQ = $qs->where('open', true); @endphp
         <section class="rs-card">
             <div class="rs-head">
                 <h2>Вопросы поставщиков</h2>
                 <span class="rs-pill {{ $openQ->isNotEmpty() ? 'attn' : 'ok' }}" style="font-weight: 600">{{ $openQ->isNotEmpty() ? $openQ->count().' без ответа' : 'все отвечены' }}</span>
-                <span class="rs-hint">через QuoteParts · ответ уходит всем, кто спросил</span>
+                <span class="rs-hint">через QuoteParts · ответ — в переписке с поставщиком, уходит всем, кто спросил</span>
             </div>
             @foreach($qs as $q)
                 @php $g = $q['group']; $rid = $q['rfq_id']; $gid = $q['group_id']; @endphp
@@ -131,38 +132,19 @@
                                 @endif
                             </div>
                         @endforeach
-                        @if($canAnswer)
-                            @php $needsEn = $this->quotePartsGroupNeedsEnglish($g); @endphp
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px">
-                                <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 500; color: var(--fg-2)">Ответ по-русски
-                                    <textarea wire:model="qpGroupRu.{{ $rid }}.{{ $gid }}" rows="3" placeholder="Уйдёт всем, кто спросил" class="rs-ta"></textarea></label>
-                                @if($needsEn)
-                                    <label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 500; color: var(--fg-2)">
-                                        <span>English version <span style="font-weight: 400; color: var(--fg-3)">· поставщик пишет на английском</span></span>
-                                        <textarea wire:model="qpGroupEn.{{ $rid }}.{{ $gid }}" rows="3" placeholder="Нажмите «Перевести» или напишите сами" class="rs-ta"></textarea></label>
-                                @endif
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
-                                @if($needsEn)
-                                    <button type="button" wire:click="translateQuotePartsGroup({{ $rid }}, {{ $gid }})" wire:loading.attr="disabled" wire:target="translateQuotePartsGroup" class="rs-btn">
-                                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>Перевести</button>
-                                @endif
-                                <label class="rs-btn ghost">
-                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>Файлы
-                                    <input type="file" multiple wire:model="qpGroupFiles.{{ $rid }}.{{ $gid }}" style="display: none" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx,.zip"></label>
-                                @foreach($qpGroupFiles[$rid][$gid] ?? [] as $up)
-                                    <span class="rs-file" style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ $up->getClientOriginalName() }}</span>
-                                @endforeach
-                                <span wire:loading wire:target="qpGroupFiles.{{ $rid }}.{{ $gid }}" class="rs-hint">загружаем…</span>
-                                <button type="button" wire:click="askClientAboutQuotePartsQuestions({{ $rid }})" class="rs-btn ghost" title="Черновик письма клиенту с этими вопросами по-русски, без имён поставщиков — откроется в редакторе">
-                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>Спросить клиента</button>
+                        {{-- Ответ — в переписке поставщика ниже (тот же диалог, что в «Актуализации цен»): там вопрос, ответ
+                             всем спросившим, перевод, файлы и «Спросить клиента». --}}
+                        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+                            @foreach($q['supplier_keys'] as $ki => $key)
+                                <button type="button" x-on:click="$dispatch('rs-open-supplier', { rfq: {{ (int) $rid }}, key: @js($key) })" class="rs-btn {{ $loop->first ? 'accent' : '' }}">
+                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>{{ $canAnswer ? 'Переписка и ответ' : 'Переписка' }}{{ count($q['supplier_keys']) > 1 ? ' · '.($q['suppliers'][$ki] ?? $key) : '' }}</button>
+                            @endforeach
+                            @if($canAnswer)
                                 <span style="flex: 1 1 160px"></span>
                                 <button type="button" wire:click="closeQuotePartsQuestions({{ $rid }}, {{ $gid }})" wire:confirm="Закрыть вопрос без ответа? Поставщикам ничего не уйдёт, вопрос перейдёт в отвеченные."
                                         class="rs-btn ghost" style="color: var(--fg-3)">Закрыть без ответа</button>
-                                <button type="button" wire:click="answerQuotePartsGroup({{ $rid }}, {{ $gid }})" wire:loading.attr="disabled" wire:target="answerQuotePartsGroup" class="rs-btn accent">
-                                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>Ответить всем · {{ count($q['supplier_keys']) }}</button>
-                            </div>
-                        @endif
+                            @endif
+                        </div>
                     </div>
                 @else
                     <div wire:key="rsq-{{ $rid }}-{{ $gid }}" style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 10px 20px; border-bottom: 1px solid var(--border); font-size: 12px">
@@ -270,7 +252,9 @@
                     </div>
                     @foreach($sups as $s)
                         @php [$stl, $stt] = $statusChip[$s['status']] ?? [$s['status'], 'neutral']; @endphp
-                        <div wire:key="rss-{{ $s['id'] }}" x-data="{ open: false }" style="border-bottom: 1px solid var(--border)">
+                        {{-- «Переписка и ответ» у вопроса выше раскрывает строку своего поставщика (rs-open-supplier). --}}
+                        <div wire:key="rss-{{ $s['id'] }}" x-data="{ open: false }" style="border-bottom: 1px solid var(--border)"
+                             @if($s['channel'] === 'quoteparts') x-on:rs-open-supplier.window="if ($event.detail.rfq === {{ (int) $s['rfq_id'] }} && $event.detail.key === @js($s['supplier_key'])) { open = true; $nextTick(() => $el.scrollIntoView({ behavior: 'smooth', block: 'start' })) }" @endif>
                             <div class="rs-sgrid rs-srow" :class="open && 'open'" x-on:click="open = ! open">
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--fg-3); transition: transform 120ms" :style="open && 'transform: rotate(90deg)'"><path d="m9 18 6-6-6-6"/></svg>
                                 <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
@@ -283,6 +267,10 @@
                                 <span class="rs-hint tnum" style="text-align: right; color: var(--fg-2); white-space: nowrap">{{ $s['last'] }}</span>
                             </div>
                             <div x-show="open" x-cloak style="padding: 4px 20px 16px 52px">
+                                @if($s['channel'] === 'quoteparts' && ($qpRfq = $ov->rfqs()->firstWhere('id', $s['rfq_id'])) !== null)
+                                    {{-- QuoteParts — тем же диалогом, что в «Актуализации цен»: вопросы с ответом, переписка, ответ поставщику. --}}
+                                    @include('livewire.quote-parts._rfq-dialog', ['rfq' => $qpRfq, 'supplierNames' => $ov->supplierNames(), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $s['supplier_key']])
+                                @else
                                 @forelse($s['thread'] as $m)
                                     @php
                                         $from = (string) ($m['from'] ?? '');
@@ -306,15 +294,13 @@
                                 @empty
                                     <div class="rs-hint" style="padding: 8px 0; border-top: 1px solid var(--border-subtle)">Писем пока нет.</div>
                                 @endforelse
-                                <div style="display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border-subtle)">
-                                    @if($s['channel'] === 'quoteparts')
-                                        <button type="button" wire:click="refreshQuotePartsRfq({{ $s['rfq_id'] }})" wire:loading.attr="disabled" wire:target="refreshQuotePartsRfq" class="rs-btn">Обновить</button>
-                                        <a href="{{ $qpUrl }}/rfqs/{{ $s['remote_id'] }}" target="_blank" rel="noopener" class="rs-btn" style="text-decoration: none">{{ trim((string) $s['tag'], '[]') }} в QuoteParts ↗</a>
-                                    @elseif(empty($s['loose']))
+                                @if(empty($s['loose']) && $s['channel'] === 'mail')
+                                    <div style="display: flex; gap: 6px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border-subtle)">
                                         <a href="{{ route('suppliers.show', $s['inquiry_id']) }}" wire:navigate class="rs-btn" style="text-decoration: none">Ответить поставщику</a>
                                         <a href="{{ route('suppliers.show', $s['inquiry_id']) }}" wire:navigate class="rs-btn ghost" style="color: var(--sky-700); text-decoration: none">Открыть запрос №{{ $s['inquiry_id'] }}</a>
-                                    @endif
-                                </div>
+                                    </div>
+                                @endif
+                                @endif
                             </div>
                         </div>
                     @endforeach

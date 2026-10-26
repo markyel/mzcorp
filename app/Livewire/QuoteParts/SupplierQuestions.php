@@ -38,16 +38,18 @@ class SupplierQuestions extends Component
     #[Reactive]
     public string $search = '';
 
-    /** Открытая переписка: «{id запроса}|{ключ поставщика}|{группа вопроса или 0}» — под одним вопросом. */
+    /**
+     * Открытая переписка: «{id запроса}|{ключ поставщика}». Диалог один на поставщика в запросе — в нём все
+     * его открытые вопросы с ответом; показывается под первым его вопросом (не под каждым — дубль).
+     */
     public ?string $dialog = null;
 
     /** @var list<int> раскрытые карточки позиций каталога */
     public array $openItems = [];
 
-    public function openDialog(int $rfqId, string $supplierKey, int $groupId, QuotePartsRfqService $rfqs): void
+    public function openDialog(int $rfqId, string $supplierKey, QuotePartsRfqService $rfqs): void
     {
-        // Под тем вопросом, который нажали: у поставщика бывает несколько вопросов в одном запросе.
-        $key = $rfqId.'|'.$supplierKey.'|'.$groupId;
+        $key = $rfqId.'|'.$supplierKey;
         $this->dialog = $this->dialog === $key ? null : $key;
         if ($this->dialog !== null) {
             try {
