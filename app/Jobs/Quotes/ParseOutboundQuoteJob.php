@@ -281,6 +281,10 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                 }
             });
 
+            // КП с номером 1С другой заявки этого клиента, отправленный в чужой тред, —
+            // дальше (матчинг, каталог, статус «КП отправлено») работаем с его заявкой.
+            $request = $this->rerouteToDocumentOwner($request, $message, $quote);
+
             // Cтоп: items нет — нечего матчить.
             $quote->refresh();
             if ($quote->items()->count() === 0) {
@@ -562,6 +566,57 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
                 'seeded' => $seeded,
             ]);
         }
+    }
+
+    /**
+     * КП, отправленный в тред другой заявки того же клиента, переходит к заявке, чей номер
+     * 1С на нём стоит (OutboundQuoteRequestResolver). Письмо остаётся в своём треде; решение
+     * «Отправлено КП», записанное по письму заявке треда, переносится на заявку документа.
+     * Счёт не переносим: его номер — не номер заявки в 1С.
+     */
+    private function rerouteToDocumentOwner(Request $request, EmailMessage $message, OutboundQuote $quote): Request
+    {
+        $quotationTypes = [DetectorType::OutboundQuotationFull, DetectorType::OutboundQuotationPartial];
+        if (! in_array(DetectorType::tryFrom($this->documentType), $quotationTypes, true)) {
+            return $request;
+        }
+        $owner = app(\App\Services\Quotes\OutboundQuoteRequestResolver::class)->resolve($request, $quote->document_number);
+        if ($owner === null) {
+            return $request;
+        }
+
+        $quote->request_id = $owner->id;
+        $quote->payload = array_merge(is_array($quote->payload) ? $quote->payload : [], [
+            'rerouted_from_request_id' => $request->id,
+            'rerouted_reason' => 'document_number_is_onec_number',
+        ]);
+        $quote->save();
+        $quote->setRelation('request', $owner);
+
+        $decisions = app(AiDecisionService::class);
+        $suggested = AiDecision::query()
+            ->where('request_id', $request->id)
+            ->where('email_message_id', $message->id)
+            ->whereIn('detector_type', array_map(fn (DetectorType $t) => $t->value, $quotationTypes))
+            ->where('status', AiDecisionStatus::Suggested->value)
+            ->get();
+        foreach ($suggested as $decision) {
+            $decisions->dismiss($decision);
+            $decisions->recordSuggestion($decision->detector_type, $owner, $message, (float) $decision->confidence, array_merge(
+                is_array($decision->payload) ? $decision->payload : [],
+                ['rerouted_from_request_id' => $request->id, 'rerouted_from_decision_id' => $decision->id],
+            ));
+        }
+
+        Log::info('ParseOutboundQuoteJob: quote belongs to the request with its 1C number — rerouted', [
+            'quote_id' => $quote->id,
+            'document_number' => $quote->document_number,
+            'thread_request_id' => $request->id,
+            'owner_request_id' => $owner->id,
+            'decisions_moved' => $suggested->pluck('id')->all(),
+        ]);
+
+        return $owner;
     }
 
     /**
