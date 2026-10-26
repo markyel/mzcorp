@@ -58,7 +58,7 @@
                                             @if(($of['kind'] ?? 'original') !== 'original')
                                                 @php $rv = \App\Models\QuotePartsOffer::query()->where('remote_id', $of['id'] ?? 0)->value('review_status'); @endphp
                                                 <span class="chip chip-sky text-[10.5px]">{{ \App\Models\QuotePartsOffer::kindLabel($of['kind']) }}</span>
-                                                <span class="chip {{ $rv === 'accepted' ? 'chip-ok' : ($rv === 'rejected' ? 'chip-neutral' : 'chip-warn') }} text-[10px]" title="Отклонения разбирает снабжение: «Снабжение» → ответы поставщиков">{{ ['accepted' => 'принято к закупке', 'rejected' => 'отклонено'][$rv] ?? 'на разборе' }}</span>
+                                                <span class="chip {{ $rv === 'accepted' ? 'chip-ok' : ($rv === 'rejected' ? 'chip-neutral' : 'chip-warn') }} text-[10px]" title="{{ \Illuminate\Support\Str::ucfirst(\App\Models\QuotePartsOffer::kindLabel($of['kind'])) }}: {{ \App\Models\QuotePartsOffer::kindHint($of['kind']) }}. Проверяет снабжение: «Снабжение» → ответы поставщиков">{{ \App\Models\QuotePartsOffer::reviewLabel($rv) }}</span>
                                                 @if(! empty($of['product']))<span class="mono text-[11.5px] text-fg-2">{{ trim(($of['product']['brand'] ?? '').' '.($of['product']['part_number'] ?? '')) }}</span>@endif
                                             @endif
                                             @foreach($of['tiers'] as $t)

@@ -214,7 +214,7 @@
                                     <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--fg-2); min-width: 0">
                                         @if($r['state'] === 'priced')
                                             <span>{{ implode(' · ', $r['terms']) }}</span>
-                                            @if($r['review'])<span class="rs-review">на разборе · {{ $r['kind'] === 'copy' ? 'вопрос о копии' : 'не оригинал' }}</span>@endif
+                                            @if($r['review'])<span class="rs-review" title="{{ \Illuminate\Support\Str::ucfirst(\App\Models\QuotePartsOffer::kindLabel($r['kind'])) }}: {{ \App\Models\QuotePartsOffer::kindHint($r['kind']) }}. Цена позиции — после «Принять к закупке» в «Снабжении»">{{ \App\Models\QuotePartsOffer::reviewLabel(null) }}</span>@endif
                                         @elseif($r['state'] === 'refused')
                                             <span>{{ ! empty($r['note']) ? '«'.\Illuminate\Support\Str::limit($r['note'], 120).'»' : 'цену не дал' }}</span>
                                         @else

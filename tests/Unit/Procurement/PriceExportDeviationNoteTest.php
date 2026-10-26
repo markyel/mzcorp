@@ -13,7 +13,17 @@ class PriceExportDeviationNoteTest extends TestCase
     {
         $o = new QuotePartsOffer(['kind' => 'analog', 'brand' => 'Fermator', 'part_number' => 'FR-60', 'note' => 'подходит по размерам']);
 
-        $this->assertSame('аналог (не оригинал): Fermator FR-60 — подходит по размерам', PriceExportService::deviationNote($o));
+        $this->assertSame('аналог (другой производитель, не оригинал): Fermator FR-60 — подходит по размерам', PriceExportService::deviationNote($o));
+    }
+
+    public function test_a_replacement_is_the_makers_new_part_number_not_a_non_original(): void
+    {
+        // Замена Sicor (UniSystem, M15565): новый артикул производителя — не «не оригинал» и не б/у.
+        $o = new QuotePartsOffer(['kind' => 'replacement', 'brand' => 'Sicor', 'part_number' => 'ELT0206 + Support SUP0147']);
+
+        $this->assertSame('замена (новый артикул производителя вместо прежнего): Sicor ELT0206 + Support SUP0147', PriceExportService::deviationNote($o));
+        $this->assertStringNotContainsString('не оригинал', PriceExportService::deviationNote($o));
+        $this->assertSame('на проверке у снабжения', QuotePartsOffer::reviewLabel('pending'));
     }
 
     public function test_offer_comment_says_everything_important(): void
@@ -21,7 +31,7 @@ class PriceExportDeviationNoteTest extends TestCase
         $o = new QuotePartsOffer(['kind' => 'analog', 'brand' => 'Fermator', 'part_number' => 'FR-60', 'note' => 'подходит по размерам',
             'tiers' => [['min_qty' => 50, 'price' => 48.5], ['min_qty' => 10, 'price' => 52]], 'lead_time_days' => 30, 'valid_until' => '2026-12-31']);
 
-        $this->assertSame('аналог (не оригинал): Fermator FR-60 — подходит по размерам; мин. партия 10; цена по партиям: от 10 — 52; от 50 — 48,5; срок поставки 30 дн.',
+        $this->assertSame('аналог (другой производитель, не оригинал): Fermator FR-60 — подходит по размерам; мин. партия 10; цена по партиям: от 10 — 52; от 50 — 48,5; срок поставки 30 дн.',
             PriceExportService::offerComment($o));
     }
 

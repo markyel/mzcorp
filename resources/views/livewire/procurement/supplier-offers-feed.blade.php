@@ -15,7 +15,7 @@
             <option value="email">ответы на рассылку (письма)</option>
         </select>
         <label class="inline-flex items-center gap-1.5">
-            <input type="checkbox" wire:model.live="toReview" class="w-4 h-4 accent-sky-600"> только на разборе
+            <input type="checkbox" wire:model.live="toReview" class="w-4 h-4 accent-sky-600"> только на проверке у снабжения
             @if($pendingReview > 0)<span class="chip chip-warn text-[10.5px]">{{ $pendingReview }}</span>@endif
         </label>
         <input type="search" wire:model.live.debounce.400ms="search" placeholder="Артикул, позиция, поставщик" class="{{ $inp }} ml-auto w-64">

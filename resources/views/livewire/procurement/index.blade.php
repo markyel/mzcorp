@@ -370,7 +370,7 @@
                                     <div class="flex items-center gap-1.5">
                                         @if($resp['state'] === 'none')
                                         @elseif($resp['state'] === 'review')
-                                            <span class="chip chip-sky text-[10.5px]" title="Поставщик предложил аналог / копию / восстановленное — нужно разобрать">🔎 на разборе</span>
+                                            <span class="chip chip-sky text-[10.5px]" title="Поставщик предложил аналог, копию, восстановленное или замену — проверьте и примите к закупке">🔎 {{ \App\Models\QuotePartsOffer::reviewLabel(null) }}</span>
                                         @elseif($resp['state'] === 'quoted')
                                             <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10.5px] font-medium">
                                                 <span>💰 {{ $resp['best_price'] !== null ? number_format($resp['best_price'], 2, '.', ' ') : 'цена' }}{{ $resp['best_currency'] ? ' '.$resp['best_currency'] : ' ₽' }}</span>
@@ -420,7 +420,7 @@
                                                     @php $__g = collect($of['photos'] ?? [])->values()->map(fn ($u, $i) => ['src' => $u, 'name' => 'Фото '.($i + 1), 'dl' => $u])->all(); @endphp @foreach($__g as $__i => $ph)<a href="{{ $ph['src'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $__g, 'index' => $__i]) }})" class="text-sky-700 hover:underline text-[11px]">📷{{ count($__g) > 1 ? $__i + 1 : '' }}</a>@endforeach
                                                     {{-- Отклонение от запрошенного — разбор руками. --}}
                                                     @if(($of['review'] ?? null) === 'pending')
-                                                        <span class="chip chip-warn text-[10.5px]">на разборе</span>
+                                                        <span class="chip chip-warn text-[10.5px]" title="{{ \Illuminate\Support\Str::ucfirst(\App\Models\QuotePartsOffer::kindLabel($of['kind'] ?? null)) }}: {{ \App\Models\QuotePartsOffer::kindHint($of['kind'] ?? null) }}">{{ \App\Models\QuotePartsOffer::reviewLabel('pending') }}</span>
                                                         <button type="button" wire:click="acceptDeviation({{ $of['ref'] }})" class="btn btn-xs" title="Закупать этот вариант по запрошенной позиции: цена пойдёт как цена позиции">Принять к закупке</button>
                                                         <button type="button" wire:click="rejectDeviation({{ $of['ref'] }})" class="btn btn-xs btn-ghost">Отклонить</button>
                                                     @elseif(($of['review'] ?? null) === 'accepted')

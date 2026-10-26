@@ -78,9 +78,38 @@ class QuotePartsOffer extends Model
         'replacement' => 'замена',
     ];
 
+    /**
+     * Что значит вид предложения — для подсказок и комментария в 1С. «Не оригинал» — только копия и аналог:
+     * замена — новый артикул самого производителя, восстановленное — б/у оригинал (26.10.2026: «на разборе ·
+     * не оригинал» у замены Sicor читалось как «б/у с разборки»).
+     */
+    public const KIND_HINTS = [
+        'analog' => 'другой производитель, не оригинал',
+        'copy' => 'не оригинал',
+        'refurbished' => 'б/у оригинал, восстановленный',
+        'replacement' => 'новый артикул производителя вместо прежнего',
+    ];
+
+    /** Статус проверки снабжением (не оригинал / замена / б/у — цена позиции только после «Принять к закупке»). */
+    public const REVIEW_LABELS = [
+        self::REVIEW_PENDING => 'на проверке у снабжения',
+        self::REVIEW_ACCEPTED => 'принято к закупке',
+        self::REVIEW_REJECTED => 'отклонено',
+    ];
+
     public static function kindLabel(?string $kind): string
     {
         return self::KINDS[$kind ?? 'original'] ?? (string) $kind;
+    }
+
+    public static function kindHint(?string $kind): ?string
+    {
+        return self::KIND_HINTS[$kind ?? 'original'] ?? null;
+    }
+
+    public static function reviewLabel(?string $status): string
+    {
+        return self::REVIEW_LABELS[$status ?? self::REVIEW_PENDING] ?? self::REVIEW_LABELS[self::REVIEW_PENDING];
     }
 
     public function catalogItem(): BelongsTo
