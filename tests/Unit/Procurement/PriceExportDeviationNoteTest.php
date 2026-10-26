@@ -31,6 +31,15 @@ class PriceExportDeviationNoteTest extends TestCase
         $this->assertSame('срок поставки 7 дн.; уточнять наличие', PriceExportService::offerComment(new QuotePartsOffer(['tiers' => [['min_qty' => 1, 'price' => 3]], 'lead_time_days' => 7, 'note' => 'уточнять наличие'])));
     }
 
+    public function test_an_agents_price_names_the_real_supplier_first(): void
+    {
+        // UniSystem (агент, контрагент в 1С) — цена Sicor на замену ELT0206 + опора SUP0147.
+        $o = new QuotePartsOffer(['kind' => 'original', 'origin_supplier' => 'Sicor Italy', 'tiers' => [['min_qty' => 1, 'price' => 329]],
+            'lead_time_days' => 3, 'note' => 'ELT0206 €312 + Support SUP0147 €17']);
+
+        $this->assertSame('поставщик Sicor Italy; срок поставки 3 дн.; ELT0206 €312 + Support SUP0147 €17', PriceExportService::offerComment($o));
+    }
+
     public function test_mail_comment(): void
     {
         $this->assertSame('KM601 pulley: USD 52/pc, MOQ 10', PriceExportService::mailComment('30 days', "KM601 pulley:\n USD 52/pc, MOQ 10"));

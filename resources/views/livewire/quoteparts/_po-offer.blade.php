@@ -33,6 +33,7 @@
         <div class="pa-col" style="opacity: {{ $ignored || $r['stale'] ? .55 : 1 }}">
             <div class="pa-who">
                 <span class="pa-sup">{{ $r['supplier'] }}</span>
+                @if(! empty($r['origin']))<span class="pa-meta" title="Цена агента — от этого поставщика">→ {{ $r['origin'] }}</span>@endif
                 @if($isNew)<span class="pa-pill pa-pill-new">новое</span>@endif
                 @if($best === $r['id'])<span class="pa-pill pa-pill-ok">лучшее</span>@endif
                 @if($r['stale'])<span class="pa-pill pa-pill-neutral">устарело</span>@endif

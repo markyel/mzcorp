@@ -262,6 +262,10 @@ class PriceExportService
     {
         $num = fn ($v) => rtrim(rtrim(number_format((float) $v, 4, ',', ' '), '0'), ',');
         $parts = [];
+        // Цена агента (контрагент в 1С — агент): от какого реального поставщика.
+        if (trim((string) $o->origin_supplier) !== '') {
+            $parts[] = 'поставщик '.trim((string) $o->origin_supplier);
+        }
         if (($o->kind ?? 'original') !== 'original') {
             $parts[] = self::deviationNote($o);
         }

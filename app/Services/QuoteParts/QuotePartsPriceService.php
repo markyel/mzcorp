@@ -188,6 +188,8 @@ class QuotePartsPriceService
                 'part_number' => $o['product']['part_number'] ?? null,
                 'product_name' => $o['product']['name'] ?? null,
                 'note' => isset($o['note']) ? mb_substr((string) $o['note'], 0, 1000) : null,
+                // Цена агента — от какого реального поставщика (UniSystem: Sicor, Donati…).
+                'origin_supplier' => isset($o['origin_supplier']) ? mb_substr((string) $o['origin_supplier'], 0, 150) : null,
                 'photos' => (int) ($o['photos'] ?? 0),
                 'rfq_remote_id' => $o['rfq']['id'] ?? null,
                 'rfq_tag' => $o['rfq']['tag'] ?? null,

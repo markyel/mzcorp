@@ -48,6 +48,8 @@ class Supplier extends Model
             'quoteparts_invited_at' => 'datetime',
             'quoteparts_groups' => 'array',
             'quoteparts_offsystem' => 'boolean',
+            // Агент (UniSystem): ищет поставщиков для нас, в каждой его цене — реальный поставщик.
+            'quoteparts_agent' => 'boolean',
         ];
     }
 

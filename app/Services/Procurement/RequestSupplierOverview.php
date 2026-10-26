@@ -133,6 +133,8 @@ class RequestSupplierOverview
                             $rub = IqotCurrencyConverter::toRub($price, $of['currency'] ?? null);
                             $rows[$itemId][] = $base + [
                                 'id' => 'q'.($lo?->id ?? $of['id']), 'source' => 'quoteparts', 'ref' => $lo?->id, 'state' => 'priced',
+                                // Цена агента — от какого реального поставщика (контрагент остаётся агентом: supplier/key).
+                                'origin' => ($of['origin_supplier'] ?? null) ?: null,
                                 'kind' => $kind, 'price' => $price, 'currency' => (string) ($of['currency'] ?? ''), 'rub' => $rub['known'] ? $rub['rub'] : null,
                                 'terms' => array_values(array_filter([
                                     'от '.rtrim(rtrim(number_format((float) ($tier['min_qty'] ?? 1), 2, ',', ''), '0'), ',').' шт.',

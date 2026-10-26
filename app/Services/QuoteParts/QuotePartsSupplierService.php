@@ -105,6 +105,19 @@ class QuotePartsSupplierService
         $this->rememberGroups($supplier, $groups);
     }
 
+    /**
+     * Поставщик — агент (UniSystem): ищет поставщиков для нас, в каждой цене называет реального, и на позицию
+     * живут несколько его цен (по поставщику). Признак — у связи в QuoteParts; копия — у всех адресов организации.
+     */
+    public function setAgent(Supplier $supplier, bool $agent): void
+    {
+        $this->client->setAgent($supplier->quotepartsKey(), $agent);
+        Supplier::query()
+            ->when($supplier->supplier_organization_id, fn ($q, $org) => $q->where('supplier_organization_id', $org), fn ($q) => $q->whereKey($supplier->id))
+            ->update(['quoteparts_agent' => $agent]);
+        $supplier->quoteparts_agent = $agent;
+    }
+
     /** @param list<string>|null $groups */
     private function rememberGroups(Supplier $supplier, ?array $groups): void
     {

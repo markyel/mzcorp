@@ -54,6 +54,7 @@
                                     {{-- Все варианты поставщика по позиции: оригинал, аналог, копия, восстановленное, замена. --}}
                                     @foreach(($line['offers'] ?? []) ?: [$line['offer']] as $of)
                                         <div @class(['mt-1 pt-1 border-t border-border-subtle' => ! $loop->first])>
+                                            @if(! empty($of['origin_supplier']))<div class="text-[11.5px] font-medium text-fg-2" title="Цена агента — от этого поставщика">→ {{ $of['origin_supplier'] }}</div>@endif
                                             @if(($of['kind'] ?? 'original') !== 'original')
                                                 @php $rv = \App\Models\QuotePartsOffer::query()->where('remote_id', $of['id'] ?? 0)->value('review_status'); @endphp
                                                 <span class="chip chip-sky text-[10.5px]">{{ \App\Models\QuotePartsOffer::kindLabel($of['kind']) }}</span>

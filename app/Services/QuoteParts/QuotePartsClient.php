@@ -195,6 +195,22 @@ class QuotePartsClient
     }
 
     /**
+     * Поставщик — агент (ищет поставщиков для нас): в каждой его цене — реальный поставщик, на позицию
+     * несколько цен (по поставщику).
+     *
+     * @return array<string, mixed> связь, как её вернул QuoteParts
+     */
+    public function setAgent(string $key, bool $agent): array
+    {
+        $response = $this->http()->put('/api/v1/supplier-links/'.rawurlencode($key).'/agent', ['agent' => $agent]);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts agent: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * Какие группы товаров (cn / ru / eu) поставщик видит в кабинете; null — все.
      *
      * @param  list<string>|null  $groups

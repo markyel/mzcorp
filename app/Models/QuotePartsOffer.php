@@ -33,6 +33,8 @@ class QuotePartsOffer extends Model
         'part_number',
         'product_name',
         'note',
+        // Цена агента (UniSystem): реальный поставщик за ней — Sicor, Donati…; null — не агент или не назвал.
+        'origin_supplier',
         'photos',
         'review_status',
         'reviewed_by_user_id',

@@ -193,6 +193,7 @@
                                     <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0">
                                         <span style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
                                             <span style="font-weight: 600">{{ $r['supplier'] }}</span>
+                                            @if(! empty($r['origin']))<span class="rs-hint" title="Цена агента — от этого поставщика" style="color: var(--fg-2)">→ {{ $r['origin'] }}</span>@endif
                                             <span class="rs-ch {{ $r['channel'] }}">{{ $r['channel'] === 'quoteparts' ? 'QuoteParts' : 'письмо' }}</span>
                                             @if($p['cheapest'] && $p['cheapest']['id'] === $r['id'] && $p['offers'] > 1)<span class="rs-pill" style="font-size: 11px; font-weight: 600; padding: 0 6px; background: var(--emerald-600); color: #fff">дешевле всех</span>@endif
                                         </span>

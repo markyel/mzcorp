@@ -36,6 +36,18 @@
             </label>
         @endif
 
+        {{-- Агент (UniSystem): ищет поставщиков для нас — в каждой цене реальный поставщик, на позицию несколько цен. --}}
+        @if($supplier->quoteparts_link_id)
+            <label class="flex items-start gap-2 text-[12.5px] cursor-pointer">
+                <input type="checkbox" wire:click="toggleAgent" @checked($supplier->quoteparts_agent) class="w-4 h-4 mt-0.5 accent-sky-600">
+                <span>
+                    <span class="font-medium text-fg-1">Агент — ищет поставщиков для нас</span>
+                    <span class="block text-fg-3">В каждой его цене — реальный поставщик (Sicor, Donati…), на позицию живут несколько цен — по поставщику.
+                        В 1С контрагент — агент, реальный поставщик — в комментарии.</span>
+                </span>
+            </label>
+        @endif
+
         @if($status && ! $open)
             {{-- Какие группы товаров поставщик видит в кабинете. --}}
             <div class="flex flex-wrap items-center gap-3 text-[12.5px]">

@@ -840,6 +840,8 @@ class PriceOffers extends Component
             // Новый товар (T-…) — название из заявки, иначе как назвал поставщик.
             'name' => $ci?->name ?? $draftName ?? ($o->product_name ?: null),
             'supplier' => (string) ($o->supplier_name ?: $o->supplier_key),
+            // Цена агента — от какого реального поставщика (UniSystem → Sicor).
+            'origin' => $o->origin_supplier,
             'key' => $o->supplier_key,
             'counts' => $o->countsAsItemPrice(),
             'rfq_remote_id' => $o->rfq_remote_id,

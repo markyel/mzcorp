@@ -83,6 +83,26 @@ class QuotePartsInvite extends Component
         ]);
     }
 
+    /**
+     * Агент (UniSystem): ищет поставщиков для нас — в каждой его цене реальный поставщик, на позицию несколько
+     * цен (по поставщику); в 1С контрагент — агент, реальный поставщик — в комментарии.
+     */
+    public function toggleAgent(QuotePartsSupplierService $service): void
+    {
+        $agent = ! $this->supplier->quoteparts_agent;
+        try {
+            $service->setAgent($this->supplier, $agent);
+        } catch (Throwable $e) {
+            $this->error = mb_substr($e->getMessage(), 0, 400);
+
+            return;
+        }
+        \Illuminate\Support\Facades\Log::info('Supplier QuoteParts agent flag changed', [
+            'supplier_id' => $this->supplier->id, 'agent' => $agent, 'user_id' => auth()->id(),
+        ]);
+        $this->dispatch('toast', type: 'success', message: $agent ? 'Агент: в каждой цене — реальный поставщик, на позицию несколько цен.' : 'Больше не агент: одна цена на позицию.');
+    }
+
     public function saveGroups(QuotePartsSupplierService $service): void
     {
         $groups = array_values(array_intersect(\App\Models\SupplyGroup::codes(), $this->groups));
