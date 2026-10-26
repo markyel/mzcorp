@@ -31,7 +31,8 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\Support\Facades\Log::warning('IMAP: transient Yandex failure, the job will retry', [
                 'cause' => $cause,
                 'exception' => $e::class,
-                'at' => collect($e->getTrace())->first(fn (array $f) => str_starts_with($f['class'] ?? '', 'App\\'))['class'] ?? null,
+                // Самый внешний класс приложения в стеке — задача (SyncMailboxFolderJob…), а не MailboxConnector.
+                'at' => collect($e->getTrace())->last(fn (array $f) => str_starts_with($f['class'] ?? '', 'App\\'))['class'] ?? null,
             ]);
 
             return false;

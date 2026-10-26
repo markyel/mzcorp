@@ -56,10 +56,19 @@ class TransientYandexImapFailureTest extends TestCase
     public function test_a_transient_failure_is_reported_as_a_warning(): void
     {
         Log::spy();
+        $e = $this->droppedDuringLogin();
+        // Стек, как в прод-логе: Client->connect ← MailboxConnector->imapClient ← SyncMailboxFolderJob->handle ← контейнер.
+        (new \ReflectionProperty(\Exception::class, 'trace'))->setValue($e, [
+            ['class' => 'Webklex\PHPIMAP\Client', 'function' => 'connect'],
+            ['class' => 'App\Services\Mail\MailboxConnector', 'function' => 'imapClient'],
+            ['class' => 'App\Jobs\Mail\SyncMailboxFolderJob', 'function' => 'handle'],
+            ['class' => 'Illuminate\Container\BoundMethod', 'function' => 'call'],
+        ]);
 
-        app(ExceptionHandler::class)->report($this->droppedDuringLogin());
+        app(ExceptionHandler::class)->report($e);
 
-        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message, array $context) => $context['cause'] === 'empty response to AUTHENTICATE');
+        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message, array $context) => $context['cause'] === 'empty response to AUTHENTICATE'
+            && $context['at'] === 'App\Jobs\Mail\SyncMailboxFolderJob');
         Log::shouldNotHaveReceived('error');
     }
 
