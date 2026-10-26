@@ -71,6 +71,26 @@ class OutboundQuoteSinglePairTest extends TestCase
         ));
     }
 
+    public function test_the_clients_part_number_in_the_quote_line_is_enough(): void
+    {
+        $bearing = new CatalogItem(['sku' => 'M31331', 'name' => 'Подшипник 6003Z']);
+
+        $this->assertTrue($this->looksLikeSameItem(
+            $this->quoteLine('Подшипник 6003Z', 'M31331', $bearing),
+            $this->requestItem('Подшипник натяжного устройства', '6003Z'),
+        ));
+    }
+
+    public function test_a_short_part_number_is_not_evidence(): void
+    {
+        $drum = new CatalogItem(['sku' => 'M27212', 'name' => 'Барабан для канатов D=350mm L=150']);
+
+        $this->assertFalse($this->looksLikeSameItem(
+            $this->quoteLine('Барабан для канатов D=350mm L=150', 'M27212', $drum),
+            $this->requestItem('Микросхема ППЗУ для платы ПУ-1', '350'),
+        ));
+    }
+
     public function test_the_manufacturer_part_number_of_our_item_is_enough(): void
     {
         $roller = new CatalogItem(['sku' => 'M32178', 'name' => 'Ролик замка дверей AMD D=31,5мм W=19,5мм', 'brand' => 'KONE', 'articles' => ['KM601107G04']]);

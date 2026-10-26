@@ -37,6 +37,8 @@ class OutboundQuoteItemMatcher
     // fuzzy_name, потому что M-SKU уже найден в каталоге — сильный сигнал
     // правильности target'а; имя только подтверждает «та же позиция».
     private const CATALOG_NAME_THRESHOLD = 0.50;
+    // Step 3.5: артикул клиента короче — слишком общий, чтобы связать пару по нему.
+    private const SINGLE_PAIR_ARTICLE_MIN_LEN = 5;
     private const LLM_CONFIDENCE_SCORES = [
         'high' => 0.85,
         'medium' => 0.65,
@@ -214,8 +216,8 @@ class OutboundQuoteItemMatcher
 
     /**
      * Строка КП и позиция заявки похожи на один товар: два и больше общих значащих
-     * слова в названии (строки КП или нашего каталожного товара) либо общий артикул
-     * производителя у каталожного товара и клиента.
+     * слова в названии (строки КП или нашего каталожного товара) либо артикул клиента
+     * в строке КП или среди артикулов нашего товара.
      */
     private function looksLikeSameItem(OutboundQuoteItem $qi, RequestItem $ri): bool
     {
@@ -228,12 +230,15 @@ class OutboundQuoteItemMatcher
             }
         }
 
+        // Артикул клиента — в строке КП или у нашего товара («Подшипник 6003Z» ↔ «… [6003Z]»).
+        // Короткие токены не в счёт: «4015», «600» встречаются где угодно.
         $reqArticle = CatalogImportService::normalizeArticle($ri->parsed_article);
-        if ($reqArticle === null || $reqArticle === '' || $catalog === null) {
+        if ($reqArticle === null || mb_strlen($reqArticle) < self::SINGLE_PAIR_ARTICLE_MIN_LEN) {
             return false;
         }
-        foreach ([$catalog->brand_article, ...(array) ($catalog->articles ?? [])] as $article) {
-            if (CatalogImportService::normalizeArticle($article) === $reqArticle) {
+        $where = [$qi->raw_article, $qi->raw_name, $catalog?->name, $catalog?->brand_article, ...(array) ($catalog?->articles ?? [])];
+        foreach ($where as $text) {
+            if (str_contains((string) CatalogImportService::normalizeArticle($text), $reqArticle)) {
                 return true;
             }
         }
