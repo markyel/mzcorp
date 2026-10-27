@@ -64,7 +64,7 @@ class IqotMarket
                 if (! isset($s['net'])) {
                     continue;
                 }
-                $fromKp = ! is_numeric($s['price'] ?? null);
+                $fromKp = $s['from_kp'] ?? ! is_numeric($s['price'] ?? null);
                 $rows[] = [
                     'kind' => $fromKp || ($s['type'] ?? null) === 'kp' ? self::KIND_MAIL_KP : self::KIND_SITE,
                     'supplier' => self::readableDomain((string) ($s['domain'] ?? '—')), 'url' => $s['url'] ?? null, 'contacts' => null,
@@ -73,6 +73,7 @@ class IqotMarket
                     'net' => (float) $s['net'], 'delivery_days' => null, 'availability' => $s['availability'] ?? null,
                     'confirmed' => ! empty($s['flags']['email_confirmed']), 'mail_kp' => ! $fromKp && ! empty($s['kp']['price']) ? (float) $s['kp']['price'] : null,
                     'pages' => (int) ($s['pages'] ?? 1), 'date' => self::date($s['observed_at'] ?? null),
+                    'web_old' => isset($s['web_old']) ? (float) $s['web_old'] : null, 'doubtful' => ! empty($s['doubtful']),
                 ];
             }
         }
@@ -85,7 +86,9 @@ class IqotMarket
         }
 
         usort($rows, fn ($a, $b) => $a['net'] <=> $b['net']);
-        $nets = array_column($rows, 'net');
+        // «Сомнительные» цены сайтов в списке видны, но в лучшую, медиану и наше место не входят.
+        $factual = array_values(array_filter($rows, fn ($r) => empty($r['doubtful'])));
+        $nets = array_column($factual, 'net');
         $best = $nets === [] ? null : $nets[0];
         $median = null;
         if ($nets !== []) {
@@ -96,16 +99,16 @@ class IqotMarket
 
         return [
             'rows' => $rows,
-            'offers' => count($rows),
-            'from_requests' => count(array_filter($rows, fn ($r) => $r['kind'] === self::KIND_REQUEST)),
-            'from_monitoring' => count(array_filter($rows, fn ($r) => $r['kind'] !== self::KIND_REQUEST)),
+            'offers' => count($factual),
+            'from_requests' => count(array_filter($factual, fn ($r) => $r['kind'] === self::KIND_REQUEST)),
+            'from_monitoring' => count(array_filter($factual, fn ($r) => $r['kind'] !== self::KIND_REQUEST)),
             'best_net' => $best,
             'median_net' => $median,
             'our_net' => $ourNet,
             'our_gross' => $ourGross,
             'our_label' => $ourLabel,
             'our_rank' => $rank,
-            'total' => count($rows) + ($ourNet !== null ? 1 : 0),
+            'total' => count($factual) + ($ourNet !== null ? 1 : 0),
             'delta' => $ourNet !== null && $best ? round($ourNet - $best, 2) : null,
             'delta_pct' => $ourNet !== null && $best ? round(($ourNet - $best) / $best * 100, 1) : null,
             'request_date' => $pos?->analyzed_at,

@@ -67,7 +67,7 @@ class IqotMonitoringItem extends Model
         $rate = (float) app_setting('tax.vat_percent', config('services.tax.vat_percent', 22)) / 100;
         $gross = $catalogPrice ?? $this->catalogItem?->price;
         $ourNet = is_numeric($gross) && (float) $gross > 0 ? round((float) $gross / (1 + $rate), 2) : null;
-        $nets = array_values(array_filter(array_map(fn ($s) => $s['net'] ?? null, (array) ($this->sources ?? [])), 'is_numeric'));
+        $nets = array_values(array_filter(array_map(fn ($s) => empty($s['doubtful']) ? ($s['net'] ?? null) : null, (array) ($this->sources ?? [])), 'is_numeric'));
         $best = $nets === [] ? null : min($nets);
 
         return [

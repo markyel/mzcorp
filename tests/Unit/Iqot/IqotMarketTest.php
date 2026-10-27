@@ -81,4 +81,28 @@ class IqotMarketTest extends TestCase
         $mon->active = false;
         $this->assertSame(0, IqotMarket::for($cat, null, $mon)['offers']);
     }
+
+    public function test_doubtful_site_is_shown_but_not_counted_and_superseded_site_shows_the_kp_price(): void
+    {
+        $cat = new CatalogItem(['sku' => 'M00217', 'price' => 1220]);
+        $cat->id = 217;
+        $src = fn (string $domain, float $price, array $flags, ?array $kp = null) => ['domain' => $domain, 'url' => null, 'price' => $price, 'currency' => 'RUB',
+            'price_kind' => 'retail', 'status' => 'active', 'vat' => false, 'flags' => $flags, 'kp' => $kp];
+        $mon = new IqotMonitoringItem(['active' => true, 'sources' => IqotMonitoringService::cleanSources([
+            $src('cheap.ru', 300, ['doubtful' => true]),
+            $src('kp.ru', 700, ['web_superseded' => true, 'kp' => true], ['price' => 1100, 'currency' => 'RUB', 'vat_included' => false]),
+            $src('b.ru', 1200, []),
+        ], 22)]);
+
+        $m = IqotMarket::for($cat, null, $mon);
+        $this->assertSame(['cheap.ru', 'kp.ru', 'b.ru'], array_column($m['rows'], 'supplier'));
+        $this->assertSame([true, false, false], array_column($m['rows'], 'doubtful'));
+        $this->assertSame([IqotMarket::KIND_SITE, IqotMarket::KIND_MAIL_KP, IqotMarket::KIND_SITE], array_column($m['rows'], 'kind'));
+        $this->assertSame([null, 700.0, null], array_column($m['rows'], 'web_old'));
+        $this->assertSame(2, $m['offers'], 'the doubtful 300 is not a price');
+        $this->assertSame(1100.0, $m['best_net'], 'the site 700 was disproved by the KP 1100');
+        $this->assertSame(1, $m['our_rank']);
+        $this->assertSame(3, $m['total']);
+        $this->assertSame(['our_net' => 1000.0, 'rank' => 1, 'total' => 3, 'delta' => -100.0, 'delta_pct' => -9.1], $mon->comparison(1220));
+    }
 }

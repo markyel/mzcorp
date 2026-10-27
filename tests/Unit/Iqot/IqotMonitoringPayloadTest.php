@@ -90,6 +90,29 @@ class IqotMonitoringPayloadTest extends TestCase
         $this->assertSame(2, $clean[2]['pages']);   // страница «на перепроверке» не считается
     }
 
+    public function test_superseded_site_takes_the_kp_price_and_doubtful_site_stays_marked(): void
+    {
+        $src = fn (string $domain, ?float $price, array $flags, ?array $kp = null) => [
+            'domain' => $domain, 'url' => null, 'price' => $price, 'currency' => 'RUB', 'price_kind' => 'retail', 'status' => 'active',
+            'vat' => true, 'flags' => $flags, 'kp' => $kp,
+        ];
+        $clean = IqotMonitoringService::cleanSources([
+            $src('kp.ru', 500, ['web_superseded' => true], ['price' => 900, 'currency' => 'RUB', 'vat_included' => false]),
+            $src('nokp.ru', 800, ['web_superseded' => true]),          // флаг без КП — остаётся цена сайта
+            $src('doubt.ru', 100, ['doubtful' => true]),
+            $src('doubt.ru', 122, []),                                  // та же площадка: надёжная страница важнее дешёвой сомнительной
+            $src('fake.ru', 50, ['doubtful' => true]),
+        ], 22);
+
+        $this->assertSame(['fake.ru', 'doubt.ru', 'nokp.ru', 'kp.ru'], array_column($clean, 'domain'));
+        $this->assertSame([50.0, 122.0, 800.0, 900.0], array_column($clean, 'value'));
+        $this->assertSame([true, false, false, false], array_column($clean, 'doubtful'));
+        $this->assertSame([false, false, false, true], array_column($clean, 'from_kp'));
+        $this->assertSame(500.0, $clean[3]['web_old']);
+        $this->assertSame(900.0, $clean[3]['net'], 'НДС берём из КП, а не с сайта');
+        $this->assertSame(['doubt.ru', 'nokp.ru', 'kp.ru'], array_column(IqotMonitoringService::factualSources($clean), 'domain'));
+    }
+
     public function test_prices_are_compared_without_vat(): void
     {
         $src = fn (string $domain, ?float $price, ?bool $vat, array $extra = []) => array_merge([

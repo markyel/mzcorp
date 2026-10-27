@@ -24,7 +24,7 @@
                 </span>
             @endif
         @else
-            <span class="text-fg-3">цен пока нет</span>
+            <span class="text-fg-3">{{ $market['rows'] !== [] ? 'фактических цен нет — только сомнительные' : 'цен пока нет' }}</span>
         @endif
         <span class="text-fg-4">
             @if($mon){{ ! $mon->active ? 'мониторинг снят' : 'мониторинг: '.(\App\Models\IqotMonitoringItem::MATCH_LABELS[$mon->match_status] ?? 'отправлена') }}{{ $mon->prices_synced_at ? ', '.$mon->prices_synced_at->format('d.m H:i') : '' }}@endif
@@ -52,13 +52,14 @@
             </thead>
             <tbody>
                 @foreach($market['rows'] as $r)
-                    @if(! $ourShown && $market['our_net'] !== null && $market['our_net'] <= $r['net'])
+                    @php $doubtful = ! empty($r['doubtful']); @endphp
+                    @if(! $doubtful && ! $ourShown && $market['our_net'] !== null && $market['our_net'] <= $r['net'])
                         @php $ourShown = true; $n++; @endphp
                         @include('livewire.iqot._market-our-row', ['n' => $n, 'market' => $market, 'rub' => $rub])
                     @endif
-                    @php $n++; @endphp
-                    <tr class="border-t border-border-subtle align-top">
-                        <td class="py-1 pr-2 text-fg-4">{{ $n }}</td>
+                    @php if (! $doubtful) { $n++; } @endphp
+                    <tr class="border-t border-border-subtle align-top" @if($doubtful) style="opacity: .6" title="IQOT понизил доверие к этому сайту: его цену поймали на расхождении. В лучшую цену, медиану и наше место не входит." @endif>
+                        <td class="py-1 pr-2 text-fg-4">{{ $doubtful ? '—' : $n }}</td>
                         <td class="py-1 pr-2">
                             @if($r['url'])<a href="{{ $r['url'] }}" target="_blank" rel="noopener noreferrer" class="text-sky-700 hover:underline" @if($r['kind'] === \App\Services\Iqot\IqotMarket::KIND_REQUEST) title="Сайт поставщика по домену его почты" @endif>{{ $r['supplier'] }}</a>@else<span class="text-fg-1">{{ $r['supplier'] }}</span>@endif
                             @if($r['kind'] === \App\Services\Iqot\IqotMarket::KIND_REQUEST && $r['url'])<span class="text-fg-4 text-[11px]"> · {{ \App\Services\Iqot\IqotMarket::readableDomain((string) parse_url($r['url'], PHP_URL_HOST)) }}</span>@endif
@@ -69,6 +70,8 @@
                             <span class="chip {{ $kindClass[$r['kind']] }} text-[10px]">{{ $kindLabel[$r['kind']] }}</span>
                             @if($r['confirmed'])<span class="chip chip-sky text-[10px]" title="Поставщик подтвердил цену сайта по почте">подтверждена</span>@endif
                             @if(! empty($r['mail_kp']))<span class="chip chip-ok text-[10px]" title="Поставщик прислал КП по почте">КП {{ $rub($r['mail_kp']) }}</span>@endif
+                            @if(! empty($r['web_old']))<span class="chip chip-neutral text-[10px]" title="Цену сайта опровергло присланное КП — она справочная, в расчёт идёт цена КП">сайт <s>{{ $rub($r['web_old']) }}</s></span>@endif
+                            @if(! empty($r['doubtful']))<span class="chip chip-attn text-[10px]">сомнительная цена</span>@endif
                         </td>
                         <td class="py-1 pr-2 whitespace-nowrap mono text-right">
                             {{ number_format((float) $r['raw'], 0, ',', ' ') }} {{ $r['symbol'] }}

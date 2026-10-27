@@ -297,7 +297,8 @@ class IqotMonitoringService
      * по одному на поставщика.
      *  - отбрасываем «на перепроверке» (status=suspicious: резкий скачок цены), источники без цены
      *    сайта и без КП, оптовые уровни и не рубли — так же сопоставимые цены считает и IQOT;
-     *  - цена источника — цена сайта, а если её нет («по запросу») — цена КП;
+     *  - цена источника — цена сайта, а если её нет («по запросу») или IQOT её опроверг присланным
+     *    КП (flags.web_superseded) — цена КП; «сомнительные» сайты (flags.doubtful) помечаем doubtful;
      *  - сравниваем и сортируем БЕЗ НДС, как в разделе IQOT: цена «с НДС» делится на 1+ставка
      *    (tax.vat_percent). НДС не указан — считаем, что цена с НДС (розница сайтов), и помечаем;
      *  - несколько страниц одного поставщика (домен) — одна строка с его лучшей ценой; признаки
@@ -318,22 +319,29 @@ class IqotMonitoringService
                 ? (float) $s['kp']['price'] : null;
             $sitePrice = is_numeric($s['price'] ?? null) && (float) $s['price'] > 0 && strtoupper((string) ($s['currency'] ?? 'RUB')) === 'RUB'
                 ? (float) $s['price'] : null;
-            $value = $sitePrice ?? $kpPrice;
+            $flags = (array) ($s['flags'] ?? []);
+            // web_superseded: IQOT опроверг цену сайта присланным КП — берём цену КП, цена сайта справочная.
+            $superseded = ! empty($flags['web_superseded']) && $kpPrice !== null;
+            $fromKp = $superseded || $sitePrice === null;
+            $value = $fromKp ? $kpPrice : $sitePrice;
             if ($value === null) {
                 continue;
             }
-            $vat = $sitePrice !== null ? ($s['vat'] ?? null) : ($s['kp']['vat_included'] ?? null);
+            $vat = $fromKp ? ($s['kp']['vat_included'] ?? null) : ($s['vat'] ?? null);
             $s['value'] = $value;
             $s['vat'] = $vat === null ? null : (bool) $vat;
             $s['net'] = round($vat !== false && $rate > 0 ? $value / (1 + $rate) : $value, 2);
+            $s['from_kp'] = $fromKp;
+            $s['web_old'] = $superseded ? $sitePrice : null;
+            // doubtful: сайт поймали на расхождении — показываем с пометкой, в сводку и сравнение не берём.
+            $s['doubtful'] = ! empty($flags['doubtful']);
             $domain = mb_strtolower(trim((string) ($s['domain'] ?? ''))) ?: 'url:'.($s['url'] ?? count($byDomain));
             $prev = $byDomain[$domain] ?? null;
-            $flags = (array) ($s['flags'] ?? []);
             if ($prev !== null) {
                 $flags['kp'] = ! empty($flags['kp']) || ! empty($prev['flags']['kp']);
                 $flags['email_confirmed'] = ! empty($flags['email_confirmed']) || ! empty($prev['flags']['email_confirmed']);
                 $s['kp'] ??= $prev['kp'] ?? null;
-                if ($prev['net'] <= $s['net']) {
+                if ([! empty($prev['doubtful']), $prev['net']] <= [$s['doubtful'], $s['net']]) {
                     $prev['flags'] = $flags;
                     $prev['kp'] ??= $s['kp'];
                     $prev['pages'] = ($prev['pages'] ?? 1) + 1;
@@ -350,6 +358,17 @@ class IqotMonitoringService
         usort($out, fn ($a, $b) => $a['net'] <=> $b['net']);
 
         return $out;
+    }
+
+    /**
+     * Источники с фактической ценой — без «сомнительных» (flags.doubtful): по ним сводка и сравнение.
+     *
+     * @param  list<array<string, mixed>>  $clean  результат cleanSources
+     * @return list<array<string, mixed>>
+     */
+    public static function factualSources(array $clean): array
+    {
+        return array_values(array_filter($clean, fn ($s) => empty($s['doubtful'])));
     }
 
     /** @param  array<string, mixed>  $p  позиция из GET …/prices */
@@ -373,9 +392,10 @@ class IqotMonitoringService
         ], (array) ($p['sources'] ?? [])));
         // Сводку считаем сами — по очищенным источникам (без перепроверки и дублей поставщика).
         $clean = self::cleanSources($sources);
-        // Сводка — без НДС.
-        $values = array_column($clean, 'net');
-        $best = $clean[0] ?? null;
+        // Сводка — без НДС и без «сомнительных» сайтов (в sources они остаются, с пометкой).
+        $factual = self::factualSources($clean);
+        $values = array_column($factual, 'net');
+        $best = $factual[0] ?? null;
         $median = null;
         if ($values !== []) {
             $mid = intdiv(count($values), 2);
@@ -386,14 +406,14 @@ class IqotMonitoringService
             'last_priced_at' => isset($p['last_priced_at']) ? Carbon::parse($p['last_priced_at']) : null,
             'prices_changed_at' => isset($p['prices_changed_at']) ? Carbon::parse($p['prices_changed_at']) : null,
             'best_price' => $best['net'] ?? null,
-            'best_source' => $best === null ? null : (is_numeric($best['price'] ?? null) && (float) $best['price'] > 0 ? 'web' : 'kp'),
+            'best_source' => $best === null ? null : ($best['from_kp'] ? 'kp' : 'web'),
             'best_supplier_domain' => $best['domain'] ?? null,
             'best_url' => $best['url'] ?? null,
             'price_min' => $values !== [] ? min($values) : null,
             'price_median' => $median,
             'price_max' => $values !== [] ? max($values) : null,
-            'sources_priced' => count($clean),
-            'has_kp' => collect($clean)->contains(fn ($s) => ! empty($s['flags']['kp'])),
+            'sources_priced' => count($factual),
+            'has_kp' => collect($factual)->contains(fn ($s) => ! empty($s['flags']['kp'])),
             'sources' => json_encode($clean, JSON_UNESCAPED_UNICODE),
             'prices_synced_at' => now(),
         ]);
