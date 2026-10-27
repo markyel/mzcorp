@@ -500,7 +500,8 @@ class PriceOffers extends Component
             ->whereIn('quoteparts_code', $draftCodes)->whereNotNull('parsed_name')
             ->orderBy('id')->get(['quoteparts_code', 'parsed_name'])->unique('quoteparts_code')->pluck('parsed_name', 'quoteparts_code');
 
-        return $offers->map(fn (QuotePartsOffer $o) => self::row($o, $draftNames->get((string) $o->sku)))->values();
+        // toBase: пустая выборка иначе остаётся Eloquent-коллекцией, и её merge() со строками-массивами падает (getKey() on array).
+        return $offers->toBase()->map(fn (QuotePartsOffer $o) => self::row($o, $draftNames->get((string) $o->sku)))->values();
     }
 
     private function query()

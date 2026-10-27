@@ -56,4 +56,12 @@ class PriceOffersRowTest extends TestCase
         $this->assertSame('Контакт двери AT120', $m->invoke(null, $o, 'Контакт двери AT120')['name']);
         $this->assertSame('Door contact', $m->invoke(null, $o, null)['name'], 'no request name — as the supplier named it');
     }
+
+    public function test_no_offers_found_still_merges_with_other_rows(): void
+    {
+        $rows = (new \ReflectionMethod(PriceOffers::class, 'rowsOf'))->invoke(null, new \Illuminate\Database\Eloquent\Collection);
+
+        $this->assertNotInstanceOf(\Illuminate\Database\Eloquent\Collection::class, $rows, 'a search with no hits (?pq=m14) crashed the page with getKey() on array');
+        $this->assertCount(1, $rows->merge(collect([['sku' => 'M14']])));
+    }
 }
