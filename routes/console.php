@@ -253,7 +253,7 @@ Schedule::command('reports:weekly-generate --send')
     ->runInBackground();
 
 // Высвобождение хранилища: обнуление raw_source (сырой RFC822, ~464 КБ/письмо)
-// у писем ЗАКРЫТЫХ заявок и не-заявок (irrelevant) старше 3 дней. raw_source
+// у писем ЗАКРЫТЫХ заявок, не-заявок (irrelevant) и писем без заявки старше 3 дней. raw_source
 // открытых заявок сохраняется. email_messages раздувалась до 16 ГБ (94% БД) —
 // это бесконечный рост; крон ограничивает его по мере закрытия заявок.
 // autovacuum переиспользует освобождённое место. См. MailPruneRawSourceCommand.

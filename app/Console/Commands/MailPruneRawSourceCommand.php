@@ -13,9 +13,13 @@ use Illuminate\Support\Facades\Log;
  * с base64-вложениями, ~464 КБ/письмо — ~95% объёма таблицы) у писем, которым
  * он больше НЕ нужен:
  *   (A) связанных с ЗАКРЫТОЙ заявкой (closed_won / closed_lost), ИЛИ
- *   (B) НЕ классифицированных как заявка (category = irrelevant),
+ *   (B) НЕ классифицированных как заявка (category = irrelevant), ИЛИ
+ *   (C) НЕ привязанных ни к какой заявке (переписка с поставщиками, исходящие
+ *       без заявки, post_sale) — их не доставляют в личный ящик; к 2026-10 они
+ *       держали ~15 ГБ из 21 ГБ raw_source, рост ~9 ГБ/мес,
  * и старше `--days` (доставка оригинала в личный ящик идёт ~30 мин, ре-парс
  * читает вложения С ДИСКА — raw_source после обработки/закрытия не требуется).
+ * Черновики (is_draft) не трогаем.
  *
  * raw_source ОТКРЫТЫХ заявок сохраняется (возможен ре-парс / ре-доставка).
  * Идемпотентно, батчами. Место переиспользует autovacuum (без VACUUM FULL —
@@ -32,7 +36,7 @@ class MailPruneRawSourceCommand extends Command
         {--days=3 : Обрабатывать письма старше N дней}
         {--chunk=500 : Размер батча}';
 
-    protected $description = 'Обнулить raw_source у писем закрытых заявок и не-заявок (высвобождение места)';
+    protected $description = 'Обнулить raw_source у писем закрытых заявок, не-заявок и писем без заявки (высвобождение места)';
 
     /** Оценка среднего размера raw_source для отчёта (по замеру 2026-06-22). */
     private const AVG_RAW_BYTES = 464 * 1024;
@@ -44,17 +48,26 @@ class MailPruneRawSourceCommand extends Command
         $apply = (bool) $this->option('apply');
         $cutoff = now()->subDays($days);
 
-        $base = fn () => EmailMessage::query()
+        $closed = fn ($q) => $q->whereHas('relatedRequest', fn ($r) => $r->whereIn('status', [
+            RequestStatus::ClosedWon->value,
+            RequestStatus::ClosedLost->value,
+        ]));
+        $irrelevant = fn ($q) => $q->where('category', EmailCategory::Irrelevant->value);
+        $unlinked = fn ($q) => $q->whereNull('related_request_id');
+
+        $candidates = fn () => EmailMessage::query()
             ->whereNotNull('raw_source')
             ->where('created_at', '<', $cutoff)
-            ->where(function ($q) {
+            ->where(fn ($q) => $q->where('is_draft', false)->orWhereNull('is_draft'));
+
+        $base = fn () => $candidates()
+            ->where(function ($q) use ($closed, $irrelevant, $unlinked) {
                 // (A) письмо связано с ЗАКРЫТОЙ заявкой.
-                $q->whereHas('relatedRequest', fn ($r) => $r->whereIn('status', [
-                    RequestStatus::ClosedWon->value,
-                    RequestStatus::ClosedLost->value,
-                ]))
-                    // (B) письмо не является заявкой (нерелевантное / спам).
-                    ->orWhere('category', EmailCategory::Irrelevant->value);
+                $closed($q);
+                // (B) письмо не является заявкой (нерелевантное / спам).
+                $q->orWhere(fn ($q) => $irrelevant($q));
+                // (C) письмо не привязано ни к какой заявке.
+                $q->orWhere(fn ($q) => $unlinked($q));
             });
 
         $total = $base()->count();
@@ -71,6 +84,11 @@ class MailPruneRawSourceCommand extends Command
         }
 
         if (! $apply) {
+            // Разбивка по причинам (пересекаются: письмо без заявки бывает и irrelevant) — реальный объём.
+            foreach (['A закрытая заявка' => $closed, 'B irrelevant' => $irrelevant, 'C без заявки' => $unlinked] as $label => $scope) {
+                $row = $scope($candidates())->selectRaw('count(*) AS n, coalesce(sum(pg_column_size(raw_source)), 0) AS bytes')->toBase()->first();
+                $this->line(sprintf('  %s: %d писем, %.2f ГБ', $label, $row->n, $row->bytes / 1024 ** 3));
+            }
             $this->warn('DRY-RUN. Запусти с --apply, чтобы обнулить raw_source.');
 
             return self::SUCCESS;
