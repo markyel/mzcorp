@@ -7,7 +7,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Картинки OpenAI (gpt-image-1) через тот же прокси, что и чат.
+ * Картинки OpenAI (gpt-image-1.5, services.openai.media_cover.model) через тот же прокси, что и чат.
  *
  * generate — картинка по описанию; edit — по образцам: модель перерисовывает
  * то, что на присланных фото (input_fidelity=high держит форму и детали).
@@ -129,7 +129,7 @@ class OpenAIImageService
 
     private function model(): string
     {
-        return (string) config('services.openai.media_cover.model', 'gpt-image-1');
+        return (string) config('services.openai.media_cover.model', 'gpt-image-1.5');
     }
 
     private function timeout(): int

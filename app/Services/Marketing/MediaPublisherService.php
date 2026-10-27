@@ -44,7 +44,10 @@ class MediaPublisherService
     private const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
     /**
-     * @return array{ok: bool, message: string, url: ?string}
+     * retry — площадка недоступна, а на неё ничего не ушло: отправку можно
+     * повторить без риска дубля (MediaAutopilotService::retryFailed).
+     *
+     * @return array{ok: bool, message: string, url: ?string, retry?: bool}
      */
     public function publish(MediaPublication $publication): array
     {
@@ -82,7 +85,7 @@ class MediaPublisherService
 
         $res = $this->deliver($publication, $channel);
         if (! $res['ok']) {
-            return ['ok' => false, 'message' => $res['message'], 'url' => null];
+            return ['ok' => false, 'message' => $res['message'], 'url' => null, 'retry' => $res['retry'] ?? false];
         }
 
         $this->recordMirrors($publication, $channel);
@@ -191,7 +194,7 @@ class MediaPublisherService
      * Отправка материала на площадку и отметка о выходе — без зеркал и без
      * сдвига срока темы: это делает publish() один раз на выпуск.
      *
-     * @return array{ok: bool, message: string, url: ?string, external_id: ?string}
+     * @return array{ok: bool, message: string, url: ?string, external_id: ?string, retry?: bool}
      */
     private function deliver(MediaPublication $publication, MediaChannel $channel): array
     {
@@ -446,7 +449,8 @@ class MediaPublisherService
                 $r = $post([]);
             }
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => 'ВК не ответил: '.$e->getMessage(), 'url' => null, 'external_id' => null];
+            // Неудачный wall.post записи не создаёт: сбой соединения можно повторить.
+            return ['ok' => false, 'message' => 'ВК не ответил: '.$e->getMessage(), 'url' => null, 'external_id' => null, 'retry' => self::isConnectFailure($e)];
         }
 
         if (isset($r['error'])) {
@@ -825,6 +829,8 @@ class MediaPublisherService
         $api = 'https://api.telegram.org/bot'.$channel->secret('bot_token').'/';
         $chatId = $channel->secret('chat_id');
         $mode = $html ? 'HTML' : null;
+        // Альбом уже в канале — сбой на тексте следом повторять нельзя: альбом вышел бы дважды.
+        $albumSent = false;
 
         try {
             // С картинками пост уходит альбомом. Подпись у альбома всего 1024
@@ -864,7 +870,8 @@ class MediaPublisherService
                         'media' => json_encode($media, JSON_UNESCAPED_UNICODE),
                     ])->json();
 
-                if (! ($album['ok'] ?? false)) {
+                $albumSent = (bool) ($album['ok'] ?? false);
+                if (! $albumSent) {
                     Log::warning('MediaPublisherService: telegram album failed, falling back to text', [
                         'channel_id' => $channel->id,
                         'error' => $album['description'] ?? 'unknown',
@@ -884,7 +891,8 @@ class MediaPublisherService
                     'disable_web_page_preview' => true,
                 ]))->json();
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => 'Telegram не ответил: '.self::redactSecrets($e->getMessage()), 'url' => null, 'external_id' => null];
+            return ['ok' => false, 'message' => 'Telegram не ответил: '.self::redactSecrets($e->getMessage()), 'url' => null, 'external_id' => null,
+                'retry' => self::isConnectFailure($e) && ! $albumSent];
         }
 
         if (! ($r['ok'] ?? false)) {
@@ -1022,7 +1030,9 @@ class MediaPublisherService
                 }
             }
         } catch (\Throwable $e) {
-            return ['ok' => false, 'message' => 'MAX не ответил: '.$e->getMessage(), 'url' => null, 'external_id' => null];
+            // Повтор — только пока в канал ничего не ушло.
+            return ['ok' => false, 'message' => 'MAX не ответил: '.$e->getMessage(), 'url' => null, 'external_id' => null,
+                'retry' => self::isConnectFailure($e) && ! ($first['ok'] ?? false)];
         }
 
         return ['ok' => true, 'message' => 'Опубликовано.', 'url' => $first['url'], 'external_id' => $first['external_id']];

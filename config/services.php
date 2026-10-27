@@ -108,10 +108,11 @@ return [
         'tone_audit_model' => env('OPENAI_TONE_AUDIT_MODEL', 'gpt-4o-mini'),
         // Анонсовая обложка ассортиментного поста медиаплана (MediaCoverService):
         // одна сгенерированная картинка вместо фото позиций. Путь
-        // /v1/images/generations открыт на прокси 12.10.2026.
+        // /v1/images/generations открыт на прокси 12.10.2026. С 26.10.2026 нашему ключу
+        // gpt-image-1 отвечает «The model 'gpt-image-1' does not exist» — посты шли без обложек.
         'media_cover' => [
             'enabled' => (bool) env('MEDIA_COVER_ENABLED', true),
-            'model' => env('MEDIA_COVER_MODEL', 'gpt-image-1'),
+            'model' => env('MEDIA_COVER_MODEL', 'gpt-image-1.5'),
             'quality' => env('MEDIA_COVER_QUALITY', 'medium'),
             // Перерисовка деталей по каталожным фото и общая сцена (images/edits):
             // high держит мелкие детали — разъёмы, спицы, клеммы.
@@ -480,6 +481,9 @@ return [
         // Время ежедневного прогона медиаплана (МСК): по нему же раздел
         // показывает, когда выйдут ближайшие материалы.
         'autopilot_at' => env('MEDIA_AUTOPILOT_AT', '09:15'),
+        // До скольких (МСК) каждый час повторяется автопубликация, не ушедшая утром
+        // из-за связи с площадкой (27.10.2026: Telegram с сервера не отвечал).
+        'autopilot_retry_until' => env('MEDIA_AUTOPILOT_RETRY_UNTIL', '19:00'),
         // Сколько тем автопилот выпускает за рабочий день. Остальные ждут
         // следующего рабочего дня, в выходные не публикуем: 29.09 в Telegram
         // разом вышли три темы (заказчик: «растянуть на рабочую неделю»).

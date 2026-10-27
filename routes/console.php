@@ -502,6 +502,17 @@ Schedule::command('media:autopilot')
     ->onOneServer()
     ->runInBackground();
 
+// Автопубликация, не ушедшая утром из-за связи с площадкой (27.10: Telegram с
+// сервера не отвечал), повторяется каждый час до вечера. Очередь пуста — команда
+// ничего не делает. См. MediaAutopilotService::retryFailed.
+Schedule::command('media:autopilot --retry')
+    ->hourlyAt(45)
+    ->between((string) config('services.marketing.autopilot_at', '09:15'), \App\Services\Marketing\MediaAutopilotService::retryUntil())
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Сообщения клиентов в Telegram/MAX, которые менеджер не открыл за 10 минут, —
 // одним письмом-сводкой, не чаще раза в 15 минут. Сразу менеджер видит тост в
 // mzCorp (сигнал почты). См. BotChatDigestService.

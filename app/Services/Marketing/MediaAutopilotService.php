@@ -31,6 +31,9 @@ class MediaAutopilotService
 
     private const LAST_RUN_KEY = 'media:autopilot:last-run';
 
+    /** Автопубликации дня, не ушедшие из-за связи с площадкой: id материала => сделано повторов. Ключ + дата. */
+    private const RETRY_KEY = 'media:autopilot:retry:';
+
     public function __construct(
         private readonly MediaMaterialService $materials,
         private readonly MediaPublisherService $publisher,
@@ -121,6 +124,9 @@ class MediaAutopilotService
                 $out = $this->publisher->publish($res['publication']);
                 if ($out['ok']) {
                     $published++;
+                } elseif ($out['retry'] ?? false) {
+                    $this->queueRetry($res['publication']);
+                    $skipped[] = $topic->title.' → '.$channel->name.': '.$out['message'].' — повторим каждый час до '.self::retryUntil();
                 } else {
                     $skipped[] = $topic->title.' → '.$channel->name.': '.$out['message'];
                 }
@@ -142,6 +148,94 @@ class MediaAutopilotService
         $this->remember($publish, $drafted, $published, $skipped);
 
         return ['drafted' => $drafted, 'published' => $published, 'skipped' => $skipped];
+    }
+
+    /**
+     * Повтор автопубликаций дня, не ушедших из-за связи с площадкой: каждый час до
+     * вечера (routes/console.php). 27.10.2026 Telegram с сервера не отвечал (SSL
+     * connection timeout) — пост «Снижение цен» остался черновиком: прогон один, утром,
+     * и днём его никто не повторил.
+     *
+     * Повторяем только сбой, при котором на площадку ничего не ушло (retry от
+     * MediaPublisherService): обрыв после отправки мог уже опубликовать пост. Материал,
+     * который человек тем временем выпустил, отклонил или взял в работу, не трогаем.
+     * Очередь — на день: назавтра тему подхватит обычный прогон.
+     *
+     * @return array{published: int, waiting: int, dropped: int}
+     */
+    public function retryFailed(): array
+    {
+        $key = self::RETRY_KEY.now()->toDateString();
+        $queue = (array) Cache::get($key, []);
+        $published = 0;
+        $dropped = 0;
+        $lines = [];
+
+        foreach ($queue as $id => $attempts) {
+            $publication = MediaPublication::query()->with('channel')->find($id);
+            $channel = $publication?->channel;
+            if ($publication === null || $publication->status !== 'draft' || $channel === null || ! $channel->is_active || ! $channel->auto_publish) {
+                unset($queue[$id]);
+                $dropped++;
+
+                continue;
+            }
+
+            $out = $this->publisher->publish($publication);
+            $where = $publication->title.' → '.$channel->name;
+            if ($out['ok']) {
+                unset($queue[$id]);
+                $published++;
+                $lines[] = $where.': опубликовано повтором в '.now()->format('H:i');
+            } elseif ($out['retry'] ?? false) {
+                $queue[$id] = (int) $attempts + 1;
+            } else {
+                unset($queue[$id]);
+                $dropped++;
+                $lines[] = $where.': повтор не удался — '.$out['message'];
+            }
+        }
+
+        $queue === [] ? Cache::forget($key) : Cache::put($key, $queue, now()->endOfDay());
+        if ($lines !== []) {
+            $this->noteRetry($published, $lines);
+        }
+        if ($published + $dropped + count($queue) > 0) {
+            Log::info('MediaAutopilot: retry finished', ['published' => $published, 'waiting' => count($queue), 'dropped' => $dropped]);
+        }
+
+        return ['published' => $published, 'waiting' => count($queue), 'dropped' => $dropped];
+    }
+
+    /** До скольких (МСК) повторяем автопубликацию дня, «ЧЧ:ММ». */
+    public static function retryUntil(): string
+    {
+        return (string) config('services.marketing.autopilot_retry_until', '19:00');
+    }
+
+    private function queueRetry(MediaPublication $publication): void
+    {
+        $key = self::RETRY_KEY.now()->toDateString();
+        $queue = (array) Cache::get($key, []);
+        $queue[$publication->id] = 0;
+        Cache::put($key, $queue, now()->endOfDay());
+    }
+
+    /**
+     * Итог повтора — в итог утреннего прогона того же дня: раздел показывает,
+     * что пост всё-таки вышел.
+     *
+     * @param  list<string>  $lines
+     */
+    private function noteRetry(int $published, array $lines): void
+    {
+        $run = $this->lastRun();
+        if ($run === null || ! str_starts_with((string) $run['at'], now()->toDateString())) {
+            return;
+        }
+        $run['published'] = (int) $run['published'] + $published;
+        $run['skipped'] = array_values(array_unique([...$run['skipped'], ...$lines]));
+        Cache::put(self::LAST_RUN_KEY, $run, now()->addDays(30));
     }
 
     /**
