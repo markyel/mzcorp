@@ -22,11 +22,12 @@
                 $who = ! empty($c['supplier']) ? ($names[$c['supplier']] ?? $c['supplier']) : null;
                 $contact = trim(($c['contact_name'] ?? '').(! empty($c['contact_email']) ? ' <'.$c['contact_email'].'>' : ''));
             @endphp
-            <div wire:key="qps-{{ $c['id'] }}" class="border border-border rounded-md">
+            {{-- Письмо от поставщика видно сразу: полоса слева и плашка с его названием. --}}
+            <div wire:key="qps-{{ $c['id'] }}" class="border border-border rounded-md" @if($who) style="border-left: 3px solid var(--status-info-fg)" @endif>
                 <button type="button" wire:click="open({{ $c['id'] }})" class="w-full text-left px-3 py-2 flex flex-wrap items-center gap-2 hover:bg-hover">
                     <span class="font-medium text-fg-1">{{ $c['subject'] }}</span>
                     @if($who)
-                        <span class="chip chip-sky text-[10px]">{{ $who }}</span>
+                        <span class="chip chip-info text-[11px]" title="Адрес отправителя — среди поставщиков QuoteParts">🏭 Поставщик: <b>{{ $who }}</b></span>
                     @else
                         <span class="chip chip-neutral text-[10px]" title="Адреса нет среди поставщиков QuoteParts">не поставщик</span>
                     @endif
@@ -37,6 +38,9 @@
                 </button>
                 @if($activeId === $c['id'])
                     <div class="px-3 pb-3 space-y-1.5">
+                        @if($who && str_starts_with((string) $c['supplier'], 'sup:'))
+                            <div class="text-[12px]"><a href="{{ route('suppliers.registry-edit', (int) substr($c['supplier'], 4)) }}" wire:navigate class="text-sky-700 hover:underline">Карточка поставщика «{{ $who }}» →</a></div>
+                        @endif
                         @foreach($c['messages'] as $m)
                             <div wire:key="qpsm-{{ $m['id'] }}" class="rounded-md px-2.5 py-1.5 text-[12.5px] {{ $m['direction'] === 'out' ? 'bg-sky-50 border border-sky-200 ml-8' : 'bg-surface-2 border border-border-subtle mr-8' }}">
                                 <div class="text-[11px] text-fg-3 mb-0.5">

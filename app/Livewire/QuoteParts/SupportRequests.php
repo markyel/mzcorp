@@ -100,8 +100,9 @@ class SupportRequests extends Component
     }
 
     /**
-     * Отвечать по-английски: поставщику — по языку его карточки; тому, кого среди поставщиков нет, —
-     * если он написал не по-русски.
+     * Отвечать по-английски — по языку письма: написали по-русски — отвечаем по-русски, даже если в
+     * карточке поставщика английский (в поддержку пишет не обязательно тот, кто ведёт запросы). Текста нет —
+     * по языку карточки поставщика, а у того, кого среди поставщиков нет, — по-русски.
      *
      * @param  array<string, mixed>|null  $c
      */
@@ -110,12 +111,15 @@ class SupportRequests extends Component
         if ($c === null) {
             return false;
         }
+        $theirs = trim(collect($c['messages'] ?? [])->where('direction', 'in')->pluck('text')->implode(' '));
+        if ($theirs !== '') {
+            return ! preg_match('/\p{Cyrillic}/u', $theirs);
+        }
         if (! empty($c['supplier'])) {
             return (app(QuotePartsRfqService::class)->supplierLanguages([$c['supplier']])[$c['supplier']] ?? 'ru') === 'en';
         }
-        $theirs = collect($c['messages'] ?? [])->where('direction', 'in')->pluck('text')->implode(' ');
 
-        return $theirs !== '' && ! preg_match('/\p{Cyrillic}/u', $theirs);
+        return false;
     }
 
     /** Ждёт ответа: открыто, последнее сообщение — от того, кто писал. */

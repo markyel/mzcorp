@@ -36,6 +36,7 @@ class SupportRequestsTest extends TestCase
 
         $this->assertStringContainsString('Cannot sign in', $html);
         $this->assertStringContainsString('не поставщик', $html);
+        $this->assertStringNotContainsString('🏭 Поставщик', $html, 'no supplier — no supplier badge');
         $this->assertStringContainsString('Anna &lt;anna@newparts.example&gt;', $html);
         $this->assertStringContainsString('ждут ответа: 1', $html);
         $this->assertStringContainsString('The code does not come.', $html);
@@ -52,6 +53,9 @@ class SupportRequestsTest extends TestCase
         $c = new SupportRequests;
         $this->assertTrue($c->english($this->conversation()), 'wrote in English — the answer goes in English');
         $this->assertFalse($c->english($this->conversation(['messages' => [['direction' => 'in', 'text' => 'Не приходит код']]])));
+        // Поставщик с английской карточкой написал по-русски — отвечаем по-русски, в базу за языком не ходим.
+        $this->assertFalse($c->english($this->conversation(['supplier' => 'sup:68', 'messages' => [['direction' => 'in', 'text' => 'Тестовое письмо']]])));
+        $this->assertTrue($c->english($this->conversation(['supplier' => 'sup:68'])), 'wrote in English — English even for a supplier');
 
         $this->assertTrue(SupportRequests::waiting($this->conversation()));
         $answered = $this->conversation(['messages' => [['direction' => 'in', 'text' => 'Hi'], ['direction' => 'out', 'text' => 'Hello']]]);
