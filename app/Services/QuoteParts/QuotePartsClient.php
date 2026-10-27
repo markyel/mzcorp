@@ -335,6 +335,22 @@ class QuotePartsClient
     }
 
     /**
+     * Письма на support@quoteparts.net: обращения на тему support — от поставщиков и от тех, кого
+     * среди поставщиков нет (supplier = null, кто писал — contact_email/contact_name).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function supportConversations(): array
+    {
+        $response = $this->http()->get('/api/v1/conversations', ['topic' => 'support']);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts support conversations: HTTP '.$response->status());
+        }
+
+        return $response->json('conversations', []);
+    }
+
+    /**
      * @param  array<string, mixed>  $fields  supplier, topic, subject, text, author_ref, author_name, external_ref
      * @param  list<array{path:string, name:string}>  $files  локальные файлы
      * @return array<string, mixed>

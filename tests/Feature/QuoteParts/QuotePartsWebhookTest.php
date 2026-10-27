@@ -60,6 +60,15 @@ class QuotePartsWebhookTest extends TestCase
             && $job->payload['started_by'] === 'supplier');
     }
 
+    public function test_a_letter_to_support_keeps_its_sender(): void
+    {
+        $this->deliver(['event' => 'conversation.message', 'conversation_id' => 6, 'topic' => 'support', 'subject' => 'Cannot sign in', 'started_by' => 'supplier',
+            'supplier' => null, 'contact_email' => 'anna@newparts.example', 'contact_name' => 'Anna'])->assertStatus(202);
+
+        Queue::assertPushed(\App\Jobs\QuoteParts\HandleQuotePartsConversationJob::class, fn ($job) => $job->payload['topic'] === 'support'
+            && $job->payload['contact_email'] === 'anna@newparts.example' && $job->payload['contact_name'] === 'Anna');
+    }
+
     public function test_a_matched_price_list_is_queued_and_resolve_needs_the_signature(): void
     {
         $this->deliver(['event' => 'price_list.matched', 'price_list_id' => 9, 'supplier' => 'org:12', 'stats' => ['exact' => 17, 'check' => 3]])

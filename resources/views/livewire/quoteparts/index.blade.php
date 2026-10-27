@@ -293,6 +293,7 @@
     @endif
 
     @if($tab === 'questions')
+        <livewire:quote-parts.support-requests />
         <livewire:quote-parts.supplier-questions :search="$search" />
     @endif
 

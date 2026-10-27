@@ -231,7 +231,20 @@ class QuotePartsRfqService
 
     public function supplierNames(iterable $rfqs): \Illuminate\Support\Collection
     {
-        $keys = collect($rfqs)->flatMap(fn ($r) => collect($r->snapshot['suppliers'] ?? [])->pluck('external_id'))->filter()->unique();
+        return $this->namesByKeys(collect($rfqs)->flatMap(fn ($r) => collect($r->snapshot['suppliers'] ?? [])->pluck('external_id')));
+    }
+
+    /**
+     * Имена поставщиков по их ключам QuoteParts (org:… / sup:…).
+     *
+     * @param  iterable<string>  $keys
+     */
+    public function namesByKeys(iterable $keys): \Illuminate\Support\Collection
+    {
+        $keys = collect($keys)->filter()->unique();
+        if ($keys->isEmpty()) {
+            return collect();
+        }
         $orgIds = $keys->filter(fn ($k) => str_starts_with($k, 'org:'))->map(fn ($k) => (int) substr($k, 4));
         $supIds = $keys->filter(fn ($k) => str_starts_with($k, 'sup:'))->map(fn ($k) => (int) substr($k, 4));
 

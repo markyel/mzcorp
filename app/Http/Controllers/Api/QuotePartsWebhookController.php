@@ -64,7 +64,7 @@ class QuotePartsWebhookController extends Controller
         // Поставщик написал в обращении вне запросов — сказать автору обращения или снабжению.
         if ($event === 'conversation.message' && is_int($data['conversation_id'] ?? null)) {
             HandleQuotePartsConversationJob::dispatch(array_intersect_key($data, array_flip([
-                'conversation_id', 'tag', 'topic', 'subject', 'started_by', 'crm_author_ref', 'supplier', 'preview',
+                'conversation_id', 'tag', 'topic', 'subject', 'started_by', 'crm_author_ref', 'supplier', 'preview', 'contact_email', 'contact_name',
             ])));
 
             return response()->json(['ok' => true], 202);

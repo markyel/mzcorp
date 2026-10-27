@@ -64,7 +64,7 @@
                                 'quoteparts_question' => 'Поставщик спрашивает · ' . ($data['tag'] ?? 'QuoteParts') . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
                                 'quoteparts_ready' => 'Цены собраны, можно выбирать · ' . ($data['tag'] ?? 'QuoteParts') . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
                                 'quoteparts_price_list' => 'Прайс поставщика' . (! empty($data['supplier']) ? ' · ' . $data['supplier'] : ''),
-                                'quoteparts_conversation' => ($data['started_by'] ?? '') === 'supplier' ? 'Поставщик написал: ' . ($data['subject'] ?? '') : 'Ответ в обращении: ' . ($data['subject'] ?? ''),
+                                'quoteparts_conversation' => ($data['topic'] ?? '') === 'support' ? 'Письмо в поддержку QuoteParts: ' . ($data['subject'] ?? '') : (($data['started_by'] ?? '') === 'supplier' ? 'Поставщик написал: ' . ($data['subject'] ?? '') : 'Ответ в обращении: ' . ($data['subject'] ?? '')),
                                 default => 'Уведомление',
                             };
                             $subtitle = match($kind) {
@@ -95,7 +95,7 @@
                                 'quoteparts_reply', 'quoteparts_ready' => \App\Models\QuotePartsRfq::authorUrl($data['request_id'] ?? null, $data['tag'] ?? null, 'offers'),
                                 'quoteparts_question' => \App\Models\QuotePartsRfq::authorUrl($data['request_id'] ?? null, $data['tag'] ?? null, 'question'),
                                 'quoteparts_price_list' => route('procurement.index', ['tab' => 'pricelists', 'pl' => $data['price_list_id'] ?? null]),
-                                'quoteparts_conversation' => ! empty($data['supplier_id']) ? route('suppliers.registry-edit', $data['supplier_id']) : route('procurement.index'),
+                                'quoteparts_conversation' => ($data['topic'] ?? '') === 'support' ? route('quoteparts.index', ['tab' => 'questions']) : (! empty($data['supplier_id']) ? route('suppliers.registry-edit', $data['supplier_id']) : route('procurement.index')),
                                 'organization_link_pending' => isset($data['link_request_id']) ? route('clients.link-requests.show', $data['link_request_id']) : '#',
                                 default => $reqId ? route('requests.show', $reqId) : '#',
                             };
