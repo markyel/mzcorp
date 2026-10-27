@@ -43,6 +43,8 @@ class SupportRequestsTest extends TestCase
         $this->assertStringNotContainsString('Old question', $html, 'closed ones only on request');
         $this->assertStringContainsString('Old question', $c->set('withClosed', true)->html());
         Http::assertSent(fn ($r) => str_contains($r->url(), 'topic=support'));
+        // Счётчик вкладки «Поддержка» — ждёт ответа одно открытое письмо.
+        $this->assertSame(1, \Illuminate\Support\Facades\Cache::get(SupportRequests::WAITING_CACHE));
     }
 
     public function test_answer_language_and_waiting(): void

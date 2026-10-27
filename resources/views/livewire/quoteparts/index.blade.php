@@ -8,6 +8,7 @@
             'suppliers' => ['Поставщики', $this->invitedGroups->count(), null, null],
             'offers' => ['Актуализация цен', $this->freshOffersCount, null, null],
             'questions' => ['Вопросы поставщиков', null, $this->openQuestionsCount > 0 ? $this->openQuestionsCount : null, 'red'],
+            'support' => ['Поддержка', null, $this->supportWaitingCount ?: null, 'red'],
             'prices' => ['Закупки 1С', null, null, null],
             'groups' => ['Группы товаров', null, null, null],
             'pilot' => ['Пилот', null, $this->pilotSwitchedOn ? 'вкл' : 'выкл', $this->pilotSwitchedOn ? 'ok' : 'neutral'],
@@ -22,7 +23,9 @@
                 <h1 style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.2; letter-spacing: -0.005em; color: var(--fg-1)">{{ $tabs[$tab][0] ?? 'QuoteParts' }}</h1>
                 <div style="font-size: 12px; color: var(--fg-3); margin-top: 4px">{{ $tab === 'offers'
                     ? 'Ответы поставщиков на запросы цен. Решите по каждой позиции — закупаем, уточняем или игнорируем — и выгрузите решения в 1С.'
-                    : 'Тестирование. Передаём группы позиций из пула «К актуализации».' }}</div>
+                    : ($tab === 'support'
+                        ? 'Письма на support@quoteparts.net — от поставщиков и от тех, кого среди них нет. Ответ уходит письмом от «QuoteParts Support».'
+                        : 'Тестирование. Передаём группы позиций из пула «К актуализации».') }}</div>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap">
                 @if($tab === 'offers')
@@ -293,8 +296,11 @@
     @endif
 
     @if($tab === 'questions')
-        <livewire:quote-parts.support-requests />
         <livewire:quote-parts.supplier-questions :search="$search" />
+    @endif
+
+    @if($tab === 'support')
+        <livewire:quote-parts.support-requests />
     @endif
 
     @if($tab === 'prices')

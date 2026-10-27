@@ -9,7 +9,7 @@ use Illuminate\Notifications\Notification;
 /**
  * In-app уведомление: поставщик написал в обращении через QuoteParts (вне запросов цен).
  * kind=quoteparts_conversation; клик ведёт в карточку поставщика, к «Обращениям», а письмо на
- * support@ (topic=support) — на вкладку QuoteParts «Вопросы», где на него отвечают.
+ * support@ (topic=support) — на вкладку QuoteParts «Поддержка», где на него отвечают.
  */
 class QuotePartsConversationNotification extends Notification
 {

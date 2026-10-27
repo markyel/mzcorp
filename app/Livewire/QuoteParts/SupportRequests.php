@@ -6,12 +6,13 @@ use App\Services\QuoteParts\QuotePartsAnswerTranslator;
 use App\Services\QuoteParts\QuotePartsClient;
 use App\Services\QuoteParts\QuotePartsPilot;
 use App\Services\QuoteParts\QuotePartsRfqService;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 use Throwable;
 
 /**
- * Вкладка QuoteParts «Вопросы» → «Письма в поддержку»: письма на support@quoteparts.net (обращения
+ * Вкладка QuoteParts «Поддержка»: письма на support@quoteparts.net (обращения
  * QuoteParts на тему support). Пишут поставщики и те, кого среди них нет (новый поставщик, человек с
  * другой почты) — у таких нет карточки, только адрес. Ответ уходит письмом с support@ от «QuoteParts
  * Support» тому, кто писал; не по-русски — английский вариант, его можно поправить.
@@ -19,6 +20,9 @@ use Throwable;
 class SupportRequests extends Component
 {
     use WithFileUploads;
+
+    /** Счётчик вкладки «Поддержка» (Index::supportWaitingCount); обновляется при каждой загрузке списка. */
+    public const WAITING_CACHE = 'quoteparts:support:waiting';
 
     public bool $loaded = false;
 
@@ -44,6 +48,7 @@ class SupportRequests extends Component
         $this->error = null;
         try {
             $this->conversations = $client->supportConversations();
+            Cache::put(self::WAITING_CACHE, collect($this->conversations)->filter(fn ($c) => self::waiting($c))->count(), 120);
         } catch (Throwable $e) {
             $this->error = 'QuoteParts не ответил: '.mb_substr($e->getMessage(), 0, 200);
         }

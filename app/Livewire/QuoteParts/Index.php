@@ -46,7 +46,7 @@ class Index extends Component
 
     public function setTab(string $tab): void
     {
-        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'questions', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
+        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'questions', 'support', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
         $this->perPage = self::PER_PAGE;
     }
 
@@ -144,6 +144,26 @@ class Index extends Component
     public function openQuestionsCount(): int
     {
         return app(\App\Livewire\QuoteParts\SupplierQuestions::class)->items()->where('open', '>', 0)->count();
+    }
+
+    /**
+     * Письма на support@, ждущие ответа, — счётчик вкладки «Поддержка». Из QuoteParts, поэтому на пару
+     * минут в кэш (раздел перерисовывается на каждый клик); QuoteParts не ответил — без счётчика.
+     */
+    #[Computed]
+    public function supportWaitingCount(): ?int
+    {
+        // -1 — QuoteParts не ответил (null кэш не хранит, и каждый клик ждал бы таймаут).
+        $n = \Illuminate\Support\Facades\Cache::remember(\App\Livewire\QuoteParts\SupportRequests::WAITING_CACHE, 120, function () {
+            try {
+                return collect(app(\App\Services\QuoteParts\QuotePartsClient::class)->supportConversations())
+                    ->filter(fn ($c) => \App\Livewire\QuoteParts\SupportRequests::waiting($c))->count();
+            } catch (\Throwable) {
+                return -1;
+            }
+        });
+
+        return $n >= 0 ? $n : null;
     }
 
     /** Поставщики, приглашённые в QuoteParts (приглашают из карточки поставщика). */
