@@ -38,6 +38,7 @@ class MediaAutopilotService
         private readonly MediaMaterialService $materials,
         private readonly MediaPublisherService $publisher,
         private readonly \App\Services\Calendar\RussianWorkingDayService $calendar,
+        private readonly MediaCoverService $covers,
     ) {}
 
     /**
@@ -181,6 +182,7 @@ class MediaAutopilotService
                 continue;
             }
 
+            $this->ensureCover($publication, $channel);
             $out = $this->publisher->publish($publication);
             $where = $publication->title.' → '.$channel->name;
             if ($out['ok']) {
@@ -205,6 +207,30 @@ class MediaAutopilotService
         }
 
         return ['published' => $published, 'waiting' => count($queue), 'dropped' => $dropped];
+    }
+
+    /**
+     * Черновик без обложки — утром она не получилась. 27.10.2026 модель картинок
+     * отвечала «does not exist», и пост 112 вышел повтором без картинки, хотя к
+     * повтору генерацию уже починили. Перед повтором пробуем ещё раз так же, как
+     * кнопка «Новая обложка» (MakeMediaCoverJob); не вышло — пост уходит без
+     * картинки, как ушёл бы утром.
+     */
+    private function ensureCover(MediaPublication $publication, MediaChannel $channel): void
+    {
+        if ($publication->images() !== [] || ! MediaCoverService::enabled() || ! $channel->isPostable()) {
+            return;
+        }
+
+        $res = $this->covers->make((string) $publication->title, (string) $publication->body, $publication->topic?->source, $publication->subject_key);
+        if (! $res['ok']) {
+            Log::info('MediaAutopilot: no cover before the retry', ['publication_id' => $publication->id, 'error' => $res['message']]);
+
+            return;
+        }
+        // У статьи обзора обложка ещё и в article: og:image, RSS, шапка страницы.
+        $article = is_array($publication->article) ? array_merge($publication->article, ['cover' => $res['url']]) : $publication->article;
+        $publication->forceFill(['image_urls' => [$res['url']], 'article' => $article])->save();
     }
 
     /** До скольких (МСК) повторяем автопубликацию дня, «ЧЧ:ММ». */

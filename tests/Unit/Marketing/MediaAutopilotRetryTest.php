@@ -5,6 +5,7 @@ namespace Tests\Unit\Marketing;
 use App\Models\MediaChannel;
 use App\Models\MediaPublication;
 use App\Services\Marketing\MediaAutopilotService;
+use App\Services\Marketing\MediaCoverService;
 use App\Services\Marketing\MediaPublisherService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Client\ConnectionException;
@@ -12,6 +13,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Sleep;
+use Mockery;
 use ReflectionMethod;
 use Tests\TestCase;
 
@@ -32,6 +34,8 @@ class MediaAutopilotRetryTest extends TestCase
         config([
             'database.connections.retry_test' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => ''],
             'database.default' => 'retry_test',
+            // Обложка при повторе — свои тесты ниже, с подменённым MediaCoverService.
+            'services.openai.media_cover.enabled' => false,
         ]);
         Schema::create('media_channels', function (Blueprint $t) {
             $t->id();
@@ -152,6 +156,47 @@ class MediaAutopilotRetryTest extends TestCase
 
         $this->assertFalse($res['ok']);
         $this->assertFalse($res['retry']);
+    }
+
+    /** 27.10.2026: черновик 112 написан, когда обложки не генерировались, — повтор выпустил его без картинки. */
+    public function test_a_retry_makes_the_missing_cover_before_publishing(): void
+    {
+        config(['services.openai.media_cover.enabled' => true]);
+        $covers = Mockery::mock(MediaCoverService::class);
+        $covers->shouldReceive('make')->once()
+            ->with('Снижение цен на шесть позиций', Mockery::type('string'), null, null)
+            ->andReturn(['ok' => true, 'url' => 'https://mzcorp.test/media/cover/new.jpg', 'message' => '']);
+        $this->app->instance(MediaCoverService::class, $covers);
+        Http::fake(function (Request $r) {
+            return str_contains($r->url(), 'mzcorp.test')
+                ? Http::response('JPEG', 200, ['Content-Type' => 'image/jpeg', 'Content-Length' => '4'])
+                : Http::response(['ok' => true, 'result' => [['message_id' => 72]]]);
+        });
+        $pub = $this->publication();
+        $this->queue($pub);
+
+        $this->assertSame(1, $this->autopilot()->retryFailed()['published']);
+
+        $this->assertSame(['https://mzcorp.test/media/cover/new.jpg'], $pub->fresh()->images());
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), 'sendMediaGroup'));
+    }
+
+    public function test_without_a_cover_the_retry_still_publishes_and_a_cover_is_not_redone(): void
+    {
+        config(['services.openai.media_cover.enabled' => true]);
+        $covers = Mockery::mock(MediaCoverService::class);
+        $covers->shouldReceive('make')->once()->andReturn(['ok' => false, 'url' => null, 'message' => "генерация картинки: The model 'gpt-image-1' does not exist."]);
+        $this->app->instance(MediaCoverService::class, $covers);
+        Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 73]]));
+        $bare = $this->publication();
+        $withCover = $this->publication(['image_urls' => ['https://mzcorp.test/media/cover/old.jpg']]);
+        $this->queue($bare);
+        $this->queue($withCover);
+
+        // make() — только для черновика без обложки; оба выходят.
+        $this->assertSame(2, $this->autopilot()->retryFailed()['published']);
+        $this->assertSame('published', $bare->fresh()->status);
+        $this->assertSame(['https://mzcorp.test/media/cover/old.jpg'], $withCover->fresh()->images());
     }
 
     public function test_a_post_released_or_rejected_by_hand_is_left_alone(): void
