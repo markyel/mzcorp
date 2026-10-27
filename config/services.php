@@ -100,6 +100,9 @@ return [
         ],
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
         'mail_classifier_model' => env('OPENAI_MAIL_CLASSIFIER_MODEL', 'gpt-4o-mini'),
+        // Английские названия позиций для иностранных поставщиков (SupplierItemTranslator):
+        // термины отрасли, а не дословно — мини переводила «КВШ» как «KVS».
+        'item_translation_model' => env('OPENAI_ITEM_TRANSLATION_MODEL', 'gpt-4.1'),
         // Проверка писем менеджеров на образ компании (mail:tone-audit): отсев
         // дешёвой моделью, отмеченное перепроверяет сильная — мини шумит.
         'tone_audit_model' => env('OPENAI_TONE_AUDIT_MODEL', 'gpt-4o-mini'),

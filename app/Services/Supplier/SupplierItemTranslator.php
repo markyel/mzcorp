@@ -2,15 +2,17 @@
 
 namespace App\Services\Supplier;
 
+use App\Prompts\Suppliers\TranslateItemNamesPrompt;
 use App\Services\AI\OpenAIChatService;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Перевод названий позиций RU→EN для письма-запроса иностранному поставщику
- * (Фаза 3.2, язык общения). gpt-4o-mini, батчем, fail-safe: при ошибке/мусоре
- * возвращает пустой массив (вызывающий оставляет прежние значения). Бренды,
- * коды моделей, артикулы, размеры и единицы сохраняем как есть — переводим
- * только описательные слова.
+ * (Фаза 3.2, язык общения) и черновиков QuoteParts. Батчем, fail-safe: при
+ * ошибке/мусоре возвращает пустой массив (вызывающий оставляет прежние значения).
+ * Название — термином лифтовой отрасли, не дословно (TranslateItemNamesPrompt);
+ * коды моделей, артикулы и размеры — как есть. Модель — services.openai.item_translation_model:
+ * gpt-4o-mini писал «Cable guiding sheave (Rim KVS …)» вместо «Traction sheave» (M-2026-20451).
  */
 class SupplierItemTranslator
 {
@@ -35,21 +37,13 @@ class SupplierItemTranslator
             $payload[] = ['id' => (int) $id, 'name' => $name];
         }
 
-        $system = 'You translate elevator and escalator spare-part names from Russian to English for a price request (RFQ) sent to a foreign supplier. '
-            . 'Keep brand names, manufacturer names, model codes, article/part numbers, dimensions and measurement values unchanged. '
-            . 'Translate only the descriptive Russian words into natural technical English. Do not add or drop information. '
-            . 'Return STRICT JSON: {"items":[{"id":<int>,"name_en":"<english>"}]}. No commentary.';
-
         try {
             $result = $this->openai->chat(
-                [
-                    ['role' => 'system', 'content' => $system],
-                    ['role' => 'user', 'content' => json_encode(['items' => $payload], JSON_UNESCAPED_UNICODE)],
-                ],
-                config('services.openai.intent_model', 'gpt-4o-mini'),
+                (new TranslateItemNamesPrompt())->build($payload),
+                config('services.openai.item_translation_model', 'gpt-4.1'),
                 [
                     'temperature' => 0,
-                    'max_tokens' => 2000,
+                    'max_tokens' => 4000,
                     'response_format' => ['type' => 'json_object'],
                 ],
             );
