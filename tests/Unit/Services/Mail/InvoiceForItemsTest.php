@@ -46,6 +46,19 @@ class InvoiceForItemsTest extends TestCase
         $this->assertTrue($this->looksLikeOrder('Выставьте нам счет на M12243 — 5 шт'));
     }
 
+    public function test_positions_with_quantities_above_the_request_are_an_order(): void
+    {
+        // Атлас, Челябинск, 28.10.2026: перечень выше, «скидывайте сразу счет», «заберем сами курьером».
+        $this->assertTrue($this->looksLikeOrder(
+            "*M00647 — 4 шт*\n*M21461 — 4 шт*\n*M22627 — 20 шт*\n*Здравствуйте, скидывайте сразу счет. Заберем сами курьером*"
+        ));
+        $this->assertTrue($this->looksLikeOrder("Ролик 608 - 10 шт\nКнопка - 2 шт\nВыставьте счет, пожалуйста"));
+        // Правка уже выставленного счёта и наше «направляем» — по-прежнему не заказ.
+        $this->assertFalse($this->looksLikeOrder("Плиты 2 шт\nПрошу перевыставить счет на другое юрлицо"));
+        $this->assertFalse($this->looksLikeOrder("Плиты 2 шт\nНаправляем счет во вложении"));
+        $this->assertFalse($this->looksLikeOrder("Заберем 3 шт завтра, вы скидывали счет?"));
+    }
+
     public function test_an_invoice_for_an_existing_order_is_not_an_order(): void
     {
         $this->assertFalse($this->looksLikeOrder('Пришлите счет на оплату по заказу 1234, заберем сами'));
