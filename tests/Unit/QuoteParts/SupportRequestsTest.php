@@ -48,6 +48,36 @@ class SupportRequestsTest extends TestCase
         $this->assertSame(1, \Illuminate\Support\Facades\Cache::get(SupportRequests::WAITING_CACHE));
     }
 
+    public function test_a_letter_is_marked_from_its_row_and_the_mark_is_taken_back(): void
+    {
+        config(['services.quoteparts.token' => 't', 'services.quoteparts.url' => 'https://qp.test']);
+        Http::fake([
+            'qp.test/api/v1/conversations/*/close' => Http::response(['ok' => true]),
+            'qp.test/api/v1/conversations/*/reopen' => Http::response(['ok' => true]),
+            'qp.test/api/v1/conversations*' => Http::response(['conversations' => [
+                $this->conversation(),
+                $this->conversation(['id' => 32, 'subject' => 'Beget welcome', 'status' => 'closed', 'resolution' => 'no_action', 'closed_by' => 'Ольга', 'closed_at' => '2026-10-28T09:00:00+00:00']),
+            ]]),
+        ]);
+        $user = (new \App\Models\User)->forceFill(['id' => 9, 'name' => 'Ольга', 'quoteparts_pilot' => true]);
+
+        $c = Livewire::actingAs($user)->test(SupportRequests::class)->call('load');
+        $this->assertStringContainsString('✓ Решено', $c->html());
+        $this->assertStringContainsString('🔕 Не требует внимания', $c->html());
+
+        $c->call('close', 31, 'resolved');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/conversations/31/close') && $r['resolution'] === 'resolved' && $r['author_name'] === 'Ольга');
+
+        // Закрытые — с плашкой причины и «Вернуть».
+        $html = $c->set('withClosed', true)->html();
+        $this->assertStringContainsString('🔕 не требует внимания', $html);
+        $this->assertStringContainsString('↩ Вернуть', $html);
+        $c->call('reopen', 32);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/conversations/32/reopen'));
+
+        $c->call('close', 31, 'whatever')->assertStatus(422);
+    }
+
     public function test_answer_language_and_waiting(): void
     {
         $c = new SupportRequests;

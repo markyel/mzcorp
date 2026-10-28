@@ -24,6 +24,9 @@ class SupportRequests extends Component
     /** Счётчик вкладки «Поддержка» (Index::supportWaitingCount); обновляется при каждой загрузке списка. */
     public const WAITING_CACHE = 'quoteparts:support:waiting';
 
+    /** Причины закрытия (Conversation::RESOLUTIONS в QuoteParts) → подпись плашки. */
+    public const RESOLUTIONS = ['resolved' => 'решено', 'no_action' => 'не требует внимания'];
+
     public bool $loaded = false;
 
     /** @var list<array<string, mixed>> */
@@ -88,11 +91,27 @@ class SupportRequests extends Component
         $this->dispatch('toast', type: 'success', message: 'Ответ отправлен с support@quoteparts.net.');
     }
 
-    public function close(int $id, QuotePartsClient $client): void
+    /** Отметка из строки списка: «Решено» / «Не требует внимания» — письмо уходит из счётчика; новое письмо в обращении вернёт его. */
+    public function close(int $id, string $resolution, QuotePartsClient $client): void
+    {
+        abort_unless(QuotePartsPilot::canAnswer(auth()->user()), 403);
+        abort_unless(isset(self::RESOLUTIONS[$resolution]), 422);
+        try {
+            $client->closeConversation($id, $resolution, auth()->user()->name);
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 200));
+        }
+        if ($this->activeId === $id) {
+            $this->activeId = null;
+        }
+        $this->load($client);
+    }
+
+    public function reopen(int $id, QuotePartsClient $client): void
     {
         abort_unless(QuotePartsPilot::canAnswer(auth()->user()), 403);
         try {
-            $client->closeConversation($id);
+            $client->reopenConversation($id);
         } catch (Throwable $e) {
             $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 200));
         }

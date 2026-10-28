@@ -370,11 +370,23 @@ class QuotePartsClient
     }
 
     /** @return array<string, mixed> */
-    public function closeConversation(int $id): array
+    /** $resolution — почему закрыли (resolved | no_action), $authorName — кто; без них просто «закрыто». */
+    public function closeConversation(int $id, ?string $resolution = null, ?string $authorName = null): array
     {
-        $response = $this->http()->post('/api/v1/conversations/'.$id.'/close');
+        $response = $this->http()->post('/api/v1/conversations/'.$id.'/close', array_filter(['resolution' => $resolution, 'author_name' => $authorName]));
         if (! $response->successful()) {
             throw new RuntimeException('QuoteParts close conversation: HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
+    /** Вернуть закрытое обращение в работу (отметку поставили по ошибке). */
+    public function reopenConversation(int $id): array
+    {
+        $response = $this->http()->post('/api/v1/conversations/'.$id.'/reopen');
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts reopen conversation: HTTP '.$response->status());
         }
 
         return $response->json();
