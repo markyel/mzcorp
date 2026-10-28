@@ -28,7 +28,9 @@ use Illuminate\Support\Facades\Log;
  *   4. From_email + open Requests этого клиента — для случаев, когда headers
  *      потеряны вовсе (mobile-клиент, ручной forward, новый thread без citing).
  *      Гейтим по category Phase 1.8c: client_request не линкуем (это новая
- *      заявка). При 1 открытой → она же; при 2+ → передаём в уровень 5.
+ *      заявка). Клиент переслал своё письмо, которое у нас есть, — за ним (его
+ *      заявка или никакой, forwardedOwnLetter). При 1 открытой → она же; при
+ *      2+ → передаём в уровень 5.
  *   5. AI multi-choice (`ThreadClarificationAi`, gpt-4o-mini) — если у клиента
  *      2+ открытых Request, GPT смотрит на тело письма + список тем и выбирает
  *      наиболее подходящую (или null = новая тема). На сбое — fallback на самую
@@ -57,6 +59,9 @@ class InboundReplyLinker
 
     /** Окно «клиент процитировал своё письмо» — matchBySelfQuote. */
     private const SELF_QUOTE_MINUTES = 60;
+
+    /** Окно «клиент переслал своё письмо» — forwardedOwnLetter. */
+    private const OWN_FORWARD_DAYS = 14;
 
     /**
      * @return Request|null  null = thread не найден, обычный flow.
@@ -613,6 +618,64 @@ class InboundReplyLinker
         return null;
     }
 
+    /**
+     * Своё письмо клиента, которое он переслал или процитировал (Re:/Fw:/Fwd:), — за
+     * OWN_FORWARD_DAYS дней, без требования к заявке (в отличие от matchBySelfQuote):
+     * тот же отправитель, та же тема без префиксов, его адрес в теле, и начало
+     * собственного текста того письма есть в теле пересылки — так из нескольких
+     * писем с одной темой («Заявка ООО Атлас, Челябинск» на каждый заказ) выбирается
+     * именно пересланное.
+     */
+    private function forwardedOwnLetter(EmailMessage $message): ?EmailMessage
+    {
+        $from = mb_strtolower(trim((string) $message->from_email));
+        $subject = (string) $message->subject;
+        if ($from === '' || ! $this->subjectLooksLikeReply($subject)) {
+            return null;
+        }
+        $base = $this->baseSubject($subject);
+        $body = mb_strtolower((string) $message->body_plain);
+        if ($base === '' || ! str_contains($body, $from)) {
+            return null;
+        }
+        $flatBody = $this->flatText($body);
+
+        $sentAt = $message->sent_at ?? now();
+        $candidates = EmailMessage::query()
+            ->where('id', '!=', $message->id)
+            ->whereRaw('lower(from_email) = ?', [$from])
+            ->where('direction', 'inbound')
+            ->where('sent_at', '>=', $sentAt->copy()->subDays(self::OWN_FORWARD_DAYS))
+            ->where('sent_at', '<', $sentAt)
+            ->orderByDesc('sent_at')
+            ->limit(20)
+            ->get();
+
+        $cleaner = app(EmailTextCleanerService::class);
+        foreach ($candidates as $p) {
+            if ($this->baseSubject((string) $p->subject) !== $base) {
+                continue;
+            }
+            try {
+                $own = $cleaner->clientOwnText($p);
+            } catch (\Throwable) {
+                continue;
+            }
+            $snippet = trim(mb_substr($this->flatText(mb_strtolower($own)), 0, 60));
+            if (mb_strlen($snippet) >= 15 && str_contains($flatBody, $snippet)) {
+                return $p;
+            }
+        }
+
+        return null;
+    }
+
+    /** Только буквы и цифры, по одному пробелу: разметка пересылки (звёздочки, переносы) не мешает сравнению. */
+    private function flatText(string $text): string
+    {
+        return trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', $text));
+    }
+
     /** Тема без префиксов Re:/Fw:/Fwd: (в любом количестве), в нижнем регистре. */
     private function baseSubject(string $subject): string
     {
@@ -648,6 +711,24 @@ class InboundReplyLinker
 
         if (! $isReply && ! $isThreadReply) {
             return null;
+        }
+
+        // Клиент переслал (или процитировал) СВОЁ письмо, которое у нас есть, — заявку
+        // не угадываем по отправителю, а идём за этим письмом: оно в заявке — туда же;
+        // без заявки — не привязываем (любая открытая заявка клиента — догадка).
+        // Атлас, 28.10.2026: «Почему-то не доходят письма» + Fwd письма с тремя
+        // позициями, не ставшего заявкой, прицепился к M-2026-20869 — заявке от 26.10
+        // на другую позицию с той же темой «Заявка ООО Атлас, Челябинск».
+        $own = $this->forwardedOwnLetter($message);
+        if ($own !== null) {
+            $ownRequest = $own->related_request_id !== null ? Request::find($own->related_request_id) : null;
+            Log::info('InboundReplyLinker: own letter forwarded — following it, not the sender', [
+                'email_message_id' => $message->id,
+                'own_letter_id' => $own->id,
+                'request_id' => $ownRequest?->id,
+            ]);
+
+            return $ownRequest;
         }
 
         // ВСЕ активные не-терминальные статусы, а не только ранние
