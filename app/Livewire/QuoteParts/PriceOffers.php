@@ -63,6 +63,9 @@ class PriceOffers extends Component
     /** Итог последнего действия выгрузки — в нижней панели. */
     public ?string $exportNote = null;
 
+    /** Выгрузка, чей сопроводительный файл («Покупаем здесь») можно скачать из нижней панели. */
+    public ?int $companionExportId = null;
+
     /** Показывать и заменённые / истёкшие предложения. */
     #[Url(as: 'pa', except: false)]
     public bool $withStale = false;
@@ -100,11 +103,14 @@ class PriceOffers extends Component
             return;
         }
         try {
-            $service->add($sku, (int) $it['cid'], self::liveOffers($it), auth()->user());
+            $from = $service->add($sku, (int) $it['cid'], self::liveOffers($it), auth()->user());
         } catch (\DomainException $e) {
             $this->dispatch('toast', type: 'error', message: $e->getMessage());
 
             return;
+        }
+        if ($from !== null) {
+            $this->dispatch('toast', type: 'success', message: $sku.' была в выгрузке у '.$from.' — теперь в вашей.');
         }
         $this->exportNote = null;
         $this->forget();
@@ -112,12 +118,12 @@ class PriceOffers extends Component
 
     public function removeFromExport(string $sku, PriceActualizationService $service): void
     {
-        $service->remove($sku);
+        $service->remove($sku, auth()->user());
         $this->exportNote = null;
         $this->forget();
     }
 
-    /** «+ Добавить все с выбранным поставщиком». */
+    /** «+ Добавить все с выбранным поставщиком» — кроме позиций в чужих списках. */
     public function addAllChosen(PriceActualizationService $service): void
     {
         foreach ($this->bar['addable'] as $it) {
@@ -128,14 +134,14 @@ class PriceOffers extends Component
     }
 
     /**
-     * «Выгрузить в 1С» — весь список, сколько угодно раз: позиции остаются на экране, сбор цен
-     * продолжается. «Выгрузить и завершить сбор цен» — весь список, и позиции уходят с экрана: работа
-     * по ним закончена до нового предложения. Файл сразу скачивается.
+     * «Выгрузить в 1С» — свой список, сколько угодно раз: позиции остаются на экране, сбор цен
+     * продолжается. «Выгрузить и завершить сбор цен» — свой список, и позиции уходят с экрана: работа
+     * по ним закончена до нового предложения. Позиции, которые добавили коллеги, сюда не попадают.
+     * Скачиваются два файла: для загрузки в 1С и сопроводительный (что покупаем и у кого).
      */
     public function exportList(bool $finish, PriceActualizationService $service)
     {
-        // В списке бывает и завершённая позиция: вернулась с новым предложением и выгружается снова.
-        $list = PricePosition::query()->whereNotNull('in_export_at')->get();
+        $list = $service->listOf(auth()->user());
         if ($list->isEmpty()) {
             return null;
         }
@@ -150,6 +156,10 @@ class PriceOffers extends Component
         $this->exportNote = $finish
             ? 'Завершено: '.$list->count().' поз. выгружено и убрано с экрана. Вернутся, если придёт новое предложение.'
             : 'Выгружено в 1С: '.$list->count().' поз. Сбор цен по ним продолжается.';
+        $this->companionExportId = $export->companion_path ? $export->id : null;
+        if ($this->companionExportId) {
+            $this->dispatch('qp-companion-download', url: route('quoteparts.price-exports.companion', $export->id));
+        }
         $this->forget();
 
         return \Illuminate\Support\Facades\Storage::disk(config('procurement.price_export.disk', 'local'))->download($export->file_path, basename($export->file_path));
@@ -660,7 +670,7 @@ class PriceOffers extends Component
     #[Computed]
     public function positions(): Collection
     {
-        return PricePosition::query()->get()->keyBy('sku');
+        return PricePosition::query()->with('inExportBy:id,name')->get()->keyBy('sku');
     }
 
     /** Артикулы, по которым сбор цен завершён. */
@@ -780,7 +790,8 @@ class PriceOffers extends Component
     }
 
     /**
-     * Нижняя панель: сколько решено в «Готово», список выгрузки и его сумма, что выгружать.
+     * Нижняя панель: сколько решено в «Готово», МОЙ список выгрузки и его сумма, что выгружать.
+     * Позиции в чужих списках в «Добавить все» не попадают — их добавляют по одной.
      *
      * @return array{done:int, total:int, inList:int, sum:float, addable:Collection}
      */
@@ -788,7 +799,7 @@ class PriceOffers extends Component
     public function bar(): array
     {
         $ready = $this->readyList;
-        $list = $this->positions->filter(fn (PricePosition $p) => $p->in_export_at !== null);
+        $list = $this->positions->filter(fn (PricePosition $p) => $p->inExportOf(auth()->id()));
         $choices = app(SupplierChoiceService::class)->forItems($list->pluck('catalog_item_id')->filter()->values()->all());
         $sum = $list->sum(function (PricePosition $p) use ($choices) {
             $c = $choices->get($p->catalog_item_id);

@@ -37,6 +37,17 @@ class PricePosition extends Model
         return $this->belongsTo(CatalogItem::class);
     }
 
+    /** Чей список выгрузки: у каждого снабженца свой, выгружает он только своё. */
+    public function inExportBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'in_export_by_user_id');
+    }
+
+    public function inExportOf(?int $userId): bool
+    {
+        return $this->in_export_at !== null && $userId !== null && (int) $this->in_export_by_user_id === $userId;
+    }
+
     public function priceExport(): BelongsTo
     {
         return $this->belongsTo(PriceExport::class);

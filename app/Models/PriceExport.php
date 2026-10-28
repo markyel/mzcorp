@@ -24,6 +24,7 @@ class PriceExport extends Model
         'suppliers_count',
         'skipped_count',
         'file_path',
+        'companion_path',
         'created_by_user_id',
         'kind',
     ];

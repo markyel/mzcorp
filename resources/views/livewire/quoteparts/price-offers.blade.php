@@ -184,21 +184,23 @@
     @endforeach
 
     {{-- Решено, список выгрузки и выгрузка. --}}
-    <div class="pa-bar">
+    {{-- Сопроводительный файл скачивается следом за файлом для 1С (PriceOffers::exportList). --}}
+    <div class="pa-bar" x-data x-on:qp-companion-download.window="setTimeout(() => { const a = document.createElement('a'); a.href = $event.detail.url; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); }, 800)">
         <div style="display: flex; flex-direction: column; gap: 6px; min-width: 220px">
-            <span style="font-size: 13px"><b class="tnum">Решено {{ $bar['done'] }} из {{ $bar['total'] }}</b> <span style="color: var(--fg-3)">· в выгрузке {{ $bar['inList'] }} поз. на ≈ {{ number_format($bar['sum'], 0, ',', ' ') }} ₽</span></span>
+            <span style="font-size: 13px"><b class="tnum">Решено {{ $bar['done'] }} из {{ $bar['total'] }}</b> <span style="color: var(--fg-3)">· в моей выгрузке {{ $bar['inList'] }} поз. на ≈ {{ number_format($bar['sum'], 0, ',', ' ') }} ₽</span></span>
             <div class="pa-progress"><div style="width: {{ $bar['total'] > 0 ? round($bar['done'] / $bar['total'] * 100) : 0 }}%"></div></div>
         </div>
         <div style="flex: 1"></div>
         @if($exportNote)
             <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--status-ok-fg)">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{ $exportNote }}</span>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{ $exportNote }}
+                @if($companionExportId)<a href="{{ route('quoteparts.price-exports.companion', $companionExportId) }}" style="color: var(--accent); text-decoration: underline">сопроводительный файл</a>@endif</span>
         @endif
         @if($bar['addable']->isNotEmpty())
             <button type="button" wire:click="addAllChosen" wire:loading.attr="disabled" class="pa-bar-add">+ Добавить все с выбранным поставщиком · {{ $bar['addable']->count() }}</button>
         @endif
         <button type="button" wire:click="exportList(false)" wire:loading.attr="disabled" @disabled($bar['inList'] === 0) class="pa-bar-btn is-secondary"
-                title="Выгрузить все позиции списка — сколько угодно раз; они останутся на экране, сбор цен продолжается">
+                title="Выгрузить мой список — сколько угодно раз; позиции останутся на экране, сбор цен продолжается. Плюс сопроводительный файл: что покупаем здесь и у кого">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>Выгрузить в 1С{{ $bar['inList'] ? ' · '.$bar['inList'] : '' }}</button>
         <button type="button" wire:click="exportList(true)" wire:loading.attr="disabled" @disabled($bar['inList'] === 0) class="pa-bar-btn is-primary"
                 wire:confirm="Выгрузить {{ $bar['inList'] }} поз. в 1С и убрать с экрана? Вернутся, если придёт новое предложение."

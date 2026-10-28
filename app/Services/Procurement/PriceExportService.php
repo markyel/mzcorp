@@ -40,6 +40,9 @@ class PriceExportService
     // Порядок колонок — по шаблону заказчика (23.10.2026): «Выбор» перед «Комментарием».
     public const HEADER = ['Артикул', 'Поставщик', 'Цена', 'Дата', 'Валюта', 'Выбор', 'Комментарий'];
 
+    /** Сопроводительный файл к выгрузке по списку: что покупаем и у кого (не для загрузки в 1С). */
+    public const COMPANION_HEADER = ['Артикул', 'Название', 'Цена', 'Валюта', 'Поставщик', 'Комментарий'];
+
     public function export(Carbon $from, Carbon $to, ?User $by): PriceExport
     {
         [$prices, $skipped] = $this->collect($from, $to);
@@ -71,6 +74,82 @@ class PriceExportService
         $from = $prices->min('date');
 
         return $this->write($prices, 0, $from ? Carbon::parse($from) : now(), now(), $by, PriceExport::KIND_POSITIONS);
+    }
+
+    /**
+     * Сопроводительный файл к выгрузке списка «Актуализации цен»: по каждой позиции — только
+     * предложение, отмеченное «Закупаем здесь» (артикул, название, цена, валюта, поставщик,
+     * комментарий). Файл для 1С остаётся как есть; этот — человеку, который будет закупать.
+     *
+     * @param  Collection<int, QuotePartsOffer>  $offers  действующие предложения позиций списка
+     * @return string путь файла на диске выгрузок
+     */
+    public function writeCompanion(Collection $offers, ?User $by): string
+    {
+        $choices = app(SupplierChoiceService::class)->forItems($offers->pluck('catalog_item_id')->filter()->unique()->values()->all());
+        $rows = self::companionRows($offers, $choices, $this->names1c($offers->pluck('supplier_key')->filter()->unique()->values()->all()));
+
+        $book = new Spreadsheet;
+        $sheet = $book->getActiveSheet();
+        $sheet->setTitle('Покупаем здесь');
+        $sheet->fromArray(self::COMPANION_HEADER, null, 'A1');
+        $sheet->getStyle('A1:F1')->getFont()->setBold(true);
+        $r = 2;
+        foreach ($rows as $row) {
+            $sheet->fromArray(array_values($row), null, 'A'.$r, true);
+            $r++;
+        }
+        $last = max(2, $r - 1);
+        $sheet->getStyle('C2:C'.$last)->getNumberFormat()->setFormatCode('# ##0.00');
+        $sheet->getStyle('F2:F'.$last)->getAlignment()->setWrapText(true);
+        foreach (['A' => 12, 'B' => 50, 'C' => 12, 'D' => 8, 'E' => 30, 'F' => 70] as $col => $w) {
+            $sheet->getColumnDimension($col)->setWidth($w);
+        }
+        $sheet->freezePane('A2');
+        $sheet->setCellValue('A'.($last + 2), 'Сформировано '.now()->format('d.m.Y H:i').($by ? ' · '.$by->name : '').' · позиций: '.count($rows));
+
+        $disk = config('procurement.price_export.disk', 'local');
+        $path = trim(config('procurement.price_export.directory', 'exports/prices'), '/').'/Покупаем здесь '.now()->format('d.m.Y His').'.xlsx';
+        $tmp = tempnam(sys_get_temp_dir(), 'pc');
+        (new Xlsx($book))->save($tmp);
+        Storage::disk($disk)->put($path, (string) file_get_contents($tmp));
+        @unlink($tmp);
+
+        return $path;
+    }
+
+    /**
+     * Строки сопроводительного файла: по позиции — её предложение «Закупаем здесь», если оно среди
+     * действующих (отмеченное «Игнорировать» или устаревшее в 1С-файл не идёт — и сюда тоже).
+     *
+     * @param  Collection<int, QuotePartsOffer>  $offers
+     * @param  Collection<int, mixed>  $choices  catalog_item_id => выбор поставщика (SupplierChoiceService)
+     * @param  array<string, string>  $names  ключ поставщика => название в 1С
+     * @return list<array{sku:string, name:string, price:float, currency:?string, supplier:string, comment:?string}>
+     */
+    public static function companionRows(Collection $offers, Collection $choices, array $names): array
+    {
+        $rows = [];
+        foreach ($choices as $cid => $c) {
+            if (($c->source ?? null) !== 'quoteparts') {
+                continue;
+            }
+            $o = $offers->first(fn (QuotePartsOffer $o) => (int) $o->id === (int) $c->offer_ref && (int) $o->catalog_item_id === (int) $cid);
+            if ($o === null || $o->catalogItem === null) {
+                continue;
+            }
+            $rows[] = [
+                'sku' => (string) $o->catalogItem->sku,
+                'name' => (string) $o->catalogItem->name,
+                'price' => (float) $o->price,
+                'currency' => $o->currency,
+                'supplier' => (string) ($names[(string) $o->supplier_key] ?? ($o->supplier_name ?: $o->supplier_key)),
+                'comment' => $o->export_comment ?? self::offerComment($o),
+            ];
+        }
+        usort($rows, fn ($a, $b) => strcmp($a['sku'], $b['sku']));
+
+        return $rows;
     }
 
     /**

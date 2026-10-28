@@ -439,6 +439,13 @@ Route::middleware('auth')->group(function () {
 
             return $disk->download($export->file_path, basename($export->file_path));
         })->whereNumber('export')->name('quoteparts.price-exports.download');
+        // Сопроводительный файл той же выгрузки: что покупаем здесь и у кого.
+        Route::get('/dashboard/quoteparts/price-exports/{export}/companion', function (\App\Models\PriceExport $export) {
+            $disk = \Illuminate\Support\Facades\Storage::disk(config('procurement.price_export.disk', 'local'));
+            abort_unless($export->companion_path && $disk->exists($export->companion_path), 404);
+
+            return $disk->download($export->companion_path, basename($export->companion_path));
+        })->whereNumber('export')->name('quoteparts.price-exports.companion');
     });
 
     // Файл из обращения к поставщику через QuoteParts (доступ проверяет контроллер: QuotePartsPilot::canConverse).

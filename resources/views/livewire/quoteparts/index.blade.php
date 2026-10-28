@@ -82,6 +82,7 @@
                                     <td class="px-3 py-1.5 text-fg-2">{{ $e->createdBy?->name ?? '—' }}</td>
                                     <td class="px-3 py-1.5">
                                         @if($e->file_path)<a href="{{ route('quoteparts.price-exports.download', $e->id) }}" class="text-sky-700 hover:underline">скачать</a>@else<span class="text-fg-4">—</span>@endif
+                                        @if($e->companion_path)<span class="text-fg-4">·</span> <a href="{{ route('quoteparts.price-exports.companion', $e->id) }}" class="text-sky-700 hover:underline" title="Что покупаем здесь и у кого">сопроводительный</a>@endif
                                     </td>
                                 </tr>
                             @endforeach

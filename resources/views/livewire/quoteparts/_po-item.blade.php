@@ -48,13 +48,17 @@
         </div>
         <div class="pa-head-side">
             @if($section !== 'wait' && $it['cid'])
-                @if($pos?->in_export_at)
+                @if($pos?->inExportOf(auth()->id()))
                     <span class="pa-export is-in">
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{ $pos->exported_at ? 'выгружено '.$pos->exported_at->timezone($tz)->format('d.m H:i') : 'в выгрузке 1С' }}</span>
                     <button type="button" wire:click="removeFromExport('{{ $it['sku'] }}')" class="pa-btn pa-btn-link" style="align-self: flex-end; height: 20px">убрать</button>
                 @else
+                    {{-- В списке выгрузки коллеги: выгрузит он; «+ В выгрузку» перенесёт позицию в мой список. --}}
+                    @if($pos?->in_export_at)
+                        <span class="pa-dim" style="font-size: 12px; align-self: flex-end">в выгрузке у {{ $pos->inExportBy?->name ?? 'коллеги' }}</span>
+                    @endif
                     <button type="button" @if($chosen) wire:click="addToExport('{{ $it['sku'] }}')" wire:loading.attr="disabled" @else disabled @endif class="pa-export"
-                            title="{{ $chosen ? 'Добавить в выгрузку 1С: все цены позиции, выбранная — «закупаем здесь»' : 'Сначала выберите предложение — «Закупаем здесь»' }}">
+                            title="{{ ! $chosen ? 'Сначала выберите предложение — «Закупаем здесь»' : ($pos?->in_export_at ? 'Перенести в мою выгрузку 1С — из списка '.($pos->inExportBy?->name ?? 'коллеги') : 'Добавить в мою выгрузку 1С: все цены позиции, выбранная — «закупаем здесь»') }}">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>В выгрузку</button>
                 @endif
             @endif

@@ -58,14 +58,21 @@ class PriceActualizationService
      * «+ В выгрузку» — только когда снабженец выбрал, где закупаем: в выгрузку идут все цены
      * позиции, выбранная — с отметкой «закупаем здесь». Сами за него не выбираем.
      *
+     * Список выгрузки у каждого свой: позиция — в списке того, кто её добавил, и «Выгрузить в 1С»
+     * берёт только его позиции. Позиция из чужого списка переходит в мой (одна строка на артикул);
+     * возвращается имя того, у кого она была, — чтобы сказать об этом.
+     *
      * @param  Collection<int, QuotePartsOffer>  $offers  действующие предложения позиции на экране
      */
-    public function add(string $sku, int $catalogItemId, Collection $offers, User $by): void
+    public function add(string $sku, int $catalogItemId, Collection $offers, User $by): ?string
     {
         $chosen = $this->choices->forItems([$catalogItemId])->get($catalogItemId);
         if (! ($chosen && $chosen->source === 'quoteparts' && $offers->contains('id', (int) $chosen->offer_ref))) {
             throw new \DomainException('Сначала выберите предложение — «Закупаем здесь».');
         }
+
+        $was = PricePosition::query()->with('inExportBy:id,name')->where('sku', $sku)->first();
+        $from = $was && $was->in_export_at !== null && (int) $was->in_export_by_user_id !== (int) $by->id ? $was->inExportBy?->name : null;
 
         PricePosition::query()->updateOrCreate(['sku' => $sku], [
             'catalog_item_id' => $catalogItemId,
@@ -73,11 +80,26 @@ class PriceActualizationService
             'in_export_by_user_id' => $by->id,
             'exported_at' => null,
         ]);
+
+        return $from;
     }
 
-    public function remove(string $sku): void
+    /** Убрать из СВОЕГО списка выгрузки; чужой список не трогаем. */
+    public function remove(string $sku, User $by): void
     {
-        PricePosition::query()->where('sku', $sku)->update(['in_export_at' => null, 'in_export_by_user_id' => null, 'exported_at' => null]);
+        PricePosition::query()->where('sku', $sku)->where('in_export_by_user_id', $by->id)
+            ->update(['in_export_at' => null, 'in_export_by_user_id' => null, 'exported_at' => null]);
+    }
+
+    /**
+     * Список выгрузки снабженца: позиции, которые добавил он.
+     *
+     * @return Collection<int, PricePosition>
+     */
+    public function listOf(User $by): Collection
+    {
+        // В списке бывает и завершённая позиция: вернулась с новым предложением и выгружается снова.
+        return PricePosition::query()->whereNotNull('in_export_at')->where('in_export_by_user_id', $by->id)->get();
     }
 
     /**
@@ -89,10 +111,16 @@ class PriceActualizationService
     public function export(Collection $positions, bool $finish, User $by): PriceExport
     {
         $cids = $positions->pluck('catalog_item_id')->filter()->unique()->values()->all();
-        $offers = QuotePartsOffer::query()->with('catalogItem:id,sku')->whereIn('catalog_item_id', $cids)
+        $offers = QuotePartsOffer::query()->with('catalogItem:id,sku,name')->whereIn('catalog_item_id', $cids)
             ->where('superseded', false)->whereIn('status', ['active', 'expiring'])->whereNull('ignored_at')->get();
 
         $export = $this->exports->exportOffers($offers, $by);
+        // Сопроводительный файл: что покупаем здесь и у кого. Не вышел — файл для 1С всё равно отдаём.
+        try {
+            $export->forceFill(['companion_path' => $this->exports->writeCompanion($offers, $by)])->save();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Price export companion file failed', ['price_export_id' => $export->id, 'error' => $e->getMessage()]);
+        }
         $choices = $this->choices->forItems($cids);
 
         DB::transaction(function () use ($positions, $finish, $export, $choices, $offers, $by) {
