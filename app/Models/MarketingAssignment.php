@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * Поручение маркетинга соседнему отделу: инструкция + файлы, статус у нас.
+ * Аутсорс-задача маркетинга соседнему отделу: инструкция + файлы, статус у нас.
  */
 class MarketingAssignment extends Model
 {
@@ -53,7 +53,7 @@ class MarketingAssignment extends Model
         return in_array($this->status, ['draft', 'handed', 'in_progress'], true);
     }
 
-    /** Срок прошёл, а поручение не закрыто. */
+    /** Срок прошёл, а задача не закрыта. */
     public function isOverdue(): bool
     {
         return $this->isOpen() && $this->due_on !== null && $this->due_on->lt(today());

@@ -306,7 +306,7 @@ class Workspace extends Component
             ->get();
     }
 
-    /** Открытые поручения соседним отделам — счётчик на вкладке. */
+    /** Открытые аутсорс-задачи соседним отделам — счётчик на вкладке. */
     #[Computed]
     public function assignmentsOpenCount(): int
     {

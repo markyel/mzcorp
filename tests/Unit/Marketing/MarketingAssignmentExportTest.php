@@ -8,7 +8,7 @@ use App\Services\Marketing\MarketingAssignmentExportService;
 use Tests\TestCase;
 
 /**
- * Выгрузка поручения соседнему отделу: исполнитель без доступа в MyLift
+ * Выгрузка аутсорс-задачи соседнему отделу: исполнитель без доступа в MyLift
  * получает инструкцию в PDF/HTML и материалы архивом.
  */
 class MarketingAssignmentExportTest extends TestCase
@@ -41,7 +41,7 @@ class MarketingAssignmentExportTest extends TestCase
     {
         $html = app(MarketingAssignmentExportService::class)->html($this->assignment());
 
-        $this->assertStringContainsString('Поручение № 7', $html);
+        $this->assertStringContainsString('Аутсорс-задача № 7', $html);
         $this->assertStringContainsString('Веб-отдел', $html);
         $this->assertStringContainsString('высокий', $html);
         $this->assertStringContainsString('mark@myzip.ru', $html);
@@ -68,6 +68,6 @@ class MarketingAssignmentExportTest extends TestCase
     {
         $name = app(MarketingAssignmentExportService::class)->filename($this->assignment(), 'zip');
 
-        $this->assertSame('Поручение 7 — Страница 404 _ в стиле сайта.zip', $name);
+        $this->assertSame('Аутсорс-задача 7 — Страница 404 _ в стиле сайта.zip', $name);
     }
 }

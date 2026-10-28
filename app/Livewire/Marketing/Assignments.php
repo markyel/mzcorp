@@ -16,9 +16,9 @@ use Livewire\WithFileUploads;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Маркетинг → «Поручения»: задачи соседним отделам (завести ящик, сверстать
+ * Маркетинг → «Аутсорс-задачи»: задачи соседним отделам (завести ящик, сверстать
  * страницу, выложить пресс-кит). У исполнителей нет доступа в MyLift, поэтому
- * поручение — подробная инструкция с файлами, которая выгружается архивом
+ * задача — подробная инструкция с файлами, которая выгружается архивом
  * (PDF + HTML + материалы), а статус и итог ведутся здесь.
  */
 class Assignments extends Component
@@ -41,7 +41,7 @@ class Assignments extends Component
 
     public string $newDue = '';
 
-    /** Открытое поручение. */
+    /** Открытая задача. */
     public ?int $openId = null;
 
     public string $title = '';
@@ -114,7 +114,7 @@ class Assignments extends Component
         return $a ? app(MarketingAssignmentExportService::class)->instructionsHtml($a) : '';
     }
 
-    /* ---------------------------- Поручения ---------------------------- */
+    /* ------------------------- Аутсорс-задачи ------------------------- */
 
     public function startNew(): void
     {
@@ -135,7 +135,7 @@ class Assignments extends Component
         $this->ensureAdmin();
         $this->resetMessages();
         if (trim($this->newTitle) === '') {
-            $this->error = 'Назовите поручение.';
+            $this->error = 'Назовите задачу.';
 
             return;
         }
@@ -151,7 +151,7 @@ class Assignments extends Component
         ]);
 
         $this->newForm = false;
-        $this->flash = 'Поручение заведено. Приложите файлы и распишите инструкцию.';
+        $this->flash = 'Задача заведена. Приложите файлы и распишите инструкцию.';
         $this->openAssignment($a->id);
         unset($this->assignments);
     }
@@ -256,7 +256,7 @@ class Assignments extends Component
         }
         $a->delete();
         $this->openId = null;
-        $this->flash = 'Поручение удалено.';
+        $this->flash = 'Задача удалена.';
         unset($this->assignments);
     }
 

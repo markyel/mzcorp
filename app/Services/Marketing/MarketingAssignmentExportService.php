@@ -9,7 +9,7 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\View;
 
 /**
- * Выгрузка поручения для исполнителя без доступа в MyLift: инструкция в PDF
+ * Выгрузка аутсорс-задачи для исполнителя без доступа в MyLift: инструкция в PDF
  * (читать и печатать) и HTML (копировать текст), материалы — в архиве рядом.
  *
  * Рендер PDF повторяет CorrespondenceExportService: PT Sans из
@@ -66,7 +66,7 @@ class MarketingAssignmentExportService
         return (string) $dompdf->output();
     }
 
-    /** Архив: инструкция (PDF + HTML) и папка «Материалы» с файлами поручения. */
+    /** Архив: инструкция (PDF + HTML) и папка «Материалы» с файлами задачи. */
     public function zip(MarketingAssignment $assignment): string
     {
         $assignment->loadMissing('files');
@@ -97,12 +97,12 @@ class MarketingAssignmentExportService
         return $bytes;
     }
 
-    /** Имя файла выгрузки: «Поручение 12 — Страница 404.zip». */
+    /** Имя файла выгрузки: «Аутсорс-задача 12 — Страница 404.zip». */
     public function filename(MarketingAssignment $assignment, string $ext): string
     {
         $title = $this->entryName(Str::limit((string) $assignment->title, 60, ''));
 
-        return 'Поручение '.$assignment->id.' — '.$title.'.'.$ext;
+        return 'Аутсорс-задача '.$assignment->id.' — '.$title.'.'.$ext;
     }
 
     private function entryName(string $name): string

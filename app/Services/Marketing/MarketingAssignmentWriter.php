@@ -8,7 +8,7 @@ use App\Services\AI\OpenAIChatService;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Подробная инструкция к поручению по короткой постановке (модель).
+ * Подробная инструкция к аутсорс-задаче по короткой постановке (модель).
  */
 class MarketingAssignmentWriter
 {

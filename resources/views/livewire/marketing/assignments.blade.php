@@ -34,13 +34,13 @@
 
     <div class="ds-card">
         <div class="ds-card-header flex-wrap">
-            <h3 class="text-[15px] font-semibold text-fg-1">📋 Поручения</h3>
+            <h3 class="text-[15px] font-semibold text-fg-1">📋 Аутсорс-задачи</h3>
             <span class="text-[12px] text-fg-3">задачи соседним отделам: инструкция и файлы выгружаются архивом, статус ведём здесь</span>
             <span class="flex-1"></span>
             <label class="text-[12px] text-fg-3 flex items-center gap-1">
                 <input type="checkbox" wire:model.live="showClosed"> закрытые
             </label>
-            <button type="button" class="btn btn-sm btn-primary" wire:click="startNew">Новое поручение</button>
+            <button type="button" class="btn btn-sm btn-primary" wire:click="startNew">Новая задача</button>
         </div>
 
         @if($newForm)
@@ -75,7 +75,7 @@
                     @endif
                 </div>
             @empty
-                <p class="text-[12.5px] text-fg-3">Поручений нет. Заведите первое: что сделать, кому, срок — и постановку своими словами.</p>
+                <p class="text-[12.5px] text-fg-3">Аутсорс-задач нет. Заведите первую: что сделать, кому, срок — и постановку своими словами.</p>
             @endforelse
         </div>
     </div>
@@ -181,7 +181,7 @@
                         @endif
                     @endforeach
                     <button type="button" class="btn btn-sm text-amber-800" wire:click="delete"
-                            wire:confirm="Удалить поручение «{{ $a->title }}» вместе с файлами?">Удалить</button>
+                            wire:confirm="Удалить задачу «{{ $a->title }}» вместе с файлами?">Удалить</button>
                 </div>
                 <div class="text-[11px] text-fg-4">
                     @if($a->handed_at)Передано {{ $a->handed_at->format('d.m.Y') }}. @endif

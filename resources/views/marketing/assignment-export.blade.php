@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>Поручение {{ $a->id }} — {{ $a->title }}</title>
+    <title>Аутсорс-задача {{ $a->id }} — {{ $a->title }}</title>
     <style>
         body { font-family: {!! $font !!}; font-size: 12px; line-height: 1.5; color: #1f2937; margin: {{ $forPdf ? '0' : '32px auto' }}; max-width: {{ $forPdf ? 'none' : '780px' }}; }
         h1 { font-size: 19px; margin: 0 0 4px; }
@@ -23,7 +23,7 @@
     </style>
 </head>
 <body>
-    <div class="muted">Поручение № {{ $a->id }} · {{ now()->format('d.m.Y') }}</div>
+    <div class="muted">Аутсорс-задача № {{ $a->id }} · {{ now()->format('d.m.Y') }}</div>
     <h1>{{ $a->title }}</h1>
 
     <table class="meta">
@@ -58,6 +58,6 @@
         </div>
     @endif
 
-    <p class="muted">Вопросы по поручению — постановщику@if($a->author?->email) ({{ $a->author->email }})@endif.</p>
+    <p class="muted">Вопросы по задаче — постановщику@if($a->author?->email) ({{ $a->author->email }})@endif.</p>
 </body>
 </html>

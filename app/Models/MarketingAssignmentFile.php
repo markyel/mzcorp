@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Файл к поручению: шаблон страницы, логотип, текст — уходит исполнителю в архиве.
+ * Файл к аутсорс-задаче: шаблон страницы, логотип, текст — уходит исполнителю в архиве.
  */
 class MarketingAssignmentFile extends Model
 {
