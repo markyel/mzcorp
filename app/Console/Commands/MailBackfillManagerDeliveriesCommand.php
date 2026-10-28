@@ -53,10 +53,10 @@ class MailBackfillManagerDeliveriesCommand extends Command
         if ($managerFilter !== null) {
             $query->where('assigned_user_id', $managerFilter);
         }
-        $reqs = $query->with(['emailMessage', 'assignedUser'])->get();
+        $reqs = $query->with(['emailMessage.mailbox', 'assignedUser'])->get();
 
         $stats = ['ok' => 0, 'skip_already' => 0, 'skip_no_personal' => 0,
-            'skip_same_mailbox' => 0, 'fail' => 0, 'dry' => 0];
+            'skip_same_mailbox' => 0, 'skip_source_inactive' => 0, 'fail' => 0, 'dry' => 0];
 
         foreach ($reqs as $r) {
             $em = $r->emailMessage;
@@ -91,6 +91,14 @@ class MailBackfillManagerDeliveriesCommand extends Command
                 continue;
             }
 
+            // Нечего отправить: письмо перечитывается только из исходного ящика, а он
+            // отключён (владелец архивирован). Раньше такое письмо пробовали каждые
+            // 30 минут без конца — 1155010 из ящика Ежова, 1166 попыток за месяц.
+            if ($em->mailbox && ! $em->mailbox->is_active) {
+                $stats['skip_source_inactive']++;
+                continue;
+            }
+
             if (! $apply) {
                 $this->line(sprintf('  DRY: msg#%d %s → %s', $em->id, $r->internal_code, $u->name));
                 $stats['dry']++;
@@ -114,9 +122,9 @@ class MailBackfillManagerDeliveriesCommand extends Command
 
         $this->newLine();
         $this->info(sprintf(
-            'Готово: доставлено=%d · уже_было=%d · нет_личного_ящика=%d · уже_в_ящике=%d · ошибки=%d · dry=%d',
+            'Готово: доставлено=%d · уже_было=%d · нет_личного_ящика=%d · уже_в_ящике=%d · источник_отключён=%d · ошибки=%d · dry=%d',
             $stats['ok'], $stats['skip_already'], $stats['skip_no_personal'],
-            $stats['skip_same_mailbox'], $stats['fail'], $stats['dry']
+            $stats['skip_same_mailbox'], $stats['skip_source_inactive'], $stats['fail'], $stats['dry']
         ));
         if (! $apply && $stats['dry'] > 0) {
             $this->warn('--dry-run: deliver() не вызван. Используй --apply.');

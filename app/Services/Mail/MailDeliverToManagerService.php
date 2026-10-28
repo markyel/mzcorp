@@ -396,6 +396,11 @@ class MailDeliverToManagerService
         if (! $sourceMailbox || ! $message->imap_uid || ! $message->folder) {
             return '';
         }
+        // Отключённый ящик (владелец архивирован) не открываем: вход в него падает,
+        // а каждая попытка — лишнее подключение к Яндексу.
+        if (! $sourceMailbox->is_active) {
+            return '';
+        }
 
         $client = null;
         try {
