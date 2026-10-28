@@ -15,7 +15,7 @@
             @if($this->enabled && $open)
                 @php $inputCls = 'h-[28px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500'; @endphp
                 <div class="border border-sky-200 bg-sky-50/40 rounded-md p-3 space-y-3">
-                    <div class="text-[12px] text-fg-3">Письмо поставщику QuoteParts отправит сам — от MyZip, на английском и китайском, с формой ответа. Ответы придут сюда.</div>
+                    <div class="text-[12px] text-fg-3">Письмо поставщику QuoteParts отправит сам — от MyZip, на языке контакта поставщика, с формой ответа. Ответы придут сюда.</div>
 
                     <div>
                         <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Позиции</div>

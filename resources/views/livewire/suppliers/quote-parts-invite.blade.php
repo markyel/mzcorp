@@ -129,7 +129,7 @@
                 {{ $status ? 'Изменить условия и пригласить ещё раз' : 'Пригласить в QuoteParts' }}
             </button>
             @if(! $status)
-                <span class="text-fg-4 text-[12px] ml-2">Поставщик получит письмо от MyZip на английском и китайском и примет режим цены по ссылке.</span>
+                <span class="text-fg-4 text-[12px] ml-2">Поставщик получит письмо от MyZip на выбранном языке и примет режим цены по ссылке.</span>
             @endif
         @else
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -146,7 +146,7 @@
                     @error('email')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror</label>
                 <label class="block"><span class="text-fg-3 text-[12px]">Язык страниц поставщика</span>
                     <select wire:model="locale" class="{{ $inputCls }}"><option value="en">English</option><option value="zh_CN">中文</option><option value="ru">Русский</option></select>
-                    <span class="text-fg-4 text-[11px]">Письмо-приглашение всегда на двух языках.</span></label>
+                    <span class="text-fg-4 text-[11px]">На этом языке уйдёт письмо-приглашение и будут письма и кабинет поставщика — и для адреса, который QuoteParts уже знает.</span></label>
             </div>
 
             <div class="text-[11px] uppercase tracking-wider text-fg-3 font-semibold pt-1">Режим цены — в нём поставщик будет давать все офферы</div>
