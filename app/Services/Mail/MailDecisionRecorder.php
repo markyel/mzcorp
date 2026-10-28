@@ -35,6 +35,7 @@ class MailDecisionRecorder
         'supplier_sender_code' => ['supplier', 'Ответ поставщика: отправитель + код заявки'],
         'supplier_rfq_subject' => ['supplier', 'Ответ поставщика по теме RFQ (тред сломан)'],
         'supplier_rfq_unregistered' => ['supplier', 'Тема RFQ, запрос поставщику ещё не зарегистрирован'],
+        'press_reply' => ['skipped', 'Ответ редакции на наш пресс-релиз'],
         'closed_won_spin_off' => ['created', 'Новый заказ в треде выигранной сделки — отдельная заявка'],
         'closed_won_invoice_child' => ['created', 'Цитата КП по выигранной сделке — дочерняя заявка на счёт'],
         'closed_won_post_sale' => ['post_sale', 'Постпродажа по выигранной сделке'],

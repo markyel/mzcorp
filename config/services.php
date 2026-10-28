@@ -513,6 +513,16 @@ return [
         ],
         // Лента новостей отрасли для еженедельного дайджеста.
         'news_digest_feed' => env('MEDIA_NEWS_DIGEST_FEED', 'https://liftpages.ru/rss.xml'),
+        // Пресс-релизы (медиаплан → «Пресс-релизы»): рассылка по базе СМИ.
+        'press' => [
+            // Ящик-отправитель по умолчанию (адрес Mailbox.email). Ответы редакций
+            // приходят в него же и привязываются к релизу (PressReplyHandler).
+            'mailbox_email' => env('PRESS_MAILBOX_EMAIL', 'info@myzip.ru'),
+            // Пауза между письмами рассылки, секунд: по письму в редакцию, а не
+            // пачкой — пачка с одного адреса читается почтовиками как спам.
+            'send_interval_seconds' => (int) env('PRESS_SEND_INTERVAL_SECONDS', 45),
+            'model' => env('PRESS_RELEASE_MODEL', 'gpt-4o'),
+        ],
     ],
 
     'mail_outbound' => [

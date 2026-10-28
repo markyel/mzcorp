@@ -50,6 +50,10 @@ class Workspace extends Component
     #[Url(as: 'm', except: '')]
     public string $period = '';
 
+    /** Раздел медиаплана: каналы и публикации | пресс-релизы. */
+    #[Url(as: 'media', except: 'plan')]
+    public string $mediaView = 'plan';
+
     public ?string $flashMessage = null;
 
     public ?string $flashError = null;

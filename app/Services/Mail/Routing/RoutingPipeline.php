@@ -11,6 +11,7 @@ use App\Services\Mail\Routing\Handlers\CrossMailboxCopyHandler;
 use App\Services\Mail\Routing\Handlers\LinkedThreadHandler;
 use App\Services\Mail\Routing\Handlers\LinkToRequestHandler;
 use App\Services\Mail\Routing\Handlers\PostSaleOrderHandler;
+use App\Services\Mail\Routing\Handlers\PressReplyHandler;
 use App\Services\Mail\Routing\Handlers\LoopForwardHandler;
 use App\Services\Mail\Routing\Handlers\NotInboundHandler;
 use App\Services\Mail\Routing\Handlers\OutboundHandler;
@@ -45,6 +46,8 @@ final class RoutingPipeline
         BlocklistHandler::class,
         CrossMailboxCopyHandler::class,
         SupplierReplyHandler::class,
+        // Ответ редакции на наш пресс-релиз — по треду рассылки, не заявка.
+        PressReplyHandler::class,
         CategorizeHandler::class,
         LinkToRequestHandler::class,
         ClosedWonThreadHandler::class,
