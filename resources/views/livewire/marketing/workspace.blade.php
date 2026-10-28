@@ -32,6 +32,7 @@
                     'feedback' => ['💬 Обратная связь', $this->feedbackOpenCount],
                     'competitors' => ['🎯 Конкуренты', $this->competitorNewCount ?: null],
                     'media' => ['📡 Медиаплан', null],
+                    'tasks' => ['📋 Поручения', $this->assignmentsOpenCount ?: null],
                 ];
             @endphp
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
@@ -1259,5 +1260,10 @@
         @else
             <livewire:marketing.media-plan wire:key="media-plan" />
         @endif
+    @endif
+
+    {{-- =========================== ПОРУЧЕНИЯ =========================== --}}
+    @if($tab === 'tasks')
+        <livewire:marketing.assignments />
     @endif
 </div>

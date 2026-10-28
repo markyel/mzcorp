@@ -523,6 +523,8 @@ return [
             'send_interval_seconds' => (int) env('PRESS_SEND_INTERVAL_SECONDS', 45),
             'model' => env('PRESS_RELEASE_MODEL', 'gpt-4o'),
         ],
+        // Поручения соседним отделам: модель, которая пишет инструкцию по постановке.
+        'assignment_model' => env('MARKETING_ASSIGNMENT_MODEL', 'gpt-4o'),
     ],
 
     'mail_outbound' => [

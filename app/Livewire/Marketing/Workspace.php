@@ -8,6 +8,7 @@ use App\Models\ClientFeedback;
 use App\Models\Competitor;
 use App\Models\CompetitorInsight;
 use App\Models\CompetitorReview;
+use App\Models\MarketingAssignment;
 use App\Models\MarketingContact;
 use App\Models\MarketingEntry;
 use App\Models\MarketingReport;
@@ -41,7 +42,7 @@ use Livewire\Component;
  */
 class Workspace extends Component
 {
-    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile', 'review', 'feedback', 'competitors', 'media'];
+    public const TABS = ['access', 'contacts', 'plan', 'log', 'report', 'profile', 'review', 'feedback', 'competitors', 'media', 'tasks'];
 
     #[Url(as: 'tab', except: 'access')]
     public string $tab = 'access';
@@ -303,6 +304,13 @@ class Workspace extends Component
             ->orderByRaw("case status when 'new' then 0 when 'in_progress' then 1 else 2 end")
             ->orderByDesc('id')
             ->get();
+    }
+
+    /** Открытые поручения соседним отделам — счётчик на вкладке. */
+    #[Computed]
+    public function assignmentsOpenCount(): int
+    {
+        return MarketingAssignment::query()->whereIn('status', ['draft', 'handed', 'in_progress'])->count();
     }
 
     #[Computed]
