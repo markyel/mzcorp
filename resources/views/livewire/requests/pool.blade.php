@@ -24,13 +24,13 @@
 @endphp
 
 {{--
-    Layout: rail (56px) + list nav (240px) + main.
+    Layout: rail (72px) + list nav (240px) + main.
     Topbar (~48px) приходит от x-app-layout, поэтому min-h берём от
     100vh - topbar. Internal scroll вне shell — основная страница
     скроллится естественно.
 --}}
 <div class="grid"
-     style="grid-template-columns: 56px 240px 1fr; min-height: calc(100vh - var(--topbar-h));">
+     style="grid-template-columns: 72px 240px 1fr; min-height: calc(100vh - var(--topbar-h));">
 
     {{-- ============== RAIL ============== --}}
     <x-left-rail active="requests" />

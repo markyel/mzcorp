@@ -64,10 +64,10 @@
 
             @auth
                 @if($showRail)
-                    {{-- Глобальный rail (56px) + main. Wrapper'ы могут отключить
+                    {{-- Глобальный rail (72px) + main. Wrapper'ы могут отключить
                          через :rail="false" если строят свой grid с доп. колонками
                          (pool — rail+list+main, catalog.search — rail+main внутри). --}}
-                    <main class="flex-1 grid" style="grid-template-columns: 56px 1fr; min-height: calc(100vh - var(--topbar-h));">
+                    <main class="flex-1 grid" style="grid-template-columns: 72px 1fr; min-height: calc(100vh - var(--topbar-h));">
                         <x-left-rail :active="$resolvedRailActive" />
                         <div class="min-w-0">
                             {{ $slot }}

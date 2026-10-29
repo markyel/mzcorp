@@ -1,7 +1,7 @@
-{{-- Layout: rail (56px) + main. Без list-nav (240px) как в Pool —
+{{-- Layout: rail (72px) + main. Без list-nav (240px) как в Pool —
      для каталога нет saved views / queue navigation.
      Макет: design/uploads/07-catalog-search.html. --}}
-<div style="display: grid; grid-template-columns: 56px 1fr; min-height: calc(100vh - var(--topbar-h));">
+<div style="display: grid; grid-template-columns: 72px 1fr; min-height: calc(100vh - var(--topbar-h));">
 
     <x-left-rail active="catalog" />
 
