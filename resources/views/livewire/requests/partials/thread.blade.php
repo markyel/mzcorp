@@ -44,7 +44,7 @@
         <div>
             @foreach($orderedThread as $msg)
                 @php
-                    $isOutbound = $msg->direction === MailDirection::Outbound;
+                    $isOutbound = $msg->direction === \App\Enums\MailDirection::Outbound;
                     $authorName = $msg->from_name ?: $msg->from_email;
                     $authorInitial = \Illuminate\Support\Str::of($authorName)->substr(0, 1)->upper();
                     $catLabel = $msg->category
