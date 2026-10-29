@@ -55,6 +55,21 @@ final class LinkedThreadHandler implements InboundRoutingHandler
      */
     private const NEW_REQUEST_CONFIDENCE = 0.8;
 
+    /**
+     * Плашка «возможно новая заявка» — только после счёта (решение заказчика 29.10.2026).
+     * До счёта «посчитайте ещё вот это» — расширение той же сделки: на истории менеджеры
+     * приняли плашку в «КП отправлено» 6 раз из 73, «На согласовании» — 1 из 9; после
+     * счёта — 11 из 45.
+     *
+     * @var list<RequestStatus>
+     */
+    private const POSSIBLE_NEW_REQUEST_STATUSES = [
+        RequestStatus::AwaitingInvoice,
+        RequestStatus::Invoiced,
+        RequestStatus::Paid,
+        RequestStatus::ClosedWon,
+    ];
+
     public function __construct(
         private readonly InternalSenderDetector $internalDetector,
         private readonly ReplyParseGate $parseGate,
@@ -186,10 +201,14 @@ final class LinkedThreadHandler implements InboundRoutingHandler
         // additional_items ИЛИ new_request ниже порога) — вероятно ОТДЕЛЬНАЯ
         // новая заявка. Поднимаем менеджеру подсказку «Создать новую заявку»;
         // auto_mode для inbound_possible_new_request выключен по умолчанию.
+        // С 29.10.2026 — только после счёта и не на просьбу поправить КП/счёт
+        // («добавьте в КП M00217», «внесите изменения в счёт»): там менеджеры
+        // отклоняли плашку в 34 случаях из 37 — это та же сделка.
         $intent = $intentResult['payload']['intent'] ?? null;
         $intentConf = (float) ($intentResult['confidence'] ?? 0);
         if ($shouldParse
-            && $linkedRequest->status->isPostQuote()
+            && in_array($linkedRequest->status, self::POSSIBLE_NEW_REQUEST_STATUSES, true)
+            && ! self::isQuoteEditText($this->cleaner->clientOwnText($message))
             && (
                 $intent === 'additional_items'
                 || ($intent === 'new_request' && $intentConf < self::NEW_REQUEST_CONFIDENCE)
@@ -388,5 +407,22 @@ final class LinkedThreadHandler implements InboundRoutingHandler
             reason: 'sticky_direct_mailbox_on_reply email_message_id=' . $message->id,
             by: null, // system-actor — переподчинение по правилу, не вручную
         );
+    }
+
+    /**
+     * Клиент просит поправить уже отправленный КП или счёт: «добавьте в КП M00217 - 1 шт»,
+     * «прошу обновить КП и добавить подшипник», «внесите изменения в счёт 11200», «в счёт
+     * добавьте ещё…». Это та же сделка, не новая заявка. Смотрим начало собственного текста.
+     */
+    public static function isQuoteEditText(string $text): bool
+    {
+        $h = mb_strtolower(mb_substr($text, 0, 600));
+
+        return preg_match(
+            '~(добав\w*|включ\w*|допиш\w*)[^.!?\n]{0,40}(кп|сч[её]т|предложени|заказ)'
+            .'|(обнов\w*|актуализ\w*|измен\w*|исправ\w*|перевыстав\w*|поправ\w*|скорректир\w*)[^.!?\n]{0,30}(кп|сч[её]т|предложени)'
+            .'|(в|к)\s+(кп|сч[её]т\w*|предложени\w*)\s+(добав|включ)~u',
+            $h,
+        ) === 1;
     }
 }
