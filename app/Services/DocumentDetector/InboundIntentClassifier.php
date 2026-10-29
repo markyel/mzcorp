@@ -227,6 +227,16 @@ class InboundIntentClassifier
             $confidence = self::INVOICE_NO_TOKEN_CONF_CAP;
         }
 
+        // Счёт обещан ПОТОМ: «да всё подходит, ждём оплату, как оплатят — мы
+        // попросим счёт» (M-2026-18985), «при поступлении предоплаты запросим
+        // счёт» (M-2026-4162). Слово «счёт» есть, но клиент ждёт денег у себя —
+        // это «на согласовании», а не «ждёт счёт».
+        if ($type === DetectorType::InboundInvoiceRequest
+            && (new \App\Services\Mail\InvoiceMentionMatcher)->defersInvoice($this->ownText($message))
+        ) {
+            $type = DetectorType::InboundUnderReview;
+        }
+
         // В ранних статусах (до квотирования) автоприменяем ТОЛЬКО decline
         // (явная отмена/отказ). Остальные интенты (счёт/доп.позиции/согласование/
         // отложить) на ранней стадии преждевременны — downgrade в unclear,
@@ -298,20 +308,30 @@ class InboundIntentClassifier
      */
     private function mentionsInvoiceToken(EmailMessage $message): bool
     {
-        $raw = trim((string) ($message->body_plain ?: strip_tags((string) $message->body_html)));
-        if ($raw === '') {
+        $text = $this->ownText($message);
+        if ($text === '') {
             return false;
         }
 
-        // Собственный текст клиента — единый владелец понятия
-        // (EmailTextCleanerService::clientOwnText). Если после среза цитаты
-        // осталось меньше 12 символов (ответ-«одно слово» под цитатой), как и
-        // раньше берём весь текст, чтобы не потерять короткое «Счёт, пожалуйста».
-        $own = trim(app(\App\Services\Mail\EmailTextCleanerService::class)->clientOwnText($message));
-        $text = mb_strlen($own) >= 12 ? $own : $raw;
-
         // Слабое упоминание счёта — единый владелец понятия InvoiceMentionMatcher.
         return (new \App\Services\Mail\InvoiceMentionMatcher)->mentions($text);
+    }
+
+    /**
+     * Собственный текст клиента — единый владелец понятия
+     * (EmailTextCleanerService::clientOwnText). Если после среза цитаты
+     * осталось меньше 12 символов (ответ-«одно слово» под цитатой), как и
+     * раньше берём весь текст, чтобы не потерять короткое «Счёт, пожалуйста».
+     */
+    private function ownText(EmailMessage $message): string
+    {
+        $raw = trim((string) ($message->body_plain ?: strip_tags((string) $message->body_html)));
+        if ($raw === '') {
+            return '';
+        }
+        $own = trim(app(\App\Services\Mail\EmailTextCleanerService::class)->clientOwnText($message));
+
+        return mb_strlen($own) >= 12 ? $own : $raw;
     }
 
     /** После письма клиента по заявке уже ушёл распознанный КП или счёт. */
