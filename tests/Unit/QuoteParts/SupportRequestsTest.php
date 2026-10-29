@@ -5,6 +5,7 @@ namespace Tests\Unit\QuoteParts;
 use App\Livewire\QuoteParts\SupportRequests;
 use App\Notifications\QuotePartsConversationNotification;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -76,6 +77,87 @@ class SupportRequestsTest extends TestCase
         Http::assertSent(fn ($r) => str_ends_with($r->url(), '/conversations/32/reopen'));
 
         $c->call('close', 31, 'whatever')->assertStatus(422);
+    }
+
+    /** Меню шаблонов в панели редактора читает личную библиотеку — пустая таблица в памяти. */
+    private function withTemplatesTable(): void
+    {
+        config(['database.connections.qps_test' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => ''], 'database.default' => 'qps_test']);
+        \Illuminate\Support\Facades\Schema::create('letter_templates', function (\Illuminate\Database\Schema\Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('parent_id')->nullable();
+            $t->unsignedBigInteger('owner_user_id')->nullable();
+            $t->boolean('is_folder')->default(false);
+            $t->string('name');
+            $t->string('subject')->nullable();
+            $t->text('body')->nullable();
+            $t->integer('sort_order')->default(0);
+            $t->timestamps();
+        });
+    }
+
+    public function test_the_reply_goes_from_the_rich_editor_with_copies_and_pictures_in_the_text(): void
+    {
+        $this->withTemplatesTable();
+        config(['services.quoteparts.token' => 't', 'services.quoteparts.url' => 'https://qp.test', 'app.url' => 'https://mzcorp.test']);
+        Storage::fake('local');
+        $answered = $this->conversation(['messages' => [
+            ['id' => 1, 'direction' => 'in', 'author' => 'Anna', 'text' => 'Не приходит код.', 'at' => '2026-10-27T15:00:00+00:00', 'send_error' => null, 'attachments' => []],
+            ['id' => 2, 'direction' => 'out', 'author' => 'Ольга', 'text' => 'Проверьте спам.', 'cc' => ['boss@newparts.example'], 'at' => '2026-10-27T16:00:00+00:00', 'send_error' => null, 'attachments' => []],
+            ['id' => 3, 'direction' => 'in', 'author' => 'Anna', 'text' => 'Нет и там.', 'at' => '2026-10-27T17:00:00+00:00', 'send_error' => null, 'attachments' => []],
+        ]]);
+        Http::fake([
+            'qp.test/api/v1/conversations/31/messages' => Http::response(['ok' => true]),
+            'qp.test/api/v1/conversations*' => Http::response(['conversations' => [$answered]]),
+        ]);
+        $user = (new \App\Models\User)->forceFill(['id' => 9, 'name' => 'Ольга', 'quoteparts_pilot' => true]);
+
+        $c = Livewire::actingAs($user)->test(SupportRequests::class)->call('load')->call('open', 31);
+        // Копия — как в прошлом нашем ответе.
+        $c->assertSet('ccRaw', 'boss@newparts.example');
+        $this->assertStringContainsString('mailEditor(', $c->html());
+        $this->assertStringContainsString('копия: boss@newparts.example', $c->html());
+
+        // Картинка, загруженная в текст до отправки, лежит в папке черновика.
+        $key = $c->get('draftKey');
+        Storage::disk('local')->put(\App\Http\Controllers\QuoteParts\SupportInlineImageController::dir(9, $key).'/qpi-abcdef123456.png', 'png');
+        $src = 'https://mzcorp.test/dashboard/quoteparts/support/images/'.$key.'/qpi-abcdef123456.png';
+
+        $c->set('bodyHtml', '<p>Вот <b>скрин</b>:</p><img src="'.$src.'"><table><tr><td>a</td></tr></table>')
+            ->set('bccRaw', 'Директор <dir@myzip.example>, не адрес')->call('reply')->assertHasErrors('bccRaw');
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/messages'));
+        $c->set('bccRaw', 'Директор <dir@myzip.example>')->call('reply')->assertHasNoErrors();
+
+        Http::assertSent(function ($r) {
+            if (! str_ends_with($r->url(), '/conversations/31/messages')) {
+                return false;
+            }
+            $body = $r->body();
+
+            return str_contains($body, 'boss@newparts.example') && str_contains($body, 'dir@myzip.example')
+                && str_contains($body, 'cid:qpi-abcdef123456.png') && ! str_contains($body, '/support/images/')
+                && str_contains($body, 'name="inline[]"; filename="qpi-abcdef123456.png"')
+                // Таблица — с рамками для почтовиков (OutboundHtmlPostProcessor::emailSafe).
+                && str_contains($body, 'border:1px solid')
+                && str_contains($body, "Вот скрин:");
+        });
+        // Черновик после отправки — новый, картинки старого удалены.
+        $this->assertNotSame($key, $c->get('draftKey'));
+        $this->assertFalse(Storage::disk('local')->exists(\App\Http\Controllers\QuoteParts\SupportInlineImageController::dir(9, $key).'/qpi-abcdef123456.png'));
+    }
+
+    public function test_a_russian_reply_to_a_foreign_letter_asks_for_the_translation_first(): void
+    {
+        $this->withTemplatesTable();
+        config(['services.quoteparts.token' => 't', 'services.quoteparts.url' => 'https://qp.test']);
+        Http::fake(['qp.test/api/v1/conversations*' => Http::response(['conversations' => [$this->conversation()]])]);
+        $user = (new \App\Models\User)->forceFill(['id' => 9, 'name' => 'Ольга', 'quoteparts_pilot' => true]);
+
+        $c = Livewire::actingAs($user)->test(SupportRequests::class)->call('load')->call('open', 31);
+        $this->assertStringContainsString('🌐 Перевести на английский', $c->html());
+        $c->set('bodyHtml', '<p>Проверьте папку «Спам».</p>')->call('reply')->assertHasErrors('bodyText');
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/messages'));
+        $c->set('bodyHtml', '<p></p>')->call('reply')->assertHasErrors('bodyText');
     }
 
     public function test_answer_language_and_waiting(): void

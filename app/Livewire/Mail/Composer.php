@@ -3,22 +3,20 @@
 namespace App\Livewire\Mail;
 
 use App\Enums\Role;
+use App\Livewire\Concerns\InsertsLetterTemplates;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
-use App\Models\LetterTemplate;
 use App\Models\Mailbox;
 use App\Models\Request as RequestModel;
 use App\Models\User;
 use App\Services\Mail\EmailDraftService;
 use App\Services\Mail\HtmlSanitizer;
-use App\Services\Mail\LetterTemplateService;
 use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\MailHistoryMirrorService;
 use App\Services\Mail\MailQuoteBuilder;
 use App\Services\Mail\OutboundReplyHooks;
 use App\Services\Mail\OutgoingMailSender;
 use App\Services\Mail\OutgoingSendRetryService;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -45,6 +43,7 @@ use Livewire\WithFileUploads;
  */
 class Composer extends Component
 {
+    use InsertsLetterTemplates;
     use WithFileUploads;
 
     public bool $open = false;
@@ -342,82 +341,10 @@ class Composer extends Component
 
     /* ---------------------------- шаблоны ---------------------------- */
 
-    /**
-     * Личное дерево шаблонов для меню вставки — та же библиотека, что во
-     * вкладке «Переписка» карточки заявки (раздел «Шаблоны писем»).
-     *
-     * @return Collection<int, LetterTemplate>
-     */
-    #[Computed]
-    public function templateTree()
+    /** Шаблоны — InsertsLetterTemplates; вставленный шаблон сразу в черновик. */
+    protected function afterTemplateInserted(): void
     {
-        return app(LetterTemplateService::class)->tree((int) auth()->id());
-    }
-
-    /** Свои папки — выбор при «Сохранить как шаблон». */
-    #[Computed]
-    public function templateFolders()
-    {
-        return LetterTemplate::folders()
-            ->ownedBy((int) auth()->id())
-            ->orderBy('name')
-            ->get(['id', 'name']);
-    }
-
-    /**
-     * Вставить шаблон в тело. Редактор здесь богатый (HTML), а шаблоны в
-     * библиотеке хранятся простым текстом — поэтому переводим строки в
-     * абзацы и дописываем в конец, не затирая уже набранное.
-     */
-    public function insertTemplateById(int $id, EmailDraftService $drafts): void
-    {
-        $tpl = LetterTemplate::templates()
-            ->ownedBy((int) auth()->id())
-            ->find($id);
-        if (! $tpl) {
-            return;
-        }
-
-        $body = trim((string) $tpl->body);
-        if ($body !== '') {
-            $html = collect(preg_split('/\R/u', $body) ?: [])
-                ->map(fn ($line) => '<p>'.($line === '' ? '<br>' : e($line)).'</p>')
-                ->implode('');
-            $this->bodyHtml = trim(strip_tags($this->bodyHtml)) === ''
-                ? $html
-                : rtrim($this->bodyHtml).$html;
-            $this->bodyText = trim($this->htmlToPlain($this->bodyHtml));
-        }
-
-        if (trim((string) $tpl->subject) !== '' && trim($this->subject) === '') {
-            $this->subject = mb_substr((string) $tpl->subject, 0, 998);
-        }
-
-        $this->autoSave($drafts);
-        // Редактор хранит своё состояние в JS — просим подтянуть новое тело.
-        $this->dispatch('mail-editor-set-html', html: $this->bodyHtml);
-    }
-
-    /** Сохранить набранное письмо в личную библиотеку шаблонов. */
-    public function saveAsTemplate(string $name, ?int $parentId): void
-    {
-        $name = trim($name);
-        $body = trim($this->htmlToPlain($this->bodyHtml));
-        if ($name === '' || $body === '') {
-            $this->dispatch('mail-composer-note', text: 'Нужны название шаблона и непустое письмо.');
-
-            return;
-        }
-
-        app(LetterTemplateService::class)->saveFromLetter(
-            name: $name,
-            body: $body,
-            parentId: $parentId,
-            subject: trim($this->subject) !== '' ? $this->subject : null,
-            by: auth()->user(),
-        );
-        unset($this->templateTree, $this->templateFolders);
-        $this->dispatch('mail-composer-note', text: 'Шаблон сохранён.');
+        $this->autoSave(app(EmailDraftService::class));
     }
 
     /** Обычные вложения (чипы); inline-картинки тела в списке не показываем. */
@@ -697,18 +624,6 @@ class Composer extends Component
     private function safeFilename(string $name): string
     {
         return mb_substr(preg_replace('/[^A-Za-z0-9._\-]/', '_', $name) ?? 'file', 0, 80);
-    }
-
-    /** HTML → читаемый plain (для валидации и plain-альтернативы письма). */
-    private function htmlToPlain(string $html): string
-    {
-        $t = preg_replace('#<\s*br\s*/?>#i', "\n", $html) ?? $html;
-        $t = preg_replace('#</\s*(p|div|li|h3|h4|blockquote)\s*>#i', "\n", $t) ?? $t;
-        $t = strip_tags($t);
-        $t = html_entity_decode($t, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        $t = preg_replace("/\n{3,}/", "\n\n", $t) ?? $t;
-
-        return trim($t);
     }
 
     private function describeError(string $code): string

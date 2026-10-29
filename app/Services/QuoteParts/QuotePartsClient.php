@@ -361,12 +361,19 @@ class QuotePartsClient
     }
 
     /**
+     * $letter — ответ из богатого редактора: html (картинки в нём по cid: — inline-файлы с этими именами),
+     * cc / bcc — копии и скрытые копии; text тогда — plain-вариант письма.
+     *
      * @param  list<array{path:string, name:string}>  $files
+     * @param  array{html?:?string, cc?:list<string>, bcc?:list<string>, inline?:list<array{path:string, name:string}>}  $letter
      * @return array<string, mixed>
      */
-    public function sendConversationMessage(int $id, string $text, ?string $authorName, array $files = []): array
+    public function sendConversationMessage(int $id, string $text, ?string $authorName, array $files = [], array $letter = []): array
     {
-        return $this->multipart('/api/v1/conversations/'.$id.'/messages', ['text' => $text, 'author_name' => $authorName], $files, 'conversation message');
+        $fields = ['text' => $text, 'author_name' => $authorName, 'html' => $letter['html'] ?? null,
+            'cc' => array_values($letter['cc'] ?? []) ?: null, 'bcc' => array_values($letter['bcc'] ?? []) ?: null];
+
+        return $this->multipart('/api/v1/conversations/'.$id.'/messages', $fields, $files, 'conversation message', $letter['inline'] ?? []);
     }
 
     /** @return array<string, mixed> */
@@ -571,13 +578,29 @@ class QuotePartsClient
      * @param  list<array{path:string, name:string}>  $files
      * @return array<string, mixed>
      */
-    private function multipart(string $url, array $fields, array $files, string $what): array
+    /** @param  list<array{path:string, name:string}>  $inline  картинки в тексте письма (поле inline[]) */
+    private function multipart(string $url, array $fields, array $files, string $what, array $inline = []): array
     {
         $request = $this->http();
         foreach ($files as $file) {
             $request = $request->attach('files[]', (string) file_get_contents($file['path']), $file['name']);
         }
-        $response = $request->post($url, array_filter($fields, fn ($v) => $v !== null));
+        foreach ($inline as $file) {
+            $request = $request->attach('inline[]', (string) file_get_contents($file['path']), $file['name']);
+        }
+        $fields = array_filter($fields, fn ($v) => $v !== null);
+        // С файлами запрос уходит multipart: список — отдельными полями cc[0], cc[1]… (без файлов — JSON как есть).
+        if ($files !== [] || $inline !== []) {
+            foreach ($fields as $key => $value) {
+                if (is_array($value)) {
+                    unset($fields[$key]);
+                    foreach (array_values($value) as $i => $item) {
+                        $fields[$key.'['.$i.']'] = $item;
+                    }
+                }
+            }
+        }
+        $response = $request->post($url, $fields);
 
         if ($response->status() === 422) {
             throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял '.$what.'.');

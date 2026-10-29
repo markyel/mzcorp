@@ -183,7 +183,8 @@ class HtmlSanitizer
         if (preg_match('#^cid:[^\s"\']+$#i', $src)) {
             return true;
         }
-        if (! preg_match('#^(?:https?://[^/\s]+)?/attachments/cid/\d+/[^\s"\']+$#i', $src)) {
+        // …и картинки ответа поддержки QuoteParts до отправки (SupportInlineImageController).
+        if (! preg_match('#^(?:https?://[^/\s]+)?(?:/attachments/cid/\d+/[^\s"\']+|/dashboard/quoteparts/support/images/[A-Za-z0-9]{16}/qpi-[a-z0-9]{12}\.(?:png|jpg|gif))$#i', $src)) {
             return false;
         }
         $host = parse_url($src, PHP_URL_HOST);

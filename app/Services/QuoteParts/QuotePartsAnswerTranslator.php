@@ -42,4 +42,37 @@ class QuotePartsAnswerTranslator
             return null;
         }
     }
+
+    /**
+     * Ответ из богатого редактора (ответ поддержки QuoteParts): переводим только текст, разметка — таблицы,
+     * ссылки, картинки, выделения — остаётся как была. Результат ещё раз пропускает HtmlSanitizer у вызывающего.
+     */
+    public function toEnglishHtml(string $html): ?string
+    {
+        $html = trim($html);
+        if ($html === '') {
+            return null;
+        }
+
+        $system = 'You translate a support e-mail of the QuoteParts platform (elevator and escalator spare parts) from Russian to English. '
+            .'The input is HTML. Translate only the human-readable text; keep every tag, attribute, link, image and table exactly as it is. '
+            .'Keep brand names, model codes, part numbers, dimensions, quantities and units unchanged. '
+            .'Write natural, polite, concise business English. Do not add or drop information. Return only the translated HTML.';
+
+        try {
+            $result = $this->openai->chat([
+                ['role' => 'system', 'content' => $system],
+                ['role' => 'user', 'content' => $html],
+            ], config('services.openai.intent_model', 'gpt-4o-mini'), ['temperature' => 0, 'max_tokens' => 4000]);
+
+            // Модель иногда оборачивает ответ в ```html … ```.
+            $out = trim(preg_replace('/^```(?:html)?\s*|\s*```$/i', '', trim((string) ($result['content'] ?? ''))) ?? '');
+
+            return $out !== '' ? $out : null;
+        } catch (Throwable $e) {
+            Log::warning('QuotePartsAnswerTranslator: LLM call failed (non-fatal)', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+    }
 }

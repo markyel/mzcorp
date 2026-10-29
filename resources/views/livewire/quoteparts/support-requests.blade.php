@@ -1,6 +1,21 @@
 {{-- Письма на support@quoteparts.net (App\Livewire\QuoteParts\SupportRequests): кто писал, переписка, ответ с support@. --}}
 <div class="ds-card mb-4" wire:init="load">
-    @php $inputCls = 'w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500'; @endphp
+    {{-- Форма ответа: поля адресатов и рамка редактора — в духе композера «Почты» (сам редактор — x-mail.rich-editor). --}}
+    <style>
+    .qps-reply{position:relative;display:flex;flex-direction:column;gap:6px;margin-top:6px}
+    .qps-fields{border:1px solid var(--border);border-radius:var(--r-md);padding:0 10px;background:var(--bg-surface)}
+    .qps-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:12.5px}
+    .qps-row:last-child{border-bottom:none}
+    .qps-row .k{width:58px;color:var(--fg-3);font-weight:500;flex-shrink:0}
+    .qps-row input{flex:1;border:none;outline:none;background:transparent;font:400 13px/1.3 var(--font-sans);color:var(--fg-1);min-width:60px}
+    .qps-editor{border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;background:var(--bg-surface)}
+    .qps-editor .mail-rte{min-height:180px}
+    .qps-editor .rte-ed{max-height:50vh}
+    .qps-att{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:999px;background:var(--sky-50);color:var(--sky-700);font:500 11px/1 var(--font-sans)}
+    .qps-att button{border:none;background:none;color:inherit;cursor:pointer;opacity:.7;font-size:12px}
+    .qps-dropveil{position:absolute;inset:0;z-index:12;background:rgba(14,165,233,.08);border:2px dashed var(--sky-500);border-radius:8px;display:flex;align-items:center;justify-content:center;pointer-events:none}
+    .qps-dropveil span{padding:8px 14px;border-radius:999px;background:var(--bg-surface);border:1px solid var(--sky-500);font:600 13px/1 var(--font-sans);color:var(--sky-700)}
+    </style>
     <div class="ds-card-header">
         <h3>Письма в поддержку</h3>
         <span class="text-[12px] text-fg-3 ml-2">support@quoteparts.net · ответ уйдёт письмом от «QuoteParts Support»</span>
@@ -71,6 +86,8 @@
                                     {{ $m['direction'] === 'out' ? 'Поддержка' : ($who ?? 'Отправитель') }}{{ $m['author'] ? ' · '.$m['author'] : '' }}
                                     · {{ $m['at'] ? \Illuminate\Support\Carbon::parse($m['at'])->timezone(config('app.timezone'))->format('d.m.Y H:i') : '' }}
                                     @if($m['send_error'])<span class="text-red-700">· не отправлено</span>@endif
+                                    @if(! empty($m['cc']))<span title="Копия">· копия: {{ implode(', ', $m['cc']) }}</span>@endif
+                                    @if(! empty($m['bcc']))<span title="Скрытая копия">· скрытая: {{ implode(', ', $m['bcc']) }}</span>@endif
                                 </div>
                                 <div class="whitespace-pre-wrap">{{ $m['text'] }}</div>
                                 @foreach($m['attachments'] as $a)
@@ -78,21 +95,93 @@
                                 @endforeach
                             </div>
                         @endforeach
-                        @if($c['status'] === 'open' && $canAnswer)
-                            <textarea wire:model="text" rows="3" placeholder="Ответ по-русски" class="{{ $inputCls }}"></textarea>
-                            @error('text')<div class="text-red-700 text-[12px]">{{ $message }}</div>@enderror
-                            @if($english)
-                                <div class="flex items-center gap-2">
-                                    <button type="button" wire:click="translate" wire:loading.attr="disabled" wire:target="translate" class="btn btn-xs">🌐 Перевести на английский</button>
-                                    <span class="text-[11px] text-fg-4">писали не по-русски — уйдёт английский вариант, его можно поправить</span>
+                        @if($c['status'] === 'open' && $canAnswer && $draftKey !== '')
+                            {{-- Ответ — тем же редактором, что в «Почте» (x-mail.rich-editor + шаблоны + адресная книга).
+                                 Файлы можно перетащить в форму: кладём их в скрытый input (wire:model newFiles) и стреляем change. --}}
+                            <div class="qps-reply" wire:key="qps-reply-{{ $draftKey }}"
+                                 x-data="{
+                                    dragging: false,
+                                    onDrop(ev) {
+                                        this.dragging = false;
+                                        const dropped = ev.dataTransfer?.files;
+                                        if (! dropped || dropped.length === 0) return;
+                                        const input = this.$refs.files;
+                                        const dt = new DataTransfer();
+                                        for (const f of dropped) dt.items.add(f);
+                                        input.files = dt.files;
+                                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                 }"
+                                 @dragenter.prevent="dragging = true" @dragover.prevent="dragging = true"
+                                 @dragleave.prevent="if (! $el.contains($event.relatedTarget)) dragging = false"
+                                 @drop.prevent="onDrop($event)"
+                                 @qps-files-added.window="$refs.files.value = ''">
+                                <div class="qps-dropveil" x-show="dragging" x-cloak><span>📎 Отпустите, чтобы прикрепить</span></div>
+                                <div class="qps-fields" data-rcpt-group>
+                                    <div class="qps-row">
+                                        <span class="k">Кому</span>
+                                        <span class="text-fg-1">{{ $contact !== '' ? $contact : ($who ?? '—') }}</span>
+                                        <span class="ml-auto text-[11px] text-fg-4">от «QuoteParts Support» · support@quoteparts.net</span>
+                                    </div>
+                                    <div class="qps-row">
+                                        <span class="k">Копия</span>
+                                        <x-mail.recipient-input field="cc" model="ccRaw" debounce="600ms" placeholder="—" />
+                                    </div>
+                                    <div class="qps-row">
+                                        <span class="k" title="Адресаты скрытой копии не видны остальным получателям">Скрытая</span>
+                                        <x-mail.recipient-input field="bcc" model="bccRaw" debounce="600ms" placeholder="—" />
+                                    </div>
                                 </div>
-                                <textarea wire:model="textEn" rows="3" placeholder="Answer in English" class="{{ $inputCls }}"></textarea>
-                                @error('textEn')<div class="text-red-700 text-[12px]">{{ $message }}</div>@enderror
-                            @endif
-                            <input type="file" wire:model="files" multiple class="block w-full text-[12px]">
-                            <div class="flex gap-2">
-                                <button type="button" wire:click="reply" wire:loading.attr="disabled" wire:target="reply,files" class="btn btn-sm btn-primary">Ответить</button>
-                                <span class="text-[11px] text-fg-4 self-center">без ответа — «Решено» или «Не требует внимания» в строке письма</span>
+                                @error('ccRaw')<div class="text-red-700 text-[12px]">{{ $message }}</div>@enderror
+                                @error('bccRaw')<div class="text-red-700 text-[12px]">{{ $message }}</div>@enderror
+
+                                @if($english)
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" x-on:click="window.dispatchEvent(new CustomEvent('mail-editor-flush'))" wire:click="translate"
+                                                wire:loading.attr="disabled" wire:target="translate" class="btn btn-xs">
+                                            <span wire:loading.remove wire:target="translate">🌐 Перевести на английский</span>
+                                            <span wire:loading wire:target="translate">Перевожу…</span>
+                                        </button>
+                                        <span class="text-[11px] text-fg-4">писали не по-русски — напишите по-русски и переведите, перевод можно поправить (Ctrl+Z вернёт русский)</span>
+                                    </div>
+                                @endif
+
+                                <div class="qps-editor">
+                                    <x-mail.rich-editor :wire-id="$this->getId()" :html="$bodyHtml"
+                                                        :upload-url="route('quoteparts.support.images.store', $draftKey)"
+                                                        :editor-key="'qps-rte-'.$draftKey"
+                                                        :placeholder="$english ? 'Ответ — по-русски, затем «Перевести», или сразу по-английски…' : 'Ваш ответ…'">
+                                        <x-slot:tools>@include('livewire.mail._composer-templates-menu')</x-slot:tools>
+                                    </x-mail.rich-editor>
+                                </div>
+                                @error('bodyText')<div class="text-red-700 text-[12px]">{{ $message }}</div>@enderror
+                                @error('newFiles.*')<div class="text-red-700 text-[12px]">{{ $message }}</div>@enderror
+                                @error('files.*')<div class="text-red-700 text-[12px]">{{ $message }}</div>@enderror
+
+                                @if($files !== [])
+                                    <div class="flex flex-wrap gap-1.5">
+                                        @foreach($files as $i => $f)
+                                            <span class="qps-att" wire:key="qpsf-{{ $draftKey }}-{{ $i }}">
+                                                {{ \Illuminate\Support\Str::limit($f->getClientOriginalName(), 32) }}
+                                                <button type="button" wire:click="removeFile({{ $i }})" title="Убрать">×</button>
+                                            </span>
+                                        @endforeach
+                                    </div>
+                                @endif
+
+                                <div class="flex items-center gap-2">
+                                    <button type="button" x-on:click="window.dispatchEvent(new CustomEvent('mail-editor-flush'))" wire:click="reply"
+                                            wire:loading.attr="disabled" wire:target="reply,newFiles" class="btn btn-sm btn-primary">
+                                        <span wire:loading.remove wire:target="reply">Ответить</span>
+                                        <span wire:loading wire:target="reply">Отправка…</span>
+                                    </button>
+                                    <label class="btn btn-sm cursor-pointer" title="Прикрепить файл — или перетащите файлы в форму">📎 Файл
+                                        <input type="file" multiple wire:model="newFiles" x-ref="files" class="hidden"></label>
+                                    <span wire:loading wire:target="newFiles" class="text-[11px] text-fg-4">Загружаю файл…</span>
+                                    <span class="text-[11px] text-emerald-700" x-data="{ t: '' }" x-show="t" x-cloak x-text="t"
+                                          @mail-composer-note.window="t = $event.detail.text; setTimeout(() => t = '', 4000)"></span>
+                                    <span class="ml-auto text-[11px] text-fg-4">без ответа — «Решено» или «Не требует внимания» в строке письма</span>
+                                </div>
                             </div>
                         @endif
                     </div>

@@ -453,6 +453,14 @@ Route::middleware('auth')->group(function () {
         ->whereNumber(['conversation', 'message', 'index'])
         ->name('quoteparts.conversation-file');
 
+    // Картинка в тексте ответа поддержки QuoteParts — до отправки лежит у нас (доступ: QuotePartsPilot::canAnswer).
+    Route::post('/dashboard/quoteparts/support/images/{draft}', [\App\Http\Controllers\QuoteParts\SupportInlineImageController::class, 'store'])
+        ->where('draft', '[A-Za-z0-9]{16}')
+        ->name('quoteparts.support.images.store');
+    Route::get('/dashboard/quoteparts/support/images/{draft}/{name}', [\App\Http\Controllers\QuoteParts\SupportInlineImageController::class, 'show'])
+        ->where(['draft' => '[A-Za-z0-9]{16}', 'name' => 'qpi-[a-z0-9]{12}\.(png|jpg|gif)'])
+        ->name('quoteparts.support.images.show');
+
     // Фото предложения поставщика из QuoteParts (копия, восстановленное, аналог).
     Route::get('/dashboard/quoteparts/offers/{offer}/photos/{index}', \App\Http\Controllers\QuoteParts\OfferPhotoController::class)
         ->whereNumber(['offer', 'index'])
