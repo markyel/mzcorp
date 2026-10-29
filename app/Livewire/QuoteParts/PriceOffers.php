@@ -70,9 +70,12 @@ class PriceOffers extends Component
     #[Url(as: 'pa', except: false)]
     public bool $withStale = false;
 
-    /** «в т.ч. без ответов»: в «Ждём ответа и отказы» — и запрошенные позиции, где не ответил никто. */
-    #[Url(as: 'pu', except: false)]
-    public bool $withUnanswered = false;
+    /**
+     * «в т.ч. без ответов»: в «Ждём ответа и отказы» — и запрошенные позиции, где не ответил никто.
+     * Включён по умолчанию (решение заказчика 29.10.2026); снятая галочка — `pu=false` в адресе.
+     */
+    #[Url(as: 'pu', except: true)]
+    public bool $withUnanswered = true;
 
 
     /** Открытая переписка по отказу: id строки отказа (declines). */
