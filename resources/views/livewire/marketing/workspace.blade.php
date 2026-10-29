@@ -32,6 +32,7 @@
                     'feedback' => ['💬 Обратная связь', $this->feedbackOpenCount],
                     'competitors' => ['🎯 Конкуренты', $this->competitorNewCount ?: null],
                     'media' => ['📡 Медиаплан', null],
+                    'tasks' => ['📋 Аутсорс-задачи', $this->assignmentsOpenCount ?: null],
                 ];
             @endphp
             <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
@@ -1245,6 +1246,24 @@
 
     {{-- =========================== МЕДИАПЛАН =========================== --}}
     @if($tab === 'media')
-        <livewire:marketing.media-plan />
+        <div class="inline-flex items-stretch rounded-md border border-border overflow-hidden text-[12.5px]">
+            @foreach(['plan' => '📡 Каналы и публикации', 'press' => '📰 Пресс-релизы'] as $k => $label)
+                <button type="button" wire:click="$set('mediaView', '{{ $k }}')"
+                        class="h-[30px] px-3 whitespace-nowrap font-medium border-r border-border last:border-r-0
+                               {{ $mediaView === $k ? 'bg-[var(--accent)] text-fg-on-accent' : 'bg-surface text-fg-2 hover:text-fg-1' }}">
+                    {{ $label }}
+                </button>
+            @endforeach
+        </div>
+        @if($mediaView === 'press')
+            <livewire:marketing.press-releases wire:key="media-press" />
+        @else
+            <livewire:marketing.media-plan wire:key="media-plan" />
+        @endif
+    @endif
+
+    {{-- =========================== ПОРУЧЕНИЯ =========================== --}}
+    @if($tab === 'tasks')
+        <livewire:marketing.assignments />
     @endif
 </div>
