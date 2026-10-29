@@ -73,8 +73,14 @@ class Detail extends Component
     /** @var Collection<int, EmailMessage> */
     public Collection $thread;
 
+    /** Вкладки, на которых видна переписка с клиентом. */
+    public const THREAD_TABS = ['overview', 'thread'];
+
     #[Url(as: 'tab')]
     public string $tab = 'overview';
+
+    /** Письма клиента этой заявки уже отмечены прочитанными (за открытие карточки). */
+    public bool $threadMarkedRead = false;
 
     /**
      * Персональный порядок писем в табе «Переписка»: 'asc' (старые сверху,
@@ -261,6 +267,7 @@ class Detail extends Component
             if ($isHandler) {
                 app(AttentionService::class)
                     ->onManagerOpened($this->request);
+                $this->markThreadRead();
             }
 
             // Implicit-state: ответственный менеджер (или acting через
@@ -294,6 +301,34 @@ class Detail extends Component
     {
         if (in_array($tab, self::TABS, true)) {
             $this->tab = $tab;
+            $user = auth()->user();
+            if ($user !== null && ($this->request->isOwnedBy($user) || $this->request->isDelegatedTo($user))) {
+                $this->markThreadRead();
+            }
+        }
+    }
+
+    /**
+     * Переписка на экране (главная вкладка или «Переписка») — письма клиента
+     * прочитаны и в «Почте». Один раз за открытие карточки. Вызывать только для
+     * ответственного менеджера / acting: наблюдатель (РОП, директор) читает, не
+     * отмечая за менеджера.
+     */
+    private function markThreadRead(): void
+    {
+        if ($this->threadMarkedRead || ! in_array($this->tab, self::THREAD_TABS, true)) {
+            return;
+        }
+        $this->threadMarkedRead = true;
+
+        try {
+            app(\App\Services\Mail\RequestThreadReadService::class)->markClientLettersRead($this->thread, auth()->user());
+            $this->dispatch('mail-unread-changed');
+        } catch (\Throwable $e) {
+            Log::warning('Detail: marking thread read failed (non-fatal)', [
+                'request_id' => $this->request->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
