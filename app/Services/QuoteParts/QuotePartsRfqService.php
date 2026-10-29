@@ -97,6 +97,9 @@ class QuotePartsRfqService
             // ответы поставщиков — копией автору, ответ на копию уходит поставщику.
             'mirror' => $by->quoteparts_mirror ? ['email' => $this->mirrorAddress($by), 'name' => $by->name] : null,
             'attachments' => $this->attachments($files),
+            // Подпись письма-запроса (29.10.2026): письмо не обезличенное — имя автора, без телефонов
+            // и личного ящика. Латиницей — name_en; без него QuoteParts запишет имя транслитом.
+            'author' => ['name' => $by->name, 'name_en' => trim((string) $by->name_en) ?: null],
         ];
         if ($letters !== []) {
             // Внесистемные: письмо как по старому алгоритму, с подписью автора; копии ответов — автору всегда.
