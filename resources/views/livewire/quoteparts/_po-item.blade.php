@@ -114,7 +114,16 @@
         <div wire:key="po-w-{{ $it['sku'] }}-{{ $loop->index }}" class="pa-offer">
             <div class="pa-grid pa-row">
                 <div class="pa-col">
-                    <div class="pa-who"><span class="pa-sup">{{ $w }}</span><span class="pa-pill pa-pill-attn">ждём ответ</span></div>
+                    @php $pp = $it['postponed'][$w] ?? null; @endphp
+                    <div class="pa-who"><span class="pa-sup">{{ $w }}</span>
+                        {{-- Поставщик нажал «Отвечу позже»: до этого дня ответа не ждём. --}}
+                        @if($pp && $pp['until']->isFuture())
+                            <span class="pa-pill" style="background: var(--neutral-100); color: var(--fg-2)" title="{{ $pp['note'] }}">отложил до {{ $pp['until']->format('d.m') }}</span>
+                        @else
+                            <span class="pa-pill pa-pill-attn">ждём ответ</span>
+                        @endif
+                    </div>
+                    @if($pp && filled($pp['note']))<span class="pa-meta">«{{ $pp['note'] }}»</span>@endif
                     @if($it['requested_at'])<span class="pa-meta">запрос {{ $it['requested_at']->timezone($tz)->format('d.m H:i') }}</span>@endif
                 </div>
                 <div class="pa-col pa-price"><span class="pa-meta" style="font-size: 13px">—</span></div>

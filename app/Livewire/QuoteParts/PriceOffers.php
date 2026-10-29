@@ -70,6 +70,10 @@ class PriceOffers extends Component
     #[Url(as: 'pa', except: false)]
     public bool $withStale = false;
 
+    /** «в т.ч. без ответов»: в «Ждём ответа и отказы» — и запрошенные позиции, где не ответил никто. */
+    #[Url(as: 'pu', except: false)]
+    public bool $withUnanswered = false;
+
 
     /** Открытая переписка по отказу: id строки отказа (declines). */
     public ?string $declineDialog = null;
@@ -285,6 +289,68 @@ class PriceOffers extends Component
             }
         }
 
+        return $this->withCatalog($rows, fn ($r) => [$r['reason']]);
+    }
+
+    /**
+     * Строки запросов QuoteParts, где поставщик ещё не ответил (ждём цену или ответ на наш
+     * вопрос), за окно запросов — с датой, до которой он отложил ответ («Отвечу позже»).
+     * Позиция, где не ответил никто, есть только здесь: предложений и отказов по ней нет
+     * (M14140 в QP-HSX8OA, 29.10.2026).
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    #[Computed]
+    public function allPending(): Collection
+    {
+        $names = $this->supplierNames;
+
+        $rows = collect();
+        foreach ($this->windowRfqs as $rfq) {
+            if ($rfq->status !== 'open') {
+                continue;
+            }
+            foreach ((array) ($rfq->snapshot['suppliers'] ?? []) as $s) {
+                $key = (string) ($s['external_id'] ?? '');
+                if ($key === '' || empty($s['sent'])) {
+                    continue;
+                }
+                $at = $s['sent_at'] ?? null;
+                foreach ((array) ($s['lines'] ?? []) as $line) {
+                    if (! in_array($line['status'] ?? '', ['pending', 'question'], true) || empty($line['code'])) {
+                        continue;
+                    }
+                    $rows->push([
+                        'id' => 'p'.$rfq->remote_id.'-'.$key.'-'.$line['code'],
+                        'at' => $at ? \Illuminate\Support\Carbon::parse($at) : $rfq->created_at,
+                        'request_id' => $rfq->request_id,
+                        'request' => $rfq->request,
+                        'rfq_tag' => $rfq->tag,
+                        'rfq_remote_id' => $rfq->remote_id,
+                        'sku' => (string) $line['code'],
+                        'line_name' => $line['name'] ?? null,
+                        'supplier' => (string) ($names[$key] ?? $key),
+                        'key' => $key,
+                        'postponed_until' => ! empty($line['postponed_until']) ? \Illuminate\Support\Carbon::parse($line['postponed_until']) : null,
+                        'postpone_note' => $line['postpone_note'] ?? null,
+                    ]);
+                }
+            }
+        }
+
+        return $this->withCatalog($rows, fn ($r) => [$r['postpone_note']]);
+    }
+
+    /**
+     * Строкам из снимков запросов (отказы, ожидание) — карточка каталога; поиск — по тем же
+     * полям, что у предложений, плюс $extra.
+     *
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @param  callable(array<string, mixed>): list<?string>  $extra
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function withCatalog(Collection $rows, callable $extra): Collection
+    {
         $catalog = CatalogItem::query()->whereIn('sku', $rows->pluck('sku')->unique())
             ->get(['id', 'sku', 'name', 'price', 'purchase_price', 'is_price_actual'])->keyBy('sku');
         $rows = $rows->map(function ($r) use ($catalog) {
@@ -301,7 +367,7 @@ class PriceOffers extends Component
 
         if (($term = trim($this->q)) !== '') {
             $rows = $rows->filter(fn ($r) => mb_stripos(implode(' ', [
-                $r['sku'], $r['name'], $r['supplier'], $r['rfq_tag'], $r['request']?->internal_code, $r['reason'],
+                $r['sku'], $r['name'], $r['supplier'], $r['rfq_tag'], $r['request']?->internal_code, ...$extra($r),
             ]), $term) !== false);
         }
 
@@ -577,8 +643,18 @@ class PriceOffers extends Component
     {
         $ready = $this->readyItems->pluck('sku')->all();
         $rows = $this->rows->merge($this->readyRows->reject(fn ($r) => in_array($r['sku'], $ready, true)))->unique('id');
+        $declines = $this->declines->reject(fn ($r) => in_array($r['sku'], $ready, true));
 
-        return $this->itemsFrom($rows->reject(fn ($r) => in_array($r['sku'], $ready, true)), $this->declines->reject(fn ($r) => in_array($r['sku'], $ready, true)))->values();
+        // «в т.ч. без ответов»: запрошенные за период позиции, где ни цены, ни отказа.
+        $unanswered = collect();
+        if ($this->withUnanswered) {
+            $since = now()->subDays(in_array($this->days, self::DAYS, true) ? $this->days : 7);
+            $answered = array_merge($ready, $rows->pluck('sku')->all(), $declines->pluck('sku')->all());
+            $unanswered = $this->allPending->filter(fn ($r) => $r['at'] && $r['at']->gte($since))
+                ->reject(fn ($r) => in_array($r['sku'], $answered, true));
+        }
+
+        return $this->itemsFrom($rows->reject(fn ($r) => in_array($r['sku'], $ready, true)), $declines, $unanswered)->values();
     }
 
     /**
@@ -586,23 +662,28 @@ class PriceOffers extends Component
      *
      * @param  Collection<int, array<string, mixed>>  $rows
      * @param  Collection<int, array<string, mixed>>|null  $declines
+     * @param  Collection<int, array<string, mixed>>|null  $unanswered  позиции, где ещё никто не ответил (строки allPending)
      * @return Collection<int, array<string, mixed>>
      */
-    private function itemsFrom(Collection $rows, ?Collection $declines = null): Collection
+    private function itemsFrom(Collection $rows, ?Collection $declines = null, ?Collection $unanswered = null): Collection
     {
         $checker = app(PriceRefreshReadiness::class);
         $declinesBySku = ($declines ?? collect())->groupBy('sku');
+        $unansweredBySku = ($unanswered ?? collect())->groupBy('sku');
         $bySku = $rows->groupBy(fn ($r) => $r['sku'] ?: 'offer-'.$r['id']);
-        foreach ($declinesBySku->keys() as $sku) {
+        foreach ($declinesBySku->keys()->merge($unansweredBySku->keys()) as $sku) {
             if (! $bySku->has($sku)) {
                 $bySku->put($sku, collect());
             }
         }
+        // Кто отложил ответ («Отвечу позже»): артикул => поставщик => до какого дня и почему.
+        $postponed = $this->allPending->filter(fn ($r) => $r['postponed_until'] !== null)->groupBy('sku')
+            ->map(fn (Collection $g) => $g->mapWithKeys(fn ($r) => [$r['supplier'] => ['until' => $r['postponed_until'], 'note' => $r['postpone_note']]])->all());
 
         return $bySku
-            ->map(function (Collection $offers, string $sku) use ($checker, $declinesBySku) {
+            ->map(function (Collection $offers, string $sku) use ($checker, $declinesBySku, $unansweredBySku, $postponed) {
                 $itemDeclines = $declinesBySku->get($sku, collect())->values();
-                $first = $offers->first() ?? $itemDeclines->first();
+                $first = $offers->first() ?? $itemDeclines->first() ?? $unansweredBySku->get($sku)?->first();
                 $st = $this->readiness[$sku] ?? null;
                 // Сначала оригиналы, потом копии и аналоги; внутри — дешевле выше.
                 $sorted = $offers->sortBy(fn ($r) => [($r['kind'] ?? 'original') === 'original' ? 0 : 1, $r['rub'] ?? PHP_FLOAT_MAX])->values();
@@ -626,7 +707,8 @@ class PriceOffers extends Component
                     // Спросили, а он ни цены, ни отказа: строка «ждём ответ».
                     'waiting' => $st ? array_values(array_map(fn ($k) => $this->supplierNames[$k] ?? $k,
                         array_diff($st['asked'], $st['offered'], $st['declined'], $offers->pluck('key')->filter()->all()))) : [],
-                    'at' => $offers->merge($itemDeclines)->max('at'),
+                    'postponed' => $postponed->get($sku, []),
+                    'at' => $offers->merge($itemDeclines)->max('at') ?? $unansweredBySku->get($sku)?->max('at'),
                 ];
             })
             ->sortByDesc(fn ($i) => $i['at']?->getTimestamp() ?? 0);
