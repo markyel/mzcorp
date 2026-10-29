@@ -143,6 +143,30 @@ class CompositionFingerprintTest extends TestCase
         $this->assertFalse($this->same($a, $c));
     }
 
+    public function test_a_bare_name_matches_a_position_already_bound_to_the_catalogue(): void
+    {
+        // M-2026-21557 / M-2026-21581: у ранней — артикулы и каталог, у новой в момент
+        // распределения только название (каталог привязался через 5 секунд).
+        $name = 'Редуктор SRT 85 100 AC32 IEC80-B14 G619 без фланца, вал 32мм';
+        $earlier = $this->request([['catalog_item_id' => 20346, 'article' => 'LW-0013324, M08827', 'name' => $name]]);
+        $fresh = $this->request([['name' => $name]]);
+
+        $this->assertTrue($this->same($fresh, $earlier, [20346 => ['M08827', 'SRT08500G632']]));
+        $this->assertTrue($this->same($earlier, $fresh, [20346 => ['M08827', 'SRT08500G632']]));
+    }
+
+    public function test_a_same_name_does_not_join_positions_with_different_articles(): void
+    {
+        $name = 'Редуктор SRT 85 100 AC32';
+        $a = $this->request([['article' => 'LW-0013324', 'name' => $name]]);
+        $b = $this->request([['article' => 'LW-0099999', 'name' => $name]]);
+        // Каталог без своих артикулов — тоже не «голое название».
+        $c = $this->request([['catalog_item_id' => 7, 'name' => $name]]);
+
+        $this->assertFalse($this->same($a, $b));
+        $this->assertFalse($this->same($a, $c));
+    }
+
     public function test_a_request_without_anything_identifiable_has_no_twin(): void
     {
         $this->assertNull(AssignmentService::compositionFingerprint($this->request([])));
