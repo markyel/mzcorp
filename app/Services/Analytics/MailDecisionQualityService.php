@@ -37,7 +37,7 @@ class MailDecisionQualityService
 
     /**
      * @return array{
-     *   detectors: list<array{type:string,label:string,total:int,auto_applied:int,dismissed:int,confirmed:int,overridden:int,dismiss_rate:?float}>,
+     *   detectors: list<array{type:string,label:string,total:int,auto_applied:int,dismissed:int,not_applicable:int,confirmed:int,overridden:int,dismiss_rate:?float}>,
      *   rollbacks: array{total:int, by_manager: list<array{user_id:int,name:string,n:int}>},
      *   phantoms: array{total:int, requests_created:int, by_reason: list<array{reason:string,label:string,n:int}>},
      *   stages: list<array{stage:string,label:string,outcome:string,n:int}>,
@@ -64,27 +64,42 @@ class MailDecisionQualityService
             ->selectRaw("detector_type,
                 count(*) as total,
                 count(*) filter (where status = 'auto_applied') as auto_applied,
-                count(*) filter (where status = 'dismissed') as dismissed,
+                count(*) filter (where status = 'dismissed' and applied_by_user_id is not null) as dismissed,
+                count(*) filter (where status = 'dismissed' and applied_by_user_id is null) as not_applicable,
                 count(*) filter (where status = 'manually_confirmed') as confirmed,
                 count(*) filter (where status = 'manually_overridden') as overridden")
             ->orderByDesc('total')
             ->get();
 
-        return $rows->map(function ($r) {
-            $judged = (int) $r->auto_applied + (int) $r->dismissed + (int) $r->confirmed + (int) $r->overridden;
-            $type = DetectorType::tryFrom((string) $r->detector_type);
+        return $rows->map(fn ($r) => self::detectorRow($r))->values()->all();
+    }
 
-            return [
-                'type' => (string) $r->detector_type,
-                'label' => $type?->label() ?? (string) $r->detector_type,
-                'total' => (int) $r->total,
-                'auto_applied' => (int) $r->auto_applied,
-                'dismissed' => (int) $r->dismissed,
-                'confirmed' => (int) $r->confirmed,
-                'overridden' => (int) $r->overridden,
-                'dismiss_rate' => $judged > 0 ? round(((int) $r->dismissed + (int) $r->overridden) / $judged, 3) : null,
-            ];
-        })->values()->all();
+    /**
+     * Строка детектора. «Отклонил менеджер» — dismissed с автором и manually_overridden;
+     * «статус уже дальше» — dismissed без автора: решение не применила схема статусов
+     * (заявка уже дальше по воронке — «запросил счёт», когда счёт уже выставлен) или оно
+     * устарело. Это не несогласие с классификатором, в долю отклонённых не входит
+     * (до 29.10.2026 входило — «на согласовании» 24% и «отложил» 70% были почти целиком им).
+     *
+     * @return array{type:string,label:string,total:int,auto_applied:int,dismissed:int,not_applicable:int,confirmed:int,overridden:int,dismiss_rate:?float}
+     */
+    public static function detectorRow(object $r): array
+    {
+        $rejected = (int) $r->dismissed + (int) $r->overridden;
+        $judged = (int) $r->auto_applied + (int) $r->confirmed + $rejected;
+        $type = DetectorType::tryFrom((string) $r->detector_type);
+
+        return [
+            'type' => (string) $r->detector_type,
+            'label' => $type?->label() ?? (string) $r->detector_type,
+            'total' => (int) $r->total,
+            'auto_applied' => (int) $r->auto_applied,
+            'dismissed' => (int) $r->dismissed,
+            'not_applicable' => (int) $r->not_applicable,
+            'confirmed' => (int) $r->confirmed,
+            'overridden' => (int) $r->overridden,
+            'dismiss_rate' => $judged > 0 ? round($rejected / $judged, 3) : null,
+        ];
     }
 
     /** @return array{total:int, by_manager: list<array{user_id:int,name:string,n:int}>} */
@@ -162,8 +177,10 @@ class MailDecisionQualityService
         $rollbacks = DB::table('request_state_changes')->whereBetween('created_at', [$from, $to])
             ->where('event', 'manual')->whereIn('from_status', self::POST_QUOTE)->whereIn('to_status', self::BACK_TO_WORK)
             ->groupByRaw("date_trunc('week', created_at)")->selectRaw("$weekExpr as w, count(*) as n")->pluck('n', 'w');
+        // Отклонил менеджер (с автором или переопределил); «статус уже дальше» не считаем.
         $dismissed = DB::table('ai_decisions')->whereBetween('created_at', [$from, $to])
-            ->whereIn('status', ['dismissed', 'manually_overridden'])
+            ->where(fn ($q) => $q->where('status', 'manually_overridden')
+                ->orWhere(fn ($w) => $w->where('status', 'dismissed')->whereNotNull('applied_by_user_id')))
             ->groupByRaw("date_trunc('week', created_at)")->selectRaw("$weekExpr as w, count(*) as n")->pluck('n', 'w');
         $postSale = DB::table('mail_decisions')->whereBetween('created_at', [$from, $to])
             ->where('outcome', 'post_sale')

@@ -55,7 +55,7 @@
             <div class="text-[11px] uppercase tracking-wider text-fg-3">Самый шумный детектор</div>
             @if($worst)
                 <div class="text-[26px] font-semibold tabular-nums {{ $rateClass($worst['dismiss_rate']) }}">{{ $pct($worst['dismiss_rate']) }}</div>
-                <div class="text-[11.5px] text-fg-3">{{ $worst['label'] }} · отклонено {{ $worst['dismissed'] + $worst['overridden'] }} из {{ $worst['total'] }}</div>
+                <div class="text-[11.5px] text-fg-3">{{ $worst['label'] }} · менеджер отклонил {{ $worst['dismissed'] + $worst['overridden'] }} из {{ $worst['total'] }}</div>
             @else
                 <div class="text-[26px] font-semibold text-fg-3">—</div>
             @endif
@@ -64,11 +64,11 @@
 
     {{-- ───────── Детекторы ───────── --}}
     <div class="ds-card">
-        <div class="ds-card-header"><h3>AI-решения по детекторам</h3><span class="text-[12px] text-fg-3 ml-2">доля отклонённых = сколько раз менеджер не согласился с автоматикой</span></div>
+        <div class="ds-card-header"><h3>AI-решения по детекторам</h3><span class="text-[12px] text-fg-3 ml-2">доля отклонённых = сколько раз менеджер не согласился с автоматикой; «статус уже дальше» — решение не применилось, потому что заявка уже прошла этот этап (например, «запросил счёт», когда счёт выставлен), в долю не входит</span></div>
         <div class="px-4 pb-4 overflow-x-auto">
             <table class="w-full text-[13px]">
                 <thead class="text-[11.5px] uppercase tracking-wider text-fg-3">
-                    <tr><th class="text-left py-1.5">Детектор</th><th class="text-right">Всего</th><th class="text-right">Авто</th><th class="text-right">Подтверждено</th><th class="text-right">Отклонено</th><th class="text-right">Доля отклонённых</th></tr>
+                    <tr><th class="text-left py-1.5">Детектор</th><th class="text-right">Всего</th><th class="text-right">Авто</th><th class="text-right">Подтверждено</th><th class="text-right">Отклонил менеджер</th><th class="text-right" title="Решение не применилось: заявка уже прошла этот этап, или решение устарело">Статус уже дальше</th><th class="text-right">Доля отклонённых</th></tr>
                 </thead>
                 <tbody>
                     @forelse($r['detectors'] as $d)
@@ -78,10 +78,11 @@
                             <td class="text-right tabular-nums">{{ $d['auto_applied'] }}</td>
                             <td class="text-right tabular-nums">{{ $d['confirmed'] }}</td>
                             <td class="text-right tabular-nums">{{ $d['dismissed'] + $d['overridden'] }}</td>
+                            <td class="text-right tabular-nums text-fg-3">{{ $d['not_applicable'] }}</td>
                             <td class="text-right tabular-nums {{ $rateClass($d['dismiss_rate']) }}">{{ $pct($d['dismiss_rate']) }}</td>
                         </tr>
                     @empty
-                        <tr><td colspan="6" class="py-3 text-fg-3">За период решений нет.</td></tr>
+                        <tr><td colspan="7" class="py-3 text-fg-3">За период решений нет.</td></tr>
                     @endforelse
                 </tbody>
             </table>
@@ -128,7 +129,7 @@
         <div class="px-4 pb-4 overflow-x-auto">
             <table class="w-full text-[13px]">
                 <thead class="text-[11.5px] uppercase tracking-wider text-fg-3">
-                    <tr><th class="text-left py-1.5">Неделя</th><th class="text-right">Заявок</th><th class="text-right">Фантомов</th><th class="text-right">Откатов</th><th class="text-right">Отклонённых решений</th><th class="text-right">Постпродажа</th></tr>
+                    <tr><th class="text-left py-1.5">Неделя</th><th class="text-right">Заявок</th><th class="text-right">Фантомов</th><th class="text-right">Откатов</th><th class="text-right" title="Отклонил или переопределил менеджер">Отклонено менеджером</th><th class="text-right">Постпродажа</th></tr>
                 </thead>
                 <tbody>
                     @foreach($r['weekly'] as $w)
