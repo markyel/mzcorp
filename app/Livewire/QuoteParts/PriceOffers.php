@@ -959,6 +959,10 @@ class PriceOffers extends Component
             'lead' => $o->lead_time_days,
             'valid' => $o->valid_until,
             'note' => $o->note,
+            // Фото товара от поставщика (лежат в QuoteParts, сотруднику — через mzcorp).
+            'photos' => $o->remote_id && (int) $o->photos > 0
+                ? array_map(fn ($i) => route('quoteparts.offer-photo', [$o->remote_id, $i]), range(0, (int) $o->photos - 1))
+                : [],
             // Поставщик писал по-китайски — выше перевод; оригинал по наведению.
             'original' => array_filter((array) ($o->original_texts ?? [])),
             'stale' => $o->superseded || ! in_array($o->status, ['active', 'expiring'], true),

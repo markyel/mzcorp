@@ -68,6 +68,18 @@
         <div class="pa-col" style="gap: 6px">
             @php $orig = $r['original'] ?? []; @endphp
             @if($kind !== 'original' && $r['product'])<span class="pa-note" @if(isset($orig['brand']) || isset($orig['part_number'])) title="Оригинал: {{ trim(($orig['brand'] ?? '').' '.($orig['part_number'] ?? '')) }}" @endif>{{ \App\Models\QuotePartsOffer::kindLabel($kind) }}: <span class="mono">{{ $r['product'] }}</span></span>@endif
+            @if(! empty($r['photos']))
+                {{-- Фото от поставщика — во встроенном просмотрщике, листаются стрелками. --}}
+                @php $gallery = collect($r['photos'])->values()->map(fn ($u, $i) => ['src' => $u, 'name' => $r['supplier'].' · фото '.($i + 1), 'dl' => $u])->all(); @endphp
+                <span class="pa-note" style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center">
+                    @foreach($gallery as $i => $ph)
+                        <a href="{{ $ph['src'] }}" x-on:click.prevent="$dispatch('open-image', {{ \Illuminate\Support\Js::from(['items' => $gallery, 'index' => $i]) }})"
+                           title="Фото от поставщика" style="display: block; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; cursor: zoom-in">
+                            <img src="{{ $ph['src'] }}" alt="" loading="lazy" style="width: 100%; height: 100%; object-fit: cover"></a>
+                    @endforeach
+                    <span style="color: var(--fg-3); font-size: 12px">фото поставщика</span>
+                </span>
+            @endif
             @if($r['note'])<span class="pa-note" @isset($orig['note']) title="Оригинал: {{ $orig['note'] }}" @endisset>Поставщик: «{{ $r['note'] }}»@isset($orig['note'])<span style="color: var(--fg-4); font-size: 11px"> · перевод</span>@endisset</span>@endif
             @if($clState === \App\Services\QuoteParts\OfferClarifications::ANSWERED)
                 <span class="pa-pill pa-pill-info" style="align-self: flex-start; font-size: 12px; font-weight: 500; padding: 2px 8px">↩ ответил на уточнение {{ $cl['answered_at']->timezone($tz)->format('d.m H:i') }} — решите по ответу</span>
