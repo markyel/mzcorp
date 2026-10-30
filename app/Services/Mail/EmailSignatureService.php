@@ -59,6 +59,22 @@ class EmailSignatureService
     }
 
     /**
+     * Имя латиницей после русского: из профиля («Имя латиницей»), а пока оно не заполнено —
+     * транслитом русского имени как есть. Зарубежный поставщик просил английское имя, когда
+     * в подписи было только «Головнев Владимир» (EVE, QP-4QV2Z0, 30.10.2026).
+     */
+    public static function nameEn(User $user): string
+    {
+        $own = trim((string) ($user->name_en ?? ''));
+        if ($own !== '') {
+            return $own;
+        }
+        $name = trim((string) ($user->name ?? ''));
+
+        return preg_match('/\p{Cyrillic}/u', $name) === 1 ? trim(\Illuminate\Support\Str::ascii($name, 'ru')) : '';
+    }
+
+    /**
      * Старая plain-text подпись (User.email_signature, заполняется
      * вручную). Оборачиваем стандартным `-- ` разделителем для plain
      * и тусклым параграфом для HTML.
@@ -88,7 +104,7 @@ class EmailSignatureService
         $lines[] = 'С уважением / With best regards,';
 
         $nameRu = trim((string) ($user->name ?? ''));
-        $nameEn = trim((string) ($user->name_en ?? ''));
+        $nameEn = self::nameEn($user);
         $nameLine = $nameRu !== '' ? $nameRu : '(имя)';
         if ($nameEn !== '') {
             $nameLine .= ' / '.$nameEn;
@@ -164,7 +180,7 @@ class EmailSignatureService
         $e = fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 
         $nameRu = trim((string) ($user->name ?? ''));
-        $nameEn = trim((string) ($user->name_en ?? ''));
+        $nameEn = self::nameEn($user);
         $personalEmail = trim((string) ($user->email ?? ''));
         $officePhone = (string) ($sig['office_phone'] ?? $company['brand_phone'] ?? '');
         $ext = trim((string) ($user->phone_extension ?? ''));
