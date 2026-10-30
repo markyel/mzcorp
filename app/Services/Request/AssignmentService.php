@@ -6,6 +6,7 @@ use App\Enums\MailboxType;
 use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
 use App\Enums\Role as RoleEnum;
+use App\Enums\TwinGround;
 use App\Jobs\Mail\DeliverToManagerInboxJob;
 use App\Models\CatalogItem;
 use App\Models\EmailMessage;
@@ -158,7 +159,7 @@ class AssignmentService
                     $request,
                     $twin['user'],
                     'auto_twin:'.json_encode(
-                        ['fingerprint' => $twin['fingerprint'], 'linked' => $twin['linked']],
+                        ['fingerprint' => $twin['fingerprint'], 'linked' => $twin['linked'], 'ground' => $twin['ground']],
                         JSON_UNESCAPED_UNICODE,
                     ),
                     $byUserId,
@@ -383,8 +384,13 @@ class AssignmentService
      * parsed_article (там их бывает несколько через запятую, M-код каталога
      * дописывается туда же) и артикулы привязанного товара каталога.
      *
+     * Свои артикулы (o — из письма) держим отдельно от всех (a — свои и
+     * каталожные): склейка по каталожному коду слабее склейки по коду,
+     * который написан в обоих письмах. Текст названия (t) — для проверки
+     * противоречий (лево/право, числа с единицами).
+     *
      * @param  array<int, list<string>>  $catalogCodes  catalog_item_id → нормализованные sku / артикулы товара
-     * @return list<array{c: ?int, a: list<string>, n: ?string}>
+     * @return list<array{c: ?int, a: list<string>, o: list<string>, n: ?string, t: string}>
      */
     public static function compositionItems(Request $request, array $catalogCodes = []): array
     {
@@ -393,13 +399,14 @@ class AssignmentService
         foreach ($request->items as $item) {
             $cid = $item->catalog_item_id ? (int) $item->catalog_item_id : null;
             $raw = (string) ($item->parsed_article ?? '');
-            $articles = [];
+            $own = [];
             foreach (array_merge([$raw], preg_split('/[,;\/]+/u', $raw) ?: []) as $piece) {
                 $code = ItemTokenizer::normalize($piece);
                 if (self::isArticleKey($code)) {
-                    $articles[$code] = true;
+                    $own[$code] = true;
                 }
             }
+            $articles = $own;
             foreach ($cid !== null ? ($catalogCodes[$cid] ?? []) : [] as $code) {
                 $articles[$code] = true;
             }
@@ -408,10 +415,122 @@ class AssignmentService
             if ($cid === null && $articles === [] && $name === '') {
                 continue;
             }
-            $rows[] = ['c' => $cid, 'a' => array_keys($articles), 'n' => $name !== '' ? $name : null];
+            $rows[] = [
+                'c' => $cid,
+                'a' => array_keys($articles),
+                'o' => array_keys($own),
+                'n' => $name !== '' ? $name : null,
+                't' => mb_strtolower((string) ($item->parsed_name ?? '')),
+            ];
         }
 
         return $rows;
+    }
+
+    /**
+     * Размытая позиция: в письме ни кода, ни цифр в названии — «Поручень»,
+     * «Кнопка с красной подсветкой», «Двигатель ДК». Её товар каталога —
+     * догадка резолвера или менеджера, и склеивать по ней близнеца нельзя:
+     * за 30 дней почти все ложные склейки (15–20 из 229) держались на такой
+     * догадке («Ограничитель скорости OTIS» ↔ «…1,6 м/с ПРАВЫЙ, трос 6 мм»).
+     *
+     * @param  array{o: list<string>, n: ?string}  $x
+     */
+    private static function isVague(array $x): bool
+    {
+        return $x['o'] === [] && preg_match('/\d/', (string) $x['n']) !== 1;
+    }
+
+    /**
+     * Противоречие в названиях запрещает склейку даже при общем коде и одном
+     * товаре каталога — каталог склеивает и разные детали (ремень Otis 10 и
+     * 12 кордов, доводчик левый и правый на одном товаре). Лево против права;
+     * числа при одной единице, у которых нет ни одного общего значения:
+     * «10 кордов» ↔ «12 кордов», «530 мм» ↔ «2800 мм», «символ 1» ↔ «символ 4».
+     * Лишняя характеристика с одной стороны («с кабелем 1500 мм») — не
+     * противоречие: единица должна быть у обеих.
+     *
+     * @param  array{t: string}  $x
+     * @param  array{t: string}  $y
+     */
+    public static function contradicts(array $x, array $y): bool
+    {
+        $sx = self::side($x['t']);
+        $sy = self::side($y['t']);
+        if ($sx !== null && $sy !== null && $sx !== $sy) {
+            return true;
+        }
+
+        $mx = self::measures($x['t']);
+        $my = self::measures($y['t']);
+        foreach (array_intersect_key($mx, $my) as $unit => $values) {
+            if (array_intersect($values, $my[$unit]) === []) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Сторона в названии: left / right; null — не названа или названы обе. */
+    private static function side(string $text): ?string
+    {
+        $edge = '(?<![\p{L}\p{N}])';
+        $end = '(?![\p{L}\p{N}])';
+        $left = preg_match('/'.$edge.'(?:лев(?:ый|ая|ое|ого|ой|ые|ых|ую|ому)|left|lh)'.$end.'/u', $text) === 1;
+        $right = preg_match('/'.$edge.'(?:прав(?:ый|ая|ое|ого|ой|ые|ых|ую|ому)|right|rh)'.$end.'/u', $text) === 1;
+
+        return $left === $right ? null : ($left ? 'left' : 'right');
+    }
+
+    /**
+     * Числа с единицами из названия: единица → значения. Число внутри кода
+     * («LC1D25», «M10») не берём — перед ним буква или цифра.
+     *
+     * @return array<string, list<string>>
+     */
+    private static function measures(string $text): array
+    {
+        $units = [
+            'mps' => 'м\/с|m\/s',
+            'mm' => 'мм|mm',
+            'cm' => 'см|cm',
+            'm' => 'м|m',
+            'cord' => 'корд(?:ов|а)?|cords?',
+            'core' => 'жил(?:ы|а)?',
+            'kw' => 'квт|kw',
+            'va' => 'ва|va',
+            'v' => 'в|v(?:ac|dc)?',
+            'a' => 'а|a',
+            'kg' => 'кг|kg',
+            'hz' => 'гц|hz',
+            'floor' => 'этаж(?:а|ей)?',
+        ];
+        $num = '(?<![\p{L}\p{N}.,])(\d+(?:[.,]\d+)?)';
+        $out = [];
+        foreach ($units as $unit => $pattern) {
+            if (preg_match_all('/'.$num.'\s*(?:'.$pattern.')(?![\p{L}\p{N}])/u', $text, $m)) {
+                foreach ($m[1] as $value) {
+                    $out[$unit][self::number($value)] = true;
+                }
+            }
+        }
+        // Символ на кнопке пишут перед числом: «символ "3"», «символ 1».
+        if (preg_match_all('/символ\w*\s*["«\'“]?\s*(\d+)/u', $text, $m)) {
+            foreach ($m[1] as $value) {
+                $out['symbol'][self::number($value)] = true;
+            }
+        }
+
+        return array_map('array_keys', $out);
+    }
+
+    /** «1,0» и «1» — одно число. */
+    private static function number(string $value): string
+    {
+        $value = str_replace(',', '.', $value);
+
+        return str_contains($value, '.') ? rtrim(rtrim($value, '0'), '.') : (ltrim($value, '0') ?: '0');
     }
 
     /**
@@ -434,55 +553,102 @@ class AssignmentService
      * двум менеджерам). Такое название должно нести цифры — «Поручень» или
      * «Кнопка для Thyssen» с чужим артикулом не склеиваются.
      *
-     * @param  array{c: ?int, a: list<string>, n: ?string}  $x
-     * @param  array{c: ?int, a: list<string>, n: ?string}  $y
+     * Размытая позиция (isVague) через каталог не склеивается — ни общим
+     * товаром, ни артикулом этого товара; противоречие в названиях
+     * (contradicts) запрещает склейку при любом основании.
+     *
+     * @param  array{c: ?int, a: list<string>, o: list<string>, n: ?string, t: string}  $x
+     * @param  array{c: ?int, a: list<string>, o: list<string>, n: ?string, t: string}  $y
      */
     public static function sameItem(array $x, array $y): bool
     {
-        if ($x['c'] !== null && $y['c'] !== null) {
-            return $x['c'] === $y['c'];
+        return self::matchGround($x, $y) !== null;
+    }
+
+    /**
+     * На чём держится «одна позиция»; null — разные позиции.
+     *
+     * @param  array{c: ?int, a: list<string>, o: list<string>, n: ?string, t: string}  $x
+     * @param  array{c: ?int, a: list<string>, o: list<string>, n: ?string, t: string}  $y
+     */
+    public static function matchGround(array $x, array $y): ?TwinGround
+    {
+        if (self::contradicts($x, $y)) {
+            return null;
         }
+        $vague = self::isVague($x) || self::isVague($y);
         $sameName = $x['n'] !== null && $x['n'] === $y['n'];
+
+        if ($x['c'] !== null && $y['c'] !== null) {
+            if ($x['c'] !== $y['c']) {
+                return null;
+            }
+            if (! $vague) {
+                return array_intersect($x['o'], $y['o']) !== [] ? TwinGround::OwnArticle : TwinGround::Catalog;
+            }
+
+            return $sameName ? TwinGround::Name : null;
+        }
         if ($x['a'] !== [] || $y['a'] !== []) {
-            if (array_intersect($x['a'], $y['a']) !== []) {
-                return true;
+            if (array_intersect($x['o'], $y['o']) !== []) {
+                return TwinGround::OwnArticle;
+            }
+            if (! $vague && array_intersect($x['a'], $y['a']) !== []) {
+                return TwinGround::CatalogCode;
             }
             $bare = fn (array $r) => $r['c'] === null && $r['a'] === [];
 
-            return ($bare($x) || $bare($y)) && $sameName && preg_match('/\d/', (string) $x['n']) === 1;
+            return ($bare($x) || $bare($y)) && $sameName && preg_match('/\d/', (string) $x['n']) === 1 ? TwinGround::Name : null;
         }
 
-        return $sameName;
+        return $sameName ? TwinGround::Name : null;
     }
 
     /**
      * Тот же состав целиком: каждая позиция одной заявки есть в другой и
      * наоборот. Лишняя позиция с любой стороны — уже другая заявка.
      *
-     * @param  list<array{c: ?int, a: list<string>, n: ?string}>  $a
-     * @param  list<array{c: ?int, a: list<string>, n: ?string}>  $b
+     * @param  list<array{c: ?int, a: list<string>, o: list<string>, n: ?string, t: string}>  $a
+     * @param  list<array{c: ?int, a: list<string>, o: list<string>, n: ?string, t: string}>  $b
      */
     public static function sameComposition(array $a, array $b): bool
     {
+        return self::compositionGround($a, $b) !== null;
+    }
+
+    /**
+     * Основание склейки двух составов — самое слабое из оснований позиций
+     * (для каждой позиции берём лучшее совпадение на другой стороне); null —
+     * составы разные.
+     *
+     * @param  list<array{c: ?int, a: list<string>, o: list<string>, n: ?string, t: string}>  $a
+     * @param  list<array{c: ?int, a: list<string>, o: list<string>, n: ?string, t: string}>  $b
+     */
+    public static function compositionGround(array $a, array $b): ?TwinGround
+    {
         if ($a === [] || $b === []) {
-            return false;
+            return null;
         }
+        $weakest = null;
         foreach ([[$a, $b], [$b, $a]] as [$from, $to]) {
             foreach ($from as $x) {
-                $found = false;
+                $best = null;
                 foreach ($to as $y) {
-                    if (self::sameItem($x, $y)) {
-                        $found = true;
-                        break;
+                    $ground = self::matchGround($x, $y);
+                    if ($ground !== null && ($best === null || $best->weakerThan($ground))) {
+                        $best = $ground;
                     }
                 }
-                if (! $found) {
-                    return false;
+                if ($best === null) {
+                    return null;
+                }
+                if ($weakest === null || $best->weakerThan($weakest)) {
+                    $weakest = $best;
                 }
             }
         }
 
-        return true;
+        return $weakest;
     }
 
     /**
@@ -529,7 +695,7 @@ class AssignmentService
      * получит ровно настолько меньше.
      *
      * @param  Collection<int, User>  $managers
-     * @return array{user: User, fingerprint: string, linked: array<int, int>}|null
+     * @return array{user: User, fingerprint: string, linked: array<int, int>, ground: string}|null
      */
     private function pickTwinManager(Request $request, Collection $managers): ?array
     {
@@ -560,7 +726,8 @@ class AssignmentService
         $mine = self::compositionItems($request, $catalogCodes);
 
         foreach ($candidates as $candidate) {
-            if (! self::sameComposition($mine, self::compositionItems($candidate, $catalogCodes))) {
+            $ground = self::compositionGround($mine, self::compositionItems($candidate, $catalogCodes));
+            if ($ground === null) {
                 continue;
             }
             $manager = $managers->firstWhere('id', (int) $candidate->assigned_user_id);
@@ -569,6 +736,7 @@ class AssignmentService
                     'user' => $manager,
                     'fingerprint' => substr($fingerprint, 0, 8),
                     'linked' => [(int) $candidate->id],
+                    'ground' => $ground->value,
                 ];
             }
         }

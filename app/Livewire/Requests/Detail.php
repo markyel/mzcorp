@@ -8,6 +8,7 @@ use App\Enums\DetectorType;
 use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
 use App\Enums\Role;
+use App\Enums\TwinGround;
 use App\Jobs\Mail\ParseRequestItemsJob;
 use App\Jobs\Mail\SendQueuedDraftJob;
 use App\Livewire\Concerns\RendersEmailBody;
@@ -892,8 +893,9 @@ class Detail extends Component
      * того же), распределитель отдал её менеджеру первой (reason auto_twin).
      * of — заявка, близнецом которой признана эта; twins — признанные
      * близнецами этой. Один спрос: считать и отвечать по нему дважды не надо.
+     * ground — на чём держится склейка (у назначений до 30.10.2026 его нет).
      *
-     * @return array{of: ?Request, twins: Collection<int, Request>}
+     * @return array{of: ?Request, ground: ?TwinGround, twins: Collection<int, Request>}
      */
     #[Computed]
     public function twinLinks(): array
@@ -902,6 +904,7 @@ class Detail extends Component
         $cols = ['id', 'internal_code', 'client_email', 'status', 'created_at'];
 
         $ofId = null;
+        $ground = null;
         $own = RequestAssignment::query()
             ->where('request_id', $id)
             ->where('reason', 'like', 'auto_twin:%')
@@ -910,6 +913,7 @@ class Detail extends Component
         if ($own !== null) {
             $payload = json_decode(substr((string) $own, strlen('auto_twin:')), true);
             $ofId = (int) (($payload['linked'] ?? [])[0] ?? 0) ?: null;
+            $ground = TwinGround::tryFrom((string) ($payload['ground'] ?? ''));
         }
 
         $twinIds = RequestAssignment::query()
@@ -920,6 +924,7 @@ class Detail extends Component
 
         return [
             'of' => $ofId ? Request::query()->find($ofId, $cols) : null,
+            'ground' => $ground,
             'twins' => $twinIds->isEmpty()
                 ? collect()
                 : Request::query()->whereIn('id', $twinIds)->orderBy('created_at')->get($cols),

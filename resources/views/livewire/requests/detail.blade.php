@@ -590,6 +590,9 @@
                                   title="Тот же состав, что в заявке {{ $twinLinks['of']->internal_code }} ({{ $twinLinks['of']->client_email }}), пришедшей раньше: один спрос, поэтому заявка отдана тому же менеджеру">⧉ близнец</span>
                             <a href="{{ route('requests.show', $twinLinks['of']) }}" title="{{ $twinLinks['of']->client_email }}"
                                class="mono text-[12px] text-sky-700 hover:underline">{{ $twinLinks['of']->internal_code }}</a>
+                            @if($twinLinks['ground'])
+                                <span class="text-fg-3 text-[11.5px]" title="На чём держится склейка">· {{ $twinLinks['ground']->label() }}</span>
+                            @endif
                         @endif
                         @if($twinLinks['twins']->isNotEmpty())
                             <span class="inline-flex items-center text-[10.5px] font-semibold px-1.5 py-0.5 rounded-[3px] bg-amber-50 text-amber-700"
