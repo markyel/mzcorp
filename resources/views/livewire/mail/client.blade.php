@@ -738,18 +738,20 @@ body.mail-resizing iframe{pointer-events:none}
         </div>
 
         <div class="threads">
-            @php $autoQuotes = $this->autoQuotes; @endphp
+            @php $autoQuotes = $this->autoQuotes; $noticeRequests = $this->noticeRequests; @endphp
             @forelse($this->threads->take($perPage) as $m)
                 @php
                     $unread = $m->my_read_at === null && $m->direction?->value === 'inbound';
                     $cat = $catChip($m->category);
-                    $isOrg = (bool) $m->related_request_id;
+                    // Заявка строки: привязанная, иначе заявка уведомления (письмо о заявке из бота).
+                    $rowReq = $m->related_request_id ? $m->relatedRequest : ($m->notice_request_id ? ($noticeRequests[$m->notice_request_id] ?? null) : null);
+                    $isOrg = $rowReq !== null || (bool) $m->related_request_id;
                     // Заявка в «Клиент ждёт счёт» — строка подсвечивается (цвет текста + маркер ₽).
                     $rrs = null;
-                    if ($m->related_request_id && $m->relatedRequest) {
-                        $rrs = $m->relatedRequest->status instanceof \App\Enums\RequestStatus
-                            ? $m->relatedRequest->status
-                            : \App\Enums\RequestStatus::tryFrom((string) $m->relatedRequest->status);
+                    if ($rowReq) {
+                        $rrs = $rowReq->status instanceof \App\Enums\RequestStatus
+                            ? $rowReq->status
+                            : \App\Enums\RequestStatus::tryFrom((string) $rowReq->status);
                     }
                     $awaitingInv = $rrs === \App\Enums\RequestStatus::AwaitingInvoice;
                     [$partyName, $partyEmail, $isToParty, $moreTo] = $counterparty($m);
@@ -791,19 +793,19 @@ body.mail-resizing iframe{pointer-events:none}
                                 @if($m->mailbox_folder_id && $m->mailbox_folder_id !== $this->customFolderId() && isset($this->folderNames[$m->mailbox_folder_id]))
                                     <span class="fchip" title="Письмо лежит в папке">▸ {{ $this->folderNames[$m->mailbox_folder_id] }}</span>
                                 @endif
-                                @if($m->related_request_id && $m->relatedRequest)
+                                @if($rowReq)
                                     @if($awaitingInv)<span class="rubchip" title="Клиент ждёт счёт — счёт ещё не выставлен">₽</span>@endif
                                     {{-- Система уже посчитала КП по этой заявке: открыть и отправить. --}}
-                                    @if(isset($autoQuotes[$m->related_request_id]))
+                                    @if(isset($autoQuotes[$rowReq->id]))
                                         <span class="aqchip"
-                                              title="Система подготовила КП на {{ number_format((float) $autoQuotes[$m->related_request_id]->total, 2, ',', ' ') }} ₽ — проверить и отправить в карточке заявки">КП готово</span>
+                                              title="Система подготовила КП на {{ number_format((float) $autoQuotes[$rowReq->id]->total, 2, ',', ' ') }} ₽ — проверить и отправить в карточке заявки">КП готово</span>
                                     @endif
                                     {{-- Чип заявки — кнопка: отсюда видна вся переписка по ней,
                                          а не только то письмо, что попалось в папке. --}}
-                                    <button type="button" class="reqchip" wire:click.stop="filterByRequest({{ $m->related_request_id }})"
-                                            title="Показать все письма заявки {{ $m->relatedRequest->internal_code }}">{{ $m->relatedRequest->internal_code }}</button>
+                                    <button type="button" class="reqchip" wire:click.stop="filterByRequest({{ $rowReq->id }})"
+                                            title="Показать все письма заявки {{ $rowReq->internal_code }}">{{ $rowReq->internal_code }}</button>
                                     @if($rrs)<span class="chip {{ $rrs->chipClass() }} stchip" title="Стадия заявки">{{ $rrs->label() }}</span>@endif
-                                    @if($m->relatedRequest->onec_number)<span class="onecchip" title="Номер заявки/КП в 1С">1С {{ $m->relatedRequest->onec_number }}</span>@endif
+                                    @if($rowReq->onec_number)<span class="onecchip" title="Номер заявки/КП в 1С">1С {{ $rowReq->onec_number }}</span>@endif
                                 @elseif($cat)
                                     <span class="catchip {{ $cat[1] }}">{{ $cat[0] }}</span>
                                 @endif

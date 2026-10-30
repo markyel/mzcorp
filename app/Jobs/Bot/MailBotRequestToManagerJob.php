@@ -57,6 +57,9 @@ class MailBotRequestToManagerJob implements ShouldQueue
         Cache::put($key, 1, now()->addDays(30));
 
         // Копия во «Входящих» mzCorp сразу — не ждём, пока Яндекс примет письмо.
-        $copies->store($manager, $mail, $messageId, ['bot_request_notice' => true]);
+        // notice_request_id — строка списка показывает номер, стадию и 1С заявки, как у письма
+        // клиента; related_request_id не ставим: письмо не клиентское, тред заявки и метрики
+        // переписки его не видят.
+        $copies->store($manager, $mail, $messageId, ['bot_request_notice' => true, 'notice_request_id' => $request->id]);
     }
 }

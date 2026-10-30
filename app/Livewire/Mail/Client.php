@@ -1203,6 +1203,10 @@ class Client extends Component
                 'ustate.flagged_at as my_flagged_at',
             ])
             ->selectRaw('LEFT(email_messages.body_plain, 200) as body_plain')
+            // Уведомление о заявке без письма клиента (заявка из бота): заявка — в пометках
+            // письма, не в related_request_id (см. MailBotRequestToManagerJob).
+            ->selectRaw("CASE WHEN email_messages.detected_artifacts->>'notice_request_id' ~ '^[0-9]+$'
+                THEN (email_messages.detected_artifacts->>'notice_request_id')::bigint END as notice_request_id")
             // Скрепка у копии письма заявки в личном ящике: своих вложений у неё
             // нет, они у оригинала (см. EmailMessage::borrowOriginAttachments).
             ->selectRaw("EXISTS (SELECT 1 FROM email_attachments oa
@@ -1241,8 +1245,24 @@ class Client extends Component
     public function autoQuotes()
     {
         return app(AutoQuoteOfferService::class)->readyForMany(
-            $this->threads->pluck('related_request_id')->filter()->map(fn ($id) => (int) $id)->all(),
+            $this->threads->map(fn ($m) => $m->related_request_id ?: $m->notice_request_id)->filter()->map(fn ($id) => (int) $id)->unique()->values()->all(),
         );
+    }
+
+    /**
+     * Заявки уведомлений в списке (письмо о заявке из бота): у строки те же чипы — номер,
+     * стадия, 1С, — что у письма, привязанного к заявке.
+     *
+     * @return Collection<int, Request>
+     */
+    #[Computed]
+    public function noticeRequests()
+    {
+        $ids = $this->threads->filter(fn ($m) => ! $m->related_request_id && $m->notice_request_id)
+            ->pluck('notice_request_id')->map(fn ($id) => (int) $id)->unique()->values();
+
+        return $ids->isEmpty() ? collect() : Request::query()->whereIn('id', $ids)
+            ->get(['id', 'internal_code', 'status', 'onec_number'])->keyBy('id');
     }
 
     #[Computed]
