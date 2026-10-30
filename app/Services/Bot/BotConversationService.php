@@ -33,6 +33,9 @@ class BotConversationService
     /** Строк в черновике заявки. */
     public const DRAFT_MAX_LINES = 100;
 
+    /** Сколько символов непонятого события площадки хранить в журнале. */
+    private const RAW_MAX_CHARS = 16000;
+
     /** Вопросы анкеты по порядку. */
     private const QUESTIONS = ['name', 'phone', 'org'];
 
@@ -84,6 +87,7 @@ class BotConversationService
                 default => 'text',
             },
             'text' => $u->isCallback() ? $u->callbackData : ($u->contactPhone ?? mb_substr($u->text, 0, 4000)),
+            'meta' => self::journalMeta($u),
         ]);
 
         if ($chat->blocked_at !== null) {
@@ -102,6 +106,27 @@ class BotConversationService
             Log::error('BotConversation: handling failed', ['chat_id' => $chat->id, 'error' => $e->getMessage()]);
             $this->say($chat, 'Что-то пошло не так. Попробуйте ещё раз чуть позже или напишите нам на почту.');
         }
+    }
+
+    /**
+     * Что ещё было во входящем, кроме текста: имена файлов, пометка пересылки, а если бот
+     * не понял ничего — само событие площадки, чтобы было по чему разбирать.
+     */
+    public static function journalMeta(BotUpdate $u): ?array
+    {
+        $meta = [];
+        if ($u->files !== []) {
+            $meta['files'] = array_map(fn (array $f) => (string) ($f['name'] ?? ($f['kind'] === 'photo' ? 'фото' : 'файл')), $u->files);
+        }
+        if ($u->forwarded) {
+            $meta['forwarded'] = true;
+        }
+        if ($u->isEmpty() && $u->raw !== []) {
+            $json = (string) json_encode($u->raw, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $meta['raw'] = mb_strlen($json) <= self::RAW_MAX_CHARS ? $u->raw : ['truncated' => mb_substr($json, 0, self::RAW_MAX_CHARS)];
+        }
+
+        return $meta !== [] ? $meta : null;
     }
 
     private function route(MessengerChat $chat, BotUpdate $u): void
@@ -156,6 +181,14 @@ class BotConversationService
         }
         if ($u->contactPhone !== null && $awaiting === 'phone') {
             $this->savePhone($chat, $u->contactPhone);
+
+            return;
+        }
+        // Бот ничего не разобрал — не меню в ответ (клиент решит, что фото ушли), а прямо сказать.
+        // Шаг диалога не трогаем: следующее сообщение продолжит то, что ждали.
+        if ($u->isEmpty()) {
+            $this->say($chat, 'Не смог прочитать это сообщение: бот понимает текст, фото и файлы (Excel, PDF, Word). '
+                .'Если отправляли фото или файл — пришлите его сюда ещё раз через скрепку 📎.');
 
             return;
         }

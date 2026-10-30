@@ -122,14 +122,25 @@
                             };
                             $text = $in ? (string) $m->text : html_entity_decode(strip_tags((string) $m->text));
                             $files = (array) (($m->meta ?? [])['files'] ?? []);
+                            if ($files === []) {
+                                $files = array_map(fn ($a) => (string) ($a['name'] ?? 'файл'), (array) (($m->meta ?? [])['attachments'] ?? []));
+                            }
+                            $raw = ($m->meta ?? [])['raw'] ?? null;
                         @endphp
                         <div class="flex {{ $in ? 'justify-start' : 'justify-end' }}" wire:key="bm-{{ $m->id }}">
                             <div class="max-w-[80%] rounded-lg px-2.5 py-1.5 text-[12.5px] leading-snug
                                         {{ $in ? ($m->kind === 'callback' ? 'bg-neutral-50 text-fg-3 italic' : 'bg-surface-2 text-fg-1') : ($m->kind === 'manager' ? 'bg-[var(--sky-50)] text-fg-1' : 'bg-neutral-50 text-fg-2') }}">
                                 <div class="text-[10px] text-fg-4">{{ $label }} · {{ $m->created_at?->format('d.m H:i:s') }}
-                                    @if(! empty(($m->meta ?? [])['send_failed']))<span class="text-amber-800"> · не доставлено</span>@endif</div>
+                                    @if(! empty(($m->meta ?? [])['send_failed']))<span class="text-amber-800"> · не доставлено</span>@endif
+                                    @if(! empty(($m->meta ?? [])['forwarded'])) · переслано @endif</div>
                                 <div class="whitespace-pre-line">{{ $text }}</div>
-                                @if($files)<div class="text-[11px] text-fg-3 mt-0.5">📎 {{ implode(', ', $files) }}</div>@endif
+                                @if($files)<div class="text-[11px] text-fg-3 mt-0.5">📎 {{ count($files) }}: {{ implode(', ', $files) }}</div>@endif
+                                @if($raw !== null)
+                                    <details class="text-[11px] text-amber-800 mt-0.5">
+                                        <summary class="cursor-pointer">бот не разобрал сообщение — событие площадки</summary>
+                                        <pre class="text-fg-3 mt-1 overflow-y-auto" style="white-space: pre-wrap; word-break: break-all; max-height: 15rem;">{{ json_encode($raw, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}</pre>
+                                    </details>
+                                @endif
                             </div>
                         </div>
                     @empty

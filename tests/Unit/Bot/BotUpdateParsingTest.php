@@ -3,6 +3,7 @@
 namespace Tests\Unit\Bot;
 
 use App\Enums\MessengerChannel;
+use App\Services\Bot\BotConversationService;
 use App\Services\Bot\BotPriceService;
 use App\Services\Bot\BotRequestService;
 use App\Services\Bot\BotUpdate;
@@ -114,6 +115,56 @@ class BotUpdateParsingTest extends TestCase
         $this->assertSame('вот деталь', $m->text);
         $this->assertSame(['photo', 'file'], array_column($m->files, 'kind'));
         $this->assertSame('spec.pdf', $m->files[1]['name']);
+    }
+
+    public function test_max_forwarded_photos_are_read_from_the_linked_message(): void
+    {
+        // Чат 10: клиент пересылал фото из другого чата — body пустое, всё в link.message.
+        $u = ['update_type' => 'message_created', 'message' => [
+            'sender' => ['user_id' => 501],
+            'recipient' => ['chat_id' => 9001, 'chat_type' => 'dialog'],
+            'body' => ['mid' => 'm4', 'text' => '', 'attachments' => []],
+            'link' => ['type' => 'forward', 'chat_id' => 77, 'message' => ['mid' => 'old', 'text' => 'тормоз', 'attachments' => [
+                ['type' => 'image', 'payload' => ['photo_id' => 1, 'url' => 'https://i.max/a.jpg']],
+                ['type' => 'image', 'payload' => ['photo_id' => 2, 'url' => 'https://i.max/b.jpg']],
+            ]]],
+        ]];
+        $m = BotUpdate::fromMax($u);
+        $this->assertTrue($m->forwarded);
+        $this->assertFalse($m->isEmpty());
+        $this->assertSame('тормоз', $m->text);
+        $this->assertSame(['https://i.max/a.jpg', 'https://i.max/b.jpg'], array_column($m->files, 'ref'));
+        $this->assertSame(['files' => ['фото', 'фото'], 'forwarded' => true], BotConversationService::journalMeta($m));
+
+        // Комментарий клиента и его собственное фото — вместе с пересланным.
+        $u['message']['body'] = ['mid' => 'm5', 'text' => 'передайте менеджеру', 'attachments' => [['type' => 'image', 'payload' => ['url' => 'https://i.max/own.jpg']]]];
+        $m = BotUpdate::fromMax($u);
+        $this->assertSame("передайте менеджеру\nтормоз", $m->text);
+        $this->assertCount(3, $m->files);
+
+        // Ответ (reply) на сообщение — не пересылка: процитированное не берём.
+        $u['message']['link']['type'] = 'reply';
+        $u['message']['body'] = ['mid' => 'm6', 'text' => 'да'];
+        $m = BotUpdate::fromMax($u);
+        $this->assertSame(['да', []], [$m->text, $m->files]);
+        $this->assertFalse($m->forwarded);
+    }
+
+    public function test_an_unreadable_message_keeps_the_raw_event_for_the_journal(): void
+    {
+        $u = ['update_type' => 'message_created', 'message' => [
+            'sender' => ['user_id' => 501],
+            'recipient' => ['chat_id' => 9001, 'chat_type' => 'dialog'],
+            'body' => ['mid' => 'm7', 'attachments' => [['type' => 'video', 'payload' => ['token' => 't']]]],
+        ]];
+        $m = BotUpdate::fromMax($u);
+        $this->assertTrue($m->isEmpty());
+        $this->assertSame(['raw' => $u], BotConversationService::journalMeta($m));
+
+        $text = BotUpdate::fromMax(['update_type' => 'message_created', 'message' => [
+            'sender' => ['user_id' => 501], 'recipient' => ['chat_id' => 9001, 'chat_type' => 'dialog'], 'body' => ['mid' => 'm8', 'text' => 'привет'],
+        ]]);
+        $this->assertNull(BotConversationService::journalMeta($text));
     }
 
     public function test_skus_accept_cyrillic_m_and_ignore_invoice_numbers(): void

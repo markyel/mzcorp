@@ -27,11 +27,22 @@ final class BotUpdate
         public readonly array $files = [],
         /** Альбом Telegram: несколько фото приходят отдельными событиями с одним id. */
         public readonly ?string $mediaGroupId = null,
+        /** Сообщение переслано из другого чата — текст и вложения взяты из пересланного. */
+        public readonly bool $forwarded = false,
+        /** Событие площадки как есть — в журнал, когда бот в нём ничего не понял. */
+        public readonly array $raw = [],
     ) {}
 
     public function isCallback(): bool
     {
         return $this->callbackId !== null;
+    }
+
+    /** Ни текста, ни файлов, ни телефона: стикер, голосовое, видео — или формат, которого бот не знает. */
+    public function isEmpty(): bool
+    {
+        return ! $this->isCallback() && ! $this->isStart && trim($this->text) === ''
+            && $this->files === [] && $this->contactPhone === null;
     }
 
     /** Telegram Bot API: message / callback_query, только личные чаты. */
@@ -80,7 +91,8 @@ final class BotUpdate
         return new self(MessengerChannel::Telegram, $updateId, (string) $from['id'], (string) $chat['id'],
             $from['username'] ?? null, $from['first_name'] ?? null, $from['last_name'] ?? null,
             text: $text, isStart: str_starts_with($text, '/start'), contactPhone: $phone,
-            files: $files, mediaGroupId: isset($m['media_group_id']) ? (string) $m['media_group_id'] : null);
+            files: $files, mediaGroupId: isset($m['media_group_id']) ? (string) $m['media_group_id'] : null,
+            forwarded: isset($m['forward_origin']) || isset($m['forward_from']) || isset($m['forward_date']), raw: $u);
     }
 
     /** MAX Bot API: message_created / message_callback / bot_started, только диалоги. */
@@ -129,20 +141,8 @@ final class BotUpdate
         }
 
         $phone = null;
-        $files = [];
+        $files = self::maxFiles((array) ($body['attachments'] ?? []));
         foreach ((array) ($body['attachments'] ?? []) as $a) {
-            $p = (array) ($a['payload'] ?? []);
-            if (in_array($a['type'] ?? '', ['image', 'file'], true) && ! empty($p['url'])) {
-                $files[] = [
-                    'kind' => ($a['type'] === 'image') ? 'photo' : 'file',
-                    'ref' => (string) $p['url'],
-                    'name' => $a['filename'] ?? $p['filename'] ?? null,
-                    'mime' => $a['type'] === 'image' ? 'image/jpeg' : null,
-                    'size' => isset($a['size']) ? (int) $a['size'] : null,
-                ];
-
-                continue;
-            }
             if (($a['type'] ?? '') !== 'contact') {
                 continue;
             }
@@ -154,9 +154,44 @@ final class BotUpdate
         }
         $text = trim((string) ($body['text'] ?? ''));
 
+        // Пересланное из другого чата лежит в link.message, а body пустое или с комментарием
+        // клиента — фото «передайте менеджеру» иначе пропадают (чат 10, M-2026-21602).
+        $link = (array) ($msg['link'] ?? []);
+        $forwarded = ($link['type'] ?? '') === 'forward' && is_array($link['message'] ?? null);
+        if ($forwarded) {
+            $files = array_merge($files, self::maxFiles((array) ($link['message']['attachments'] ?? [])));
+            $quoted = trim((string) ($link['message']['text'] ?? ''));
+            $text = trim($text."\n".$quoted);
+        }
+
         return new self(MessengerChannel::Max, 'msg'.($body['mid'] ?? $ts), (string) $user['user_id'], (string) $chatId,
             $user['username'] ?? null, self::maxFirstName($user), $user['last_name'] ?? null,
-            text: $text, isStart: str_starts_with($text, '/start'), contactPhone: $phone, files: $files);
+            text: $text, isStart: ! $forwarded && str_starts_with($text, '/start'), contactPhone: $phone, files: $files,
+            forwarded: $forwarded, raw: $u);
+    }
+
+    /**
+     * Фото и файлы из вложений MAX (без ссылки скачать нечего — такие пропускаем).
+     *
+     * @return list<array{kind: 'photo'|'file', ref: string, name: ?string, mime: ?string, size: ?int}>
+     */
+    private static function maxFiles(array $attachments): array
+    {
+        $files = [];
+        foreach ($attachments as $a) {
+            $p = (array) ($a['payload'] ?? []);
+            if (in_array($a['type'] ?? '', ['image', 'file'], true) && ! empty($p['url'])) {
+                $files[] = [
+                    'kind' => ($a['type'] === 'image') ? 'photo' : 'file',
+                    'ref' => (string) $p['url'],
+                    'name' => $a['filename'] ?? $p['filename'] ?? null,
+                    'mime' => $a['type'] === 'image' ? 'image/jpeg' : null,
+                    'size' => isset($a['size']) ? (int) $a['size'] : null,
+                ];
+            }
+        }
+
+        return $files;
     }
 
     private static function maxFirstName(array $user): ?string
