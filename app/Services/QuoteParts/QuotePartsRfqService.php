@@ -281,7 +281,7 @@ class QuotePartsRfqService
             'signature' => $withSignature ? $this->signature($by, offsystem: ($rfq->snapshot['channel'] ?? null) === 'offsystem') : null,
         ]);
         $rfq->forceFill([
-            'snapshot' => $snapshot,
+            'snapshot' => $this->russified($snapshot),
             'status' => $snapshot['status'] ?? $rfq->status,
             'synced_at' => now(),
         ])->save();
@@ -335,7 +335,7 @@ class QuotePartsRfqService
             throw new RuntimeException('Закрывать вопросы поставщиков могут снабжение, руководство и участники пилота.');
         }
         $snapshot = $this->client->closeQuestions($rfq->remote_id, $groupId, $supplierKey, $by->name);
-        $rfq->forceFill(['snapshot' => collect($snapshot)->except('closed')->all(), 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
+        $rfq->forceFill(['snapshot' => $this->russified(collect($snapshot)->except('closed')->all()), 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
 
         return (int) ($snapshot['closed'] ?? 0);
     }
@@ -366,7 +366,7 @@ class QuotePartsRfqService
             $by->name,
             ['files' => $this->uploadedFiles($files), 'signature' => $withSignature ? $this->signature($by, offsystem: ($rfq->snapshot['channel'] ?? null) === 'offsystem') : null],
         );
-        $rfq->forceFill(['snapshot' => $snapshot, 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
+        $rfq->forceFill(['snapshot' => $this->russified($snapshot), 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
 
         return $rfq;
     }
@@ -408,9 +408,39 @@ class QuotePartsRfqService
         return $draft;
     }
 
+    /**
+     * Письма поставщика по-китайски — с русским переводом своей части (без подписи и цитаты нашего
+     * запроса) в text_ru: лента переписки показывает перевод, оригинал — под «весь текст».
+     * Кэш переводчика держит уже переведённое — повторные обновления снимка бесплатны.
+     */
+    public function russified(array $snapshot): array
+    {
+        $own = [];
+        foreach ($snapshot['suppliers'] ?? [] as $si => $s) {
+            foreach ($s['thread'] ?? [] as $mi => $m) {
+                if (($m['direction'] ?? null) === 'in' && ForeignTextTranslator::needs($text = (string) ($m['text'] ?? ''))) {
+                    $own["$si.$mi"] = QuotePartsThread::split($text)[0] ?: $text;
+                }
+            }
+        }
+        if ($own === []) {
+            return $snapshot;
+        }
+
+        $ru = app(ForeignTextTranslator::class)->toRussian(array_values($own));
+        foreach ($own as $path => $text) {
+            if (isset($ru[$text])) {
+                [$si, $mi] = explode('.', $path);
+                $snapshot['suppliers'][$si]['thread'][$mi]['text_ru'] = $ru[$text];
+            }
+        }
+
+        return $snapshot;
+    }
+
     public function refresh(QuotePartsRfq $rfq): QuotePartsRfq
     {
-        $snapshot = $this->client->rfq($rfq->remote_id);
+        $snapshot = $this->russified($this->client->rfq($rfq->remote_id));
         $rfq->forceFill([
             'snapshot' => $snapshot,
             'status' => $snapshot['status'] ?? $rfq->status,

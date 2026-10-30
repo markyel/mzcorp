@@ -66,8 +66,9 @@
         </div>
 
         <div class="pa-col" style="gap: 6px">
-            @if($kind !== 'original' && $r['product'])<span class="pa-note">{{ \App\Models\QuotePartsOffer::kindLabel($kind) }}: <span class="mono">{{ $r['product'] }}</span></span>@endif
-            @if($r['note'])<span class="pa-note">Поставщик: «{{ $r['note'] }}»</span>@endif
+            @php $orig = $r['original'] ?? []; @endphp
+            @if($kind !== 'original' && $r['product'])<span class="pa-note" @if(isset($orig['brand']) || isset($orig['part_number'])) title="Оригинал: {{ trim(($orig['brand'] ?? '').' '.($orig['part_number'] ?? '')) }}" @endif>{{ \App\Models\QuotePartsOffer::kindLabel($kind) }}: <span class="mono">{{ $r['product'] }}</span></span>@endif
+            @if($r['note'])<span class="pa-note" @isset($orig['note']) title="Оригинал: {{ $orig['note'] }}" @endisset>Поставщик: «{{ $r['note'] }}»@isset($orig['note'])<span style="color: var(--fg-4); font-size: 11px"> · перевод</span>@endisset</span>@endif
             @if($clState === \App\Services\QuoteParts\OfferClarifications::ANSWERED)
                 <span class="pa-pill pa-pill-info" style="align-self: flex-start; font-size: 12px; font-weight: 500; padding: 2px 8px">↩ ответил на уточнение {{ $cl['answered_at']->timezone($tz)->format('d.m H:i') }} — решите по ответу</span>
             @elseif($clWaiting)

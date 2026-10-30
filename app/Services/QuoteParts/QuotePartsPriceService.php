@@ -165,10 +165,15 @@ class QuotePartsPriceService
         $requestByRfq = $rfqIds->isEmpty() ? collect() : \App\Models\QuotePartsRfq::query()->whereIn('remote_id', $rfqIds)->whereNotNull('request_id')->pluck('request_id', 'remote_id');
         $refs = collect($offers)->pluck('rfq.external_ref')->filter()->unique()->values();
         $requestByRef = $refs->isEmpty() ? collect() : \App\Models\Request::query()->whereIn('internal_code', $refs)->pluck('id', 'internal_code');
+        // Китайские поставщики пишут примечание, бренд и артикул аналога по-китайски — снабжению по-русски.
+        $texts = collect($offers)->map(fn ($o) => self::offerTexts($o));
+        $translated = app(ForeignTextTranslator::class)->toRussian($texts->flatten()->filter()->values()->all());
 
-        foreach ($offers as $o) {
+        foreach ($offers as $i => $o) {
             $tiers = (array) ($o['tiers'] ?? []);
-            $row = QuotePartsOffer::query()->updateOrCreate(['remote_id' => (int) $o['id']], [
+            [$local, $originals] = self::localized($texts[$i], $translated);
+            $row = QuotePartsOffer::query()->updateOrCreate(['remote_id' => (int) $o['id']], $local + [
+                'original_texts' => $originals ?: null,
                 'catalog_item_id' => $catalog[$o['item_code'] ?? ''] ?? null,
                 'sku' => $o['item_code'] ?? null,
                 'supplier_key' => $o['supplier'] ?? null,
@@ -183,11 +188,6 @@ class QuotePartsPriceService
                 'status' => $o['status'] ?? null,
                 'superseded' => (bool) ($o['superseded'] ?? false),
                 'remote_updated_at' => $o['updated_at'] ?? now(),
-                // Аналог, копия, замена — другой товар: чей и какой артикул; состояние и фото.
-                'brand' => $o['product']['brand'] ?? null,
-                'part_number' => $o['product']['part_number'] ?? null,
-                'product_name' => $o['product']['name'] ?? null,
-                'note' => isset($o['note']) ? mb_substr((string) $o['note'], 0, 1000) : null,
                 // Цена агента — от какого реального поставщика (UniSystem: Sicor, Donati…).
                 'origin_supplier' => isset($o['origin_supplier']) ? mb_substr((string) $o['origin_supplier'], 0, 150) : null,
                 'photos' => (int) ($o['photos'] ?? 0),
@@ -205,6 +205,42 @@ class QuotePartsPriceService
         }
 
         return count($offers);
+    }
+
+    /**
+     * Тексты оффера, которые пишет поставщик. Аналог, копия, замена — другой товар: чей и какой артикул.
+     *
+     * @return array{brand: ?string, part_number: ?string, product_name: ?string, note: ?string}
+     */
+    public static function offerTexts(array $o): array
+    {
+        return [
+            'brand' => $o['product']['brand'] ?? null,
+            'part_number' => $o['product']['part_number'] ?? null,
+            'product_name' => $o['product']['name'] ?? null,
+            'note' => isset($o['note']) ? mb_substr((string) $o['note'], 0, 1000) : null,
+        ];
+    }
+
+    /**
+     * Подставить русский перевод вместо китайского: [поля с переводом, оригиналы переведённых полей].
+     * «无» (нет) в бренде аналога переводится в пусто — поля нет.
+     *
+     * @param  array<string, ?string>  $texts
+     * @param  array<string, string>  $translated  исходный текст => перевод
+     * @return array{0: array<string, ?string>, 1: array<string, string>}
+     */
+    public static function localized(array $texts, array $translated): array
+    {
+        $originals = [];
+        foreach ($texts as $field => $text) {
+            if ($text !== null && isset($translated[$text])) {
+                $originals[$field] = $text;
+                $texts[$field] = $translated[$text] !== '' ? $translated[$text] : null;
+            }
+        }
+
+        return [$texts, $originals];
     }
 
     /** Решение по тому же варианту того же поставщика на эту позицию, если уже было. */

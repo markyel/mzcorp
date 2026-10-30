@@ -130,7 +130,7 @@ class HandleQuotePartsEventJob implements ShouldQueue
             'created_by_user_id' => null,
             'reply_by' => $snapshot['reply_by'] ?? null,
             'status' => $snapshot['status'] ?? 'open',
-            'snapshot' => $snapshot,
+            'snapshot' => $service->russified($snapshot),
             'synced_at' => now(),
         ]);
     }

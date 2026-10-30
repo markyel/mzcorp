@@ -83,7 +83,7 @@
                 @if($loose->isNotEmpty())
                     <div class="qd-ask">
                         <div><b style="color: var(--amber-800, #92400e)">Поставщик спрашивает</b> <span class="qd-hint">— ответьте в поле ниже</span></div>
-                        @foreach($loose as $q)<div style="color: var(--fg-2)">{{ $q['text'] }}</div>@endforeach
+                        @foreach($loose as $q)<div style="color: var(--fg-2)">{{ ($q['text_ru'] ?? null) ?: $q['text'] }}@if(! empty($q['text_ru']) && $q['text_ru'] !== $q['text'])<span class="qd-hint"> («{{ $q['text'] }}»)</span>@endif</div>@endforeach
                     </div>
                 @endif
             </div>

@@ -959,6 +959,8 @@ class PriceOffers extends Component
             'lead' => $o->lead_time_days,
             'valid' => $o->valid_until,
             'note' => $o->note,
+            // Поставщик писал по-китайски — выше перевод; оригинал по наведению.
+            'original' => array_filter((array) ($o->original_texts ?? [])),
             'stale' => $o->superseded || ! in_array($o->status, ['active', 'expiring'], true),
             'purchase' => $purchase,
             'sale' => $ci?->price !== null ? (float) $ci->price : null,

@@ -1,6 +1,6 @@
 {{-- Сообщение ленты переписки с поставщиком (вкладка «Поставщики» заявки, «Актуализация цен»): как в чате —
      поставщик слева с аватаром и серым пузырём, мы справа в белом пузыре с рамкой, события — строкой по центру.
-     Ждёт $msg: dir in|out|event, name, who?, subject?, gist, body?, at, files? (url, dl?, name, mime?, image). --}}
+     Ждёт $msg: dir in|out|event, name, who?, subject?, gist, body?, original? (письмо до перевода), at, files? (url, dl?, name, mime?, image). --}}
 @once
     <style>
         .ct-ev{display:flex;align-items:center;gap:12px;margin:10px 0;font-size:12px;color:var(--fg-3);text-align:center}
@@ -30,6 +30,10 @@
     $gist = (string) ($msg['gist'] ?? '');
     // Свёрнуто — первые строки сути; «весь текст» снимает ограничение и дописывает подпись и цитату ниже.
     [$own, $tail] = $dir !== 'event' && trim($body) !== '' ? \App\Services\QuoteParts\QuotePartsThread::split($body) : [$gist, ''];
+    // Переведённое письмо: body — перевод, под «весь текст» — письмо как пришло.
+    if (! empty($msg['original'])) {
+        $tail = "Оригинал:\n".trim((string) $msg['original']);
+    }
     $files = collect($msg['files'] ?? []);
     $gallery = $files->where('image', true)->values()->map(fn ($f) => ['src' => $f['url'], 'name' => $f['name'], 'dl' => $f['dl'] ?? $f['url']])->all();
     $shot = 0;

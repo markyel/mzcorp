@@ -33,6 +33,8 @@ class QuotePartsOffer extends Model
         'part_number',
         'product_name',
         'note',
+        // Поставщик писал по-китайски: в полях выше — перевод, здесь — его текст по полям.
+        'original_texts',
         // Цена агента (UniSystem): реальный поставщик за ней — Sicor, Donati…; null — не агент или не назвал.
         'origin_supplier',
         'photos',
@@ -59,6 +61,7 @@ class QuotePartsOffer extends Model
 
     protected $casts = [
         'tiers' => 'array',
+        'original_texts' => 'array',
         'price' => 'decimal:4',
         'valid_until' => 'date',
         'superseded' => 'boolean',

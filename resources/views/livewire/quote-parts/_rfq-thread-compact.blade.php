@@ -11,7 +11,9 @@
     @foreach($thread as $m)
         @php
             $dir = $m['direction'] ?? 'event';
-            $body = (string) ($m['text'] ?? '');
+            // Письмо по-китайски: перевод своей части (QuotePartsRfqService::russified), оригинал — под «весь текст».
+            $original = ! empty($m['text_ru']) ? (string) ($m['text'] ?? '') : null;
+            $body = (string) ($m['text_ru'] ?? $m['text'] ?? '');
             $who = (string) ($m['who'] ?? '');
         @endphp
         <div wire:key="qpc-{{ $rfq->id }}-{{ $si }}-{{ $loop->index }}">
@@ -23,7 +25,9 @@
                     $dir === 'in' ? trim(preg_replace('/\s*\(.*\)\s*$/u', '', $who) ?? '') : $who,
                     ! empty($m['auto']) ? 'автоответ' : null,
                     ! empty($m['cc']) ? 'копия: '.implode(', ', $m['cc']) : null,
+                    $original !== null ? 'перевод' : null,
                 ]))),
+                'original' => $original,
                 'subject' => $m['subject'] ?? null,
                 'gist' => $dir === 'event' ? $body : \App\Services\QuoteParts\QuotePartsThread::gist($body),
                 'body' => $body,
