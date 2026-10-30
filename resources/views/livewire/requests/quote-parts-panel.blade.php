@@ -38,7 +38,7 @@
                             <label wire:key="qps-{{ $s->id }}" class="inline-flex items-center gap-1.5 mr-4 py-0.5">
                                 <input type="checkbox" wire:model="suppliers.{{ $s->id }}" class="w-4 h-4 accent-sky-600"> {{ $s->organization?->name ?: ($s->name ?: $s->email) }}
                                 @if($s->quoteparts_status !== 'active')
-                                    <span class="text-[11px] text-fg-4">· {{ \App\Services\QuoteParts\QuotePartsSupplierService::STATUS_LABELS[$s->quoteparts_status] ?? 'Переписка' }}</span>
+                                    <span class="text-[11px] text-fg-4">· {{ $s->quoteparts_offsystem || $s->quoteparts_link_id === null ? 'письмом с '.config('services.quoteparts.offsystem_mailbox') : (\App\Services\QuoteParts\QuotePartsSupplierService::STATUS_LABELS[$s->quoteparts_status] ?? 'Переписка') }}</span>
                                 @endif
                             </label>
                         @empty
@@ -61,7 +61,7 @@
                                 <div class="mt-1 text-[12px] text-fg-4">Не нашлось поставщиков с адресом.</div>
                             @endif
                         </div>
-                        <div class="mt-1 text-[11px] text-fg-4">Кто не принял приглашение, получит обычное письмо с ящика MyZip и ответит письмом или по ссылке — без регистрации. Ответ разберётся в предложения так же.</div>
+                        <div class="mt-1 text-[11px] text-fg-4">Кто не принял приглашение, получит наше письмо с {{ config('services.quoteparts.offsystem_mailbox') }}, как из обычной формы, и ответит письмом — ответ разберётся в предложения так же. Новый поставщик отсюда сразу становится внесистемным.</div>
                     </div>
 
                     <div class="flex flex-wrap items-center gap-3">

@@ -9,6 +9,9 @@ use App\Models\RequestItem;
 use App\Models\Supplier;
 use App\Services\QuoteParts\QuotePartsPilot;
 use App\Services\QuoteParts\QuotePartsRfqService;
+use App\Services\QuoteParts\QuotePartsRouting;
+use App\Services\Supplier\SupplierDispatchService;
+use Illuminate\Support\Facades\Log;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -82,7 +85,7 @@ class QuotePartsPanel extends Component
         return Supplier::query()
             ->where(fn ($q) => $q->whereNotNull('quoteparts_link_id')->orWhereIn('id', $this->extraSupplierIds))
             ->with('organization:id,name')->orderBy('name')
-            ->get(['id', 'name', 'email', 'supplier_organization_id', 'quoteparts_status'])
+            ->get(['id', 'name', 'email', 'supplier_organization_id', 'quoteparts_status', 'quoteparts_offsystem', 'quoteparts_link_id'])
             ->sortBy(fn ($s) => [$s->quoteparts_status === 'active' ? 0 : 1, (string) $s->name])
             ->unique(fn ($s) => $s->quotepartsKey())
             ->values();
@@ -149,17 +152,66 @@ class QuotePartsPanel extends Component
             return;
         }
 
+        $request = RequestModel::findOrFail($this->requestId);
+        $routing = app(QuotePartsRouting::class);
+        // Поставщик, которого блок заводит в QuoteParts сам (приглашения не было), — внесистемный:
+        // запросы ему идут нашим письмом с orders@, как из обычной формы, а не письмом платформы
+        // (ПЭА, QP-P2UE4Q, 30.10.2026: «Переписка» в справочнике, а письмо — с адреса платформы).
+        $route = $routing->classify($supplierIds);
+        foreach (Supplier::query()->whereIn('id', $route['mail'])->whereNull('quoteparts_link_id')->get() as $s) {
+            $s->forceFill(['quoteparts_offsystem' => true])->save();
+            Log::info('Supplier off-system flag changed', ['supplier_id' => $s->id, 'offsystem' => true, 'user_id' => auth()->id(), 'via' => 'quoteparts panel, first request']);
+        }
+        $route = $routing->classify($supplierIds);
+        $platform = [...$route['quoteparts'], ...$route['mail']];
+
+        $sent = [];
         try {
-            $rfq = $service->send(RequestModel::findOrFail($this->requestId), $quantities, $supplierIds, $this->replyBy ?: null, $this->message, auth()->user(), $draftQuantities);
+            if ($platform !== []) {
+                $sent[] = $service->send($request, $quantities, $platform, $this->replyBy ?: null, $this->message, auth()->user(), $draftQuantities)->tag;
+            }
+            if ($route['offsystem'] !== []) {
+                $sent[] = $service->send($request, $quantities, $route['offsystem'], $this->replyBy ?: null, $this->message, auth()->user(), $draftQuantities,
+                    letters: $this->offsystemLetters($request, $route['offsystem'], $chosen))->tag.' (письмом с '.config('services.quoteparts.offsystem_mailbox').')';
+            }
         } catch (Throwable $e) {
-            $this->error = mb_substr($e->getMessage(), 0, 400);
+            $this->error = ($sent !== [] ? 'Отправлено: '.implode(', ', $sent).'. Остальным — нет: ' : '').mb_substr($e->getMessage(), 0, 400);
+            unset($this->rfqs);
 
             return;
         }
 
         $this->reset('items', 'suppliers', 'message', 'open');
         unset($this->rfqs);
-        $this->dispatch('toast', type: 'success', message: 'Запрос '.$rfq->tag.' отправлен через QuoteParts.');
+        $this->dispatch('toast', type: 'success', message: (count($sent) > 1 ? 'Запросы ' : 'Запрос ').implode(', ', $sent).' отправлен'.(count($sent) > 1 ? 'ы' : '').' через QuoteParts.');
+    }
+
+    /**
+     * Письма внесистемным — как из обычной формы рассылки (SupplierDispatchService::composeLetter): на языке
+     * поставщика, с позициями и количеством, примечание — сообщением блока.
+     *
+     * @param  list<int>  $supplierIds
+     * @param  list<int>  $itemIds  отмеченные позиции заявки
+     * @return array<int, array{lang:string, subject:string, html:string, plain:string}>
+     */
+    private function offsystemLetters(RequestModel $request, array $supplierIds, array $itemIds): array
+    {
+        $dispatcher = app(SupplierDispatchService::class);
+        // Количество в письме — введённое в блоке, если его поменяли; иначе из заявки, с единицей.
+        $qty = [];
+        foreach ($this->catalogItems->whereIn('id', $itemIds) as $it) {
+            $typed = trim((string) ($this->qty[$it->id] ?? ''));
+            if ($typed !== '' && (float) str_replace(',', '.', $typed) !== (float) ($it->parsed_qty ?: 1)) {
+                $qty[(int) $it->id] = $typed;
+            }
+        }
+        $edits = ['qty' => $qty, 'qty_en' => $qty];
+        $letters = [];
+        foreach (Supplier::query()->whereIn('id', $supplierIds)->get() as $s) {
+            $letters[(int) $s->id] = $dispatcher->composeLetter($request, $s, $itemIds, $this->message ?: null, $edits);
+        }
+
+        return $letters;
     }
 
     public function refresh(int $id, QuotePartsRfqService $service): void

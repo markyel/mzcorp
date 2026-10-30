@@ -37,6 +37,24 @@ class QuotePartsRouting
             return ['quoteparts' => [], 'offsystem' => [], 'mail' => $supplierIds];
         }
 
+        return $this->classify($supplierIds);
+    }
+
+    /**
+     * То же разделение без выключателя маршрутизации — для блока «Запрос через QuoteParts» заявки:
+     * он шлёт только через платформу, но внесистемным — нашим письмом с orders@, как и обычная форма.
+     * «mail» здесь — заведённые в QuoteParts без отметки «внесистемный»: им письмо платформы.
+     *
+     * @param  list<int>  $supplierIds
+     * @return array{quoteparts: list<int>, offsystem: list<int>, mail: list<int>}
+     */
+    public function classify(array $supplierIds): array
+    {
+        $supplierIds = array_values(array_unique(array_map('intval', $supplierIds)));
+        if ($supplierIds === []) {
+            return ['quoteparts' => [], 'offsystem' => [], 'mail' => []];
+        }
+
         $rows = Supplier::query()->whereIn('id', $supplierIds)->get(['id', 'supplier_organization_id', 'quoteparts_status', 'quoteparts_offsystem']);
         $activeOrgs = Supplier::query()->where('quoteparts_status', 'active')->whereNotNull('supplier_organization_id')
             ->whereIn('supplier_organization_id', $rows->pluck('supplier_organization_id')->filter())
