@@ -129,6 +129,27 @@ class Index extends Component
                     \App\Services\Request\AssignmentService::MODE_PROPORTIONAL => 'пропорциональный (по проценту нагрузки)',
                 ],
             ],
+            \App\Services\Request\AssignmentService::SETTING_TWIN_MODE => [
+                'group' => 'Распределение заявок',
+                'label' => 'Близнецы: как опознаём (пропорциональный режим)',
+                'help' => 'Строгий: та же заявка — по общему артикулу, товару каталога или одинаковому названию, с проверкой противоречий (лево/право, разные размеры). Эксперимент: только по похожести названий — позиций поровну, и у каждой есть позиция с названием, похожим не меньше порога ниже. Ловит больше, но и ошибается чаще — в карточке такая склейка помечена «похожие названия (эксперимент)» с процентом.',
+                'type' => AppSetting::TYPE_STRING,
+                'default' => \App\Services\Request\AssignmentService::TWIN_MODE_STRICT,
+                'options' => [
+                    \App\Services\Request\AssignmentService::TWIN_MODE_STRICT => 'строгий (артикул, каталог, одинаковое название)',
+                    \App\Services\Request\AssignmentService::TWIN_MODE_SIMILAR => 'эксперимент: похожие названия',
+                ],
+            ],
+            \App\Services\Request\AssignmentService::SETTING_TWIN_SIMILARITY => [
+                'group' => 'Распределение заявок',
+                'label' => 'Близнецы, эксперимент: порог похожести названий, %',
+                'help' => 'Для режима «эксперимент: похожие названия». Каждая позиция новой заявки должна найти в ранней позицию с названием, похожим не меньше этого (similar_text). 100 — только одинаковые названия.',
+                'type' => AppSetting::TYPE_INT,
+                'default' => \App\Services\Request\AssignmentService::TWIN_SIMILARITY_DEFAULT,
+                'step' => 1,
+                'min' => 1,
+                'max' => 100,
+            ],
             'assignment.newbie_boost' => [
                 'group' => 'Распределение заявок',
                 'label' => 'Скорость догона отстающих (X)',

@@ -895,7 +895,7 @@ class Detail extends Component
      * близнецами этой. Один спрос: считать и отвечать по нему дважды не надо.
      * ground — на чём держится склейка (у назначений до 30.10.2026 его нет).
      *
-     * @return array{of: ?Request, ground: ?TwinGround, twins: Collection<int, Request>}
+     * @return array{of: ?Request, ground: ?TwinGround, similarity: ?int, twins: Collection<int, Request>}
      */
     #[Computed]
     public function twinLinks(): array
@@ -905,6 +905,7 @@ class Detail extends Component
 
         $ofId = null;
         $ground = null;
+        $similarity = null;
         $own = RequestAssignment::query()
             ->where('request_id', $id)
             ->where('reason', 'like', 'auto_twin:%')
@@ -914,6 +915,7 @@ class Detail extends Component
             $payload = json_decode(substr((string) $own, strlen('auto_twin:')), true);
             $ofId = (int) (($payload['linked'] ?? [])[0] ?? 0) ?: null;
             $ground = TwinGround::tryFrom((string) ($payload['ground'] ?? ''));
+            $similarity = isset($payload['similarity']) ? (int) $payload['similarity'] : null;
         }
 
         $twinIds = RequestAssignment::query()
@@ -925,6 +927,7 @@ class Detail extends Component
         return [
             'of' => $ofId ? Request::query()->find($ofId, $cols) : null,
             'ground' => $ground,
+            'similarity' => $similarity,
             'twins' => $twinIds->isEmpty()
                 ? collect()
                 : Request::query()->whereIn('id', $twinIds)->orderBy('created_at')->get($cols),

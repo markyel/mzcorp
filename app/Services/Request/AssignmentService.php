@@ -106,6 +106,35 @@ class AssignmentService
         return $mode === self::MODE_PROPORTIONAL ? self::MODE_PROPORTIONAL : self::MODE_SMART;
     }
 
+    /**
+     * Как опознаём близнеца (пропорциональный режим). Строгий — по коду, каталогу и
+     * одинаковому названию с проверкой противоречий (compositionGround). Эксперимент
+     * (30.10.2026, по просьбе заказчика) — только по похожести названий: столько же
+     * позиций, и у каждой есть своя пара с названием, похожим не меньше порога.
+     * Переключается в «Настройки → Распределение заявок» без выкладки.
+     */
+    public const SETTING_TWIN_MODE = 'assignment.twin_mode';
+
+    public const TWIN_MODE_STRICT = 'strict';
+
+    public const TWIN_MODE_SIMILAR = 'similar';
+
+    /** Порог похожести названий в эксперименте, %. */
+    public const SETTING_TWIN_SIMILARITY = 'assignment.twin_similarity';
+
+    public const TWIN_SIMILARITY_DEFAULT = 70;
+
+    public function twinMode(): string
+    {
+        return app(SettingsService::class)->get(self::SETTING_TWIN_MODE, self::TWIN_MODE_STRICT) === self::TWIN_MODE_SIMILAR
+            ? self::TWIN_MODE_SIMILAR : self::TWIN_MODE_STRICT;
+    }
+
+    public function twinSimilarity(): int
+    {
+        return max(1, min(100, (int) app(SettingsService::class)->get(self::SETTING_TWIN_SIMILARITY, self::TWIN_SIMILARITY_DEFAULT)));
+    }
+
     public function __construct(
         private readonly AttentionService $attention,
         private readonly RequestActivityService $activity,
@@ -159,7 +188,8 @@ class AssignmentService
                     $request,
                     $twin['user'],
                     'auto_twin:'.json_encode(
-                        ['fingerprint' => $twin['fingerprint'], 'linked' => $twin['linked'], 'ground' => $twin['ground']],
+                        ['fingerprint' => $twin['fingerprint'], 'linked' => $twin['linked'], 'ground' => $twin['ground']]
+                            + (isset($twin['similarity']) ? ['similarity' => $twin['similarity']] : []),
                         JSON_UNESCAPED_UNICODE,
                     ),
                     $byUserId,
@@ -695,7 +725,7 @@ class AssignmentService
      * получит ровно настолько меньше.
      *
      * @param  Collection<int, User>  $managers
-     * @return array{user: User, fingerprint: string, linked: array<int, int>, ground: string}|null
+     * @return array{user: User, fingerprint: string, linked: array<int, int>, ground: string, similarity?: int}|null
      */
     private function pickTwinManager(Request $request, Collection $managers): ?array
     {
@@ -718,6 +748,26 @@ class AssignmentService
             ->orderByDesc('created_at')
             ->limit(500)
             ->get(['id', 'assigned_user_id', 'created_at']);
+
+        if ($this->twinMode() === self::TWIN_MODE_SIMILAR) {
+            $threshold = $this->twinSimilarity();
+            $mine = self::positionNames($request);
+            foreach ($candidates as $candidate) {
+                $similarity = self::similarComposition($mine, self::positionNames($candidate), $threshold);
+                $manager = $similarity !== null ? $managers->firstWhere('id', (int) $candidate->assigned_user_id) : null;
+                if ($manager) {
+                    return [
+                        'user' => $manager,
+                        'fingerprint' => substr($fingerprint, 0, 8),
+                        'linked' => [(int) $candidate->id],
+                        'ground' => TwinGround::Similar->value,
+                        'similarity' => $similarity,
+                    ];
+                }
+            }
+
+            return null;
+        }
 
         $catalogCodes = self::catalogCodes(array_merge(
             $request->items->pluck('catalog_item_id')->all(),
@@ -742,6 +792,65 @@ class AssignmentService
         }
 
         return null;
+    }
+
+    /**
+     * Названия позиций для эксперимента «похожие названия»: строчными, пробелы схлопнуты;
+     * без названия — артикул. Позиции без того и другого не считаются.
+     *
+     * @return list<string>
+     */
+    public static function positionNames(Request $request): array
+    {
+        $names = [];
+        foreach ($request->items as $item) {
+            $text = trim((string) ($item->parsed_name ?: $item->parsed_article));
+            $text = mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $text)));
+            if ($text !== '') {
+                $names[] = $text;
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Похожи ли составы по названиям: позиций поровну, и каждой позиции одной заявки
+     * досталась своя позиция другой с похожестью не ниже порога (similar_text, %). Пары
+     * подбираются от самых похожих. Возвращает похожесть самой слабой пары или null.
+     *
+     * @param  list<string>  $a
+     * @param  list<string>  $b
+     */
+    public static function similarComposition(array $a, array $b, int $threshold): ?int
+    {
+        if ($a === [] || count($a) !== count($b)) {
+            return null;
+        }
+
+        $pairs = [];
+        foreach ($a as $i => $x) {
+            foreach ($b as $j => $y) {
+                similar_text($x, $y, $percent);
+                $pairs[] = [$i, $j, (int) floor($percent)];
+            }
+        }
+        usort($pairs, fn ($p, $q) => $q[2] <=> $p[2]);
+
+        $usedA = $usedB = [];
+        $weakest = 100;
+        foreach ($pairs as [$i, $j, $score]) {
+            if (isset($usedA[$i]) || isset($usedB[$j])) {
+                continue;
+            }
+            if ($score < $threshold) {
+                return null;
+            }
+            $usedA[$i] = $usedB[$j] = true;
+            $weakest = min($weakest, $score);
+        }
+
+        return count($usedA) === count($a) ? $weakest : null;
     }
 
     /**

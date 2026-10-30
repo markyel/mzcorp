@@ -24,6 +24,9 @@ enum TwinGround: string
     /** Одинаковое название. */
     case Name = 'name';
 
+    /** Экспериментальный режим: названия позиций похожи не меньше порога (AssignmentService::similarComposition). */
+    case Similar = 'similar';
+
     public function label(): string
     {
         return match ($this) {
@@ -31,6 +34,7 @@ enum TwinGround: string
             self::Catalog => 'один товар каталога',
             self::CatalogCode => 'артикул товара каталога',
             self::Name => 'одинаковое название',
+            self::Similar => 'похожие названия (эксперимент)',
         };
     }
 

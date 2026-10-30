@@ -235,6 +235,34 @@ class CompositionFingerprintTest extends TestCase
         ));
     }
 
+    public function test_experimental_mode_matches_similar_names_one_to_one(): void
+    {
+        $names = fn (array $items) => AssignmentService::positionNames($this->request($items));
+
+        // Одна позиция, названия похожи, хотя артикулов нет и формулировки разные.
+        $this->assertNotNull(AssignmentService::similarComposition(
+            $names([['name' => 'Редуктор SRT 85 100 AC32 IEC80-B14 G619 без фланца, вал 32мм']]),
+            $names([['name' => 'Редуктор SRT 85 100 AC32 IEC80-B14 G619, вал 32 мм']]),
+            70,
+        ));
+        // Позиций не поровну — не близнецы, даже если одна совпала.
+        $this->assertNull(AssignmentService::similarComposition(
+            $names([['name' => 'Ролик двери Fermator']]),
+            $names([['name' => 'Ролик двери Fermator'], ['name' => 'Башмак двери Fermator']]),
+            70,
+        ));
+        // Каждой позиции — своя пара: две позиции одной заявки не делят одну позицию другой.
+        $this->assertNull(AssignmentService::similarComposition(
+            $names([['name' => 'Ролик двери Fermator 50 мм'], ['name' => 'Ролик двери Fermator 52 мм']]),
+            $names([['name' => 'Ролик двери Fermator 50 мм'], ['name' => 'Частотный преобразователь Unidrive SP']]),
+            70,
+        ));
+        // Порог: 100 — только одинаковые названия (регистр и пробелы не в счёт); без названия — артикул.
+        $this->assertSame(100, AssignmentService::similarComposition($names([['name' => 'Кнопка  KT40']]), $names([['name' => 'кнопка kt40']]), 100));
+        $this->assertNull(AssignmentService::similarComposition($names([['name' => 'Кнопка KT40']]), $names([['name' => 'Кнопка KT41']]), 100));
+        $this->assertSame(['xo-508'], $names([['article' => 'XO-508']]));
+    }
+
     public function test_a_request_without_anything_identifiable_has_no_twin(): void
     {
         $this->assertNull(AssignmentService::compositionFingerprint($this->request([])));

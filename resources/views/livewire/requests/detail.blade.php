@@ -591,7 +591,7 @@
                             <a href="{{ route('requests.show', $twinLinks['of']) }}" title="{{ $twinLinks['of']->client_email }}"
                                class="mono text-[12px] text-sky-700 hover:underline">{{ $twinLinks['of']->internal_code }}</a>
                             @if($twinLinks['ground'])
-                                <span class="text-fg-3 text-[11.5px]" title="На чём держится склейка">· {{ $twinLinks['ground']->label() }}</span>
+                                <span class="text-fg-3 text-[11.5px]" title="На чём держится склейка">· {{ $twinLinks['ground']->label() }}{{ $twinLinks['similarity'] !== null ? ', '.$twinLinks['similarity'].'%' : '' }}</span>
                             @endif
                         @endif
                         @if($twinLinks['twins']->isNotEmpty())
