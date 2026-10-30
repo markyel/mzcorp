@@ -93,7 +93,11 @@ class BotChatDigestService
 
         MessengerMessage::query()->whereIn('id', $messages->pluck('id'))->whereNull('emailed_at')->update(['emailed_at' => now()]);
         Cache::put($gapKey, 1, now()->addMinutes(max(1, (int) config('services.bot_chat_digest.min_interval_minutes', 15))));
-        $this->copies->store($manager, $mail, $messageId, ['bot_chat_digest' => true]);
+        // Сводка по одной заявке — в списке почты с её чипами (notice_request_id, как у письма о заявке
+        // из бота); по нескольким — без: одной строке не выбрать.
+        $requestIds = $messages->pluck('request_id')->filter()->unique()->values();
+        $this->copies->store($manager, $mail, $messageId, ['bot_chat_digest' => true]
+            + ($requestIds->count() === 1 ? ['notice_request_id' => (int) $requestIds->first()] : []));
 
         return true;
     }
