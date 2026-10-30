@@ -408,34 +408,76 @@ class QuotePartsRfqService
         return $draft;
     }
 
+    /** Что поставщик пишет в строках запроса: примечание и аналог в предложении, отсрочка, отказ. */
+    private const LINE_TEXT_KEYS = ['note', 'brand', 'part_number', 'name', 'postpone_note', 'decline_reason'];
+
     /**
-     * Письма поставщика по-китайски — с русским переводом своей части (без подписи и цитаты нашего
-     * запроса) в text_ru: лента переписки показывает перевод, оригинал — под «весь текст».
-     * Кэш переводчика держит уже переведённое — повторные обновления снимка бесплатны.
+     * Снимок запроса по-русски там, где поставщик написал по-китайски. Письма — русский перевод своей
+     * части (без подписи и цитаты нашего запроса) в text_ru: лента показывает перевод, оригинал — под
+     * «весь текст». Строки (примечание, бренд и артикул аналога, отсрочка, отказ) — перевод на месте,
+     * оригинал рядом в «<поле>_original». Кэш переводчика держит уже переведённое — повторные
+     * обновления снимка бесплатны. Наши письма (запрос по-китайски) не трогаем.
      */
     public function russified(array $snapshot): array
     {
-        $own = [];
+        $letters = [];
+        $lineTexts = [];
         foreach ($snapshot['suppliers'] ?? [] as $si => $s) {
             foreach ($s['thread'] ?? [] as $mi => $m) {
                 if (($m['direction'] ?? null) === 'in' && ForeignTextTranslator::needs($text = (string) ($m['text'] ?? ''))) {
-                    $own["$si.$mi"] = QuotePartsThread::split($text)[0] ?: $text;
+                    $letters["$si.$mi"] = QuotePartsThread::split($text)[0] ?: $text;
                 }
             }
+            $lineTexts = array_merge($lineTexts, self::lineTexts((array) ($s['lines'] ?? [])));
         }
-        if ($own === []) {
+        if ($letters === [] && $lineTexts === []) {
             return $snapshot;
         }
 
-        $ru = app(ForeignTextTranslator::class)->toRussian(array_values($own));
-        foreach ($own as $path => $text) {
+        $ru = app(ForeignTextTranslator::class)->toRussian(array_merge(array_values($letters), $lineTexts));
+        foreach ($letters as $path => $text) {
             if (isset($ru[$text])) {
                 [$si, $mi] = explode('.', $path);
                 $snapshot['suppliers'][$si]['thread'][$mi]['text_ru'] = $ru[$text];
             }
         }
+        foreach ($snapshot['suppliers'] ?? [] as $si => $s) {
+            if (! empty($s['lines'])) {
+                $snapshot['suppliers'][$si]['lines'] = self::translateLineTexts($s['lines'], $ru);
+            }
+        }
 
         return $snapshot;
+    }
+
+    /** @return list<string> китайские тексты поставщика в строках запроса */
+    public static function lineTexts(array $node): array
+    {
+        $out = [];
+        foreach ($node as $key => $value) {
+            if (is_array($value)) {
+                $out = array_merge($out, self::lineTexts($value));
+            } elseif (is_string($value) && in_array($key, self::LINE_TEXT_KEYS, true) && ForeignTextTranslator::needs($value)) {
+                $out[] = $value;
+            }
+        }
+
+        return $out;
+    }
+
+    /** @param  array<string, string>  $ru  исходный текст => перевод */
+    private static function translateLineTexts(array $node, array $ru): array
+    {
+        foreach ($node as $key => $value) {
+            if (is_array($value)) {
+                $node[$key] = self::translateLineTexts($value, $ru);
+            } elseif (is_string($value) && in_array($key, self::LINE_TEXT_KEYS, true) && isset($ru[$value])) {
+                $node[$key.'_original'] = $value;
+                $node[$key] = $ru[$value] !== '' ? $ru[$value] : null;
+            }
+        }
+
+        return $node;
     }
 
     public function refresh(QuotePartsRfq $rfq): QuotePartsRfq

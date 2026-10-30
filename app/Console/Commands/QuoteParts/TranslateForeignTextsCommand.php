@@ -48,20 +48,22 @@ class TranslateForeignTextsCommand extends Command
         QuotePartsRfq::query()->where('synced_at', '>=', $since)->orderBy('id')->chunkById(50, function ($chunk) use ($rfqs, $dry, &$count) {
             foreach ($chunk as $rfq) {
                 $snapshot = (array) $rfq->snapshot;
-                $after = $dry ? $snapshot : $rfqs->russified($snapshot);
-                $foreign = collect($snapshot['suppliers'] ?? [])->flatMap(fn ($s) => $s['thread'] ?? [])
-                    ->filter(fn ($m) => ($m['direction'] ?? null) === 'in' && empty($m['text_ru']) && ForeignTextTranslator::needs((string) ($m['text'] ?? '')))->count();
+                $suppliers = collect($snapshot['suppliers'] ?? []);
+                $foreign = $suppliers->flatMap(fn ($s) => $s['thread'] ?? [])
+                    ->filter(fn ($m) => ($m['direction'] ?? null) === 'in' && empty($m['text_ru']) && ForeignTextTranslator::needs((string) ($m['text'] ?? '')))->count()
+                    + $suppliers->sum(fn ($s) => count(QuotePartsRfqService::lineTexts((array) ($s['lines'] ?? []))));
                 if ($foreign === 0) {
                     continue;
                 }
                 $count += $foreign;
+                $after = $dry ? $snapshot : $rfqs->russified($snapshot);
                 if (! $dry && $after !== $snapshot) {
                     // Только снимок: время обновления и статус не трогаем.
                     $rfq->forceFill(['snapshot' => $after])->saveQuietly();
                 }
             }
         });
-        $this->info(($dry ? 'Писем к переводу: ' : 'Писем переведено (или в работе): ').$count);
+        $this->info(($dry ? 'Текстов в запросах к переводу: ' : 'Текстов в запросах обработано: ').$count);
 
         return self::SUCCESS;
     }

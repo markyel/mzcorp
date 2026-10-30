@@ -68,11 +68,13 @@ class ForeignTextTranslatorTest extends TestCase
     public function test_supplier_letters_in_chinese_get_text_ru(): void
     {
         $calls = 0;
-        $this->fakeModel(['您好，有现货' => 'Здравствуйте, есть в наличии'], $calls);
+        $this->fakeModel(['您好，有现货' => 'Здравствуйте, есть в наличии', '无' => '', '进口产品 等国外厂家回复' => 'Импорт, ждём ответа завода'], $calls);
         $snapshot = ['suppliers' => [['external_id' => 'org:1', 'thread' => [
             ['direction' => 'out', 'text' => '您好'],
             ['direction' => 'in', 'text' => '您好，有现货'],
             ['direction' => 'in', 'text' => 'Hello, in stock'],
+        ], 'letters' => [['text' => 'MyZip 请您对以下物品报价']], 'lines' => [
+            ['code' => 'M32654', 'postpone_note' => '进口产品 等国外厂家回复', 'offers' => [['note' => 'ok', 'product' => ['brand' => '无', 'part_number' => 'AZ05']]]],
         ]]]];
 
         $out = $this->app->make(QuotePartsRfqService::class)->russified($snapshot);
@@ -80,5 +82,11 @@ class ForeignTextTranslatorTest extends TestCase
         $this->assertArrayNotHasKey('text_ru', $thread[0], 'our own letters are not translated');
         $this->assertSame('Здравствуйте, есть в наличии', $thread[1]['text_ru']);
         $this->assertArrayNotHasKey('text_ru', $thread[2]);
+        $this->assertSame('MyZip 请您对以下物品报价', $out['suppliers'][0]['letters'][0]['text'], 'our request letter stays as sent');
+
+        $line = $out['suppliers'][0]['lines'][0];
+        $this->assertSame(['Импорт, ждём ответа завода', '进口产品 等国外厂家回复'], [$line['postpone_note'], $line['postpone_note_original']]);
+        $this->assertSame(['brand' => null, 'part_number' => 'AZ05', 'brand_original' => '无'], $line['offers'][0]['product']);
+        $this->assertSame(1, $calls);
     }
 }
