@@ -1,6 +1,12 @@
 {{-- Вложения письма: фото (лайтбокс), PDF (предпросмотр), прочее — скачать.
      Общий для вкладки «Переписка» и «Обзора». Параметры: $msg,
      $isImageAttachment, $isPdfAttachment. --}}
+                                        @if($msg->needsBodyFetch() && ($msg->history_has_attachments || (blank($msg->body_plain) && blank($msg->body_html))))
+                                            <button type="button" class="btn btn-sm mt-2"
+                                                    wire:click="loadRetroMessage({{ $msg->id }})" wire:loading.attr="disabled" wire:target="loadRetroMessage({{ $msg->id }})">
+                                                {{ $msg->history_has_attachments ? 'Загрузить вложения' : 'Загрузить письмо' }}
+                                            </button>
+                                        @endif
                                         @if($msg->attachments->isNotEmpty())
                                             @php
                                                 // Галерея картинок этого письма для листания в лайтбоксе:
