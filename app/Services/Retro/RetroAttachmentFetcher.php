@@ -98,7 +98,8 @@ class RetroAttachmentFetcher
         } else {
             $query->where('e.history_has_attachments', true)
                 ->whereRaw("NOT jsonb_exists(e.detected_artifacts, 'cross_mailbox_copy_of')")
-                ->where('e.category', '!=', 'supplier_reply')
+                // У исходящих категории нет: сравнение с NULL их отбросило бы.
+                ->whereRaw("COALESCE(e.category, '') <> 'supplier_reply'")
                 ->whereIn('e.related_request_id', DB::table('requests')->select('id')->where('status', '!=', 'closed_lost'));
         }
 
