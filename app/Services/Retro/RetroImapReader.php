@@ -5,6 +5,7 @@ namespace App\Services\Retro;
 use App\Models\Mailbox;
 use App\Services\Mail\YandexOAuthService;
 use RuntimeException;
+use Throwable;
 
 /**
  * Соединение с ящиком только на чтение. Пропускает лишь команды, которые не
@@ -46,7 +47,7 @@ class RetroImapReader
                 $this->open();
 
                 return;
-            } catch (RuntimeException $e) {
+            } catch (Throwable $e) {
                 if ($try >= 5) {
                     throw $e;
                 }
@@ -81,7 +82,7 @@ class RetroImapReader
         fwrite($this->socket, "$tag $command\r\n");
         $rows = [];
         while (true) {
-            $line = fgets($this->socket);
+            $line = @fgets($this->socket);
             if ($line === false) {
                 // Вход в журнал не пишем: в команде токен.
                 throw new RuntimeException('Соединение оборвалось на: '.(str_starts_with($command, 'AUTHENTICATE') ? 'вход' : substr($command, 0, 40)));
@@ -96,7 +97,7 @@ class RetroImapReader
                 $size = (int) $m[1];
                 $buffer = '';
                 while (strlen($buffer) < $size) {
-                    $chunk = fread($this->socket, min(65536, $size - strlen($buffer)));
+                    $chunk = @fread($this->socket, min(65536, $size - strlen($buffer)));
                     if ($chunk === false || $chunk === '') {
                         throw new RuntimeException('Обрыв при чтении письма');
                     }
@@ -107,7 +108,7 @@ class RetroImapReader
                 if ($size < 2000) {
                     $all .= '"'.str_replace('"', ' ', $buffer).'" ';
                 }
-                $text = fgets($this->socket);
+                $text = @fgets($this->socket);
                 if ($text === false) {
                     throw new RuntimeException('Обрыв после письма');
                 }
@@ -184,7 +185,7 @@ class RetroImapReader
                     break;
                 }
                 sleep(5);
-            } catch (RuntimeException $e) {
+            } catch (Throwable $e) {
                 if ($try >= 6) {
                     throw $e;
                 }
