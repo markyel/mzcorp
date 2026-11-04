@@ -206,7 +206,9 @@ class CatalogSyncFromUrlCommand extends Command
         // что ломает CSV-парсер при значениях с запятой/переносом строки
         // (одна позиция «съезжает» по колонкам, начинается мисаллайнмент).
         // Default mdb-export quote'ит текст стандартными double-quote'ами.
-        $process = new Process(['mdb-export', '-d', ',', $disk->path($snapshotRel), $table]);
+        // Кириллическое имя таблицы: без UTF-8 в окружении mdb-export молча отдаёт пустой вывод
+        // (cron и воркеры запускаются без LANG).
+        $process = new Process(['mdb-export', '-d', ',', $disk->path($snapshotRel), $table], null, ['LC_ALL' => 'C.UTF-8', 'LANG' => 'C.UTF-8']);
         $process->setTimeout(120);
         $fh = fopen($csvAbs, 'wb');
         if (! $fh) {
