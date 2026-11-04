@@ -70,6 +70,8 @@ for scope in documents open; do
   wait
 done
 sudo -u www-data php artisan retro:attachments --database="$TARGET" --link-only 2>&1 | tail -n 1
+echo "=== $(date +%H:%M) суммы из PDF"
+sudo -u www-data php artisan retro:totals --database="$TARGET" 2>&1 | tail -n 12 | cut -c1-80
 
 sudo -u postgres psql -d "$TARGET" -tAc "select status, count(*) from requests group by 1 order by 2 desc"
 sudo -u postgres psql -d "$TARGET" -tAc "select document_type, count(*), count(email_attachment_id) from outbound_quotes group by 1"

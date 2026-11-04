@@ -227,6 +227,36 @@ class RetroMailParser
         return ['type' => $type, 'number' => $number, 'date' => $date];
     }
 
+    /**
+     * Суммы из текста PDF наших КП и счетов (шаблон 1С): «Итого: 1 234,50», «Итого со
+     * скидкой: …», «В том числе НДС: …», «Всего наименований 3, на сумму 1 234,50 RUB».
+     *
+     * @return array{subtotal:?float, discounted:?float, vat:?float, sum:?float, lines:?int, currency:?string}
+     */
+    public static function documentTotals(string $text): array
+    {
+        $number = '(\d[\d\s\x{00A0}]*(?:[.,]\d{1,2})?)';
+        $amount = fn (string $pattern) => preg_match($pattern, $text, $m)
+            ? (float) str_replace([' ', "\u{00A0}", ','], ['', '', '.'], preg_replace('/\s+/u', ' ', trim($m[1])))
+            : null;
+
+        $out = [
+            'subtotal' => $amount('/Итого\s*:\s*'.$number.'/u'),
+            'discounted' => $amount('/Итого\s+со\s+скидкой\s*:\s*'.$number.'/u'),
+            'vat' => $amount('/В\s+том\s+числе\s+НДС\s*:\s*'.$number.'/u'),
+            'sum' => null,
+            'lines' => null,
+            'currency' => null,
+        ];
+        if (preg_match('/Всего\s+наименований\s+(\d+)\s*,\s*на\s+сумму\s+'.$number.'\s*([A-Z]{3})?/u', $text, $m)) {
+            $out['lines'] = (int) $m[1];
+            $out['sum'] = (float) str_replace([' ', "\u{00A0}", ','], ['', '', '.'], preg_replace('/\s+/u', ' ', trim($m[2])));
+            $out['currency'] = $m[3] ?? null;
+        }
+
+        return $out;
+    }
+
     /** Адреса заголовка: [{email, name}], в нижнем регистре, без пустых. */
     public static function addresses(string $header): array
     {

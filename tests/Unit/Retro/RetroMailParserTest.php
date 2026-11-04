@@ -66,6 +66,18 @@ class RetroMailParserTest extends TestCase
         $this->assertSame('abc@x', $files[1]['content_id']);
     }
 
+    public function test_document_totals_read_our_template(): void
+    {
+        $text = "   Итого:                         1 234 567,50\n   Итого со скидкой:              1 200 000,00\n"
+            ."   В том числе НДС:                 218 181,82\n\n Всего наименований 12, на сумму 1 200 000,00 RUB\n";
+
+        $this->assertSame(
+            ['subtotal' => 1234567.5, 'discounted' => 1200000.0, 'vat' => 218181.82, 'sum' => 1200000.0, 'lines' => 12, 'currency' => 'RUB'],
+            RetroMailParser::documentTotals($text),
+        );
+        $this->assertNull(RetroMailParser::documentTotals('Свидетельство ИНН')['sum']);
+    }
+
     public function test_our_logo_and_banner_are_not_attachments(): void
     {
         $line = '* 1 FETCH (UID 5 BODYSTRUCTURE (("IMAGE" "PNG" ("NAME" "mylift-logo.png")) ("IMAGE" "PNG" ("NAME" "mylift-promo")) ("APPLICATION" "PDF" ("NAME" "file.pdf"))))';
