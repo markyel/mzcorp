@@ -127,8 +127,14 @@ class RetroAssembler
 
     private function isSupplierMarked(array $row): bool
     {
+        return self::isSupplierSubject($row['subject']);
+    }
+
+    /** Тема нашего запроса поставщику или ответа на него (маркировка CRM). */
+    public static function isSupplierSubject(string $subject): bool
+    {
         foreach (self::SUPPLIER_MARK_RE as $re) {
-            if (preg_match($re, $row['subject'])) {
+            if (preg_match($re, $subject)) {
                 return true;
             }
         }
