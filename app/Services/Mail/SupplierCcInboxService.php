@@ -31,8 +31,8 @@ use Symfony\Component\Mime\Email;
  */
 class SupplierCcInboxService
 {
-    /** Номер заявки: M-YYYY-NNNN. */
-    private const CODE_RE = '/\bM-\d{4}-\d{1,6}\b/iu';
+    /** Номер заявки: M-YYYY-NNNN или MZYYYY-NNNNN (App\Support\RequestCode). */
+    private const CODE_RE = \App\Support\RequestCode::REGEX;
 
     public function __construct(private readonly OutgoingMailSender $sender)
     {

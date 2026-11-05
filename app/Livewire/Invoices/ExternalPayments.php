@@ -135,7 +135,7 @@ class ExternalPayments extends Component
         $ext = ImportedPayment::findOrFail($this->linkingId);
         $code = trim($this->linkCode);
         $request = Request::query()
-            ->where('internal_code', $code)
+            ->where('internal_code', mb_strtoupper($code))
             ->orWhere('internal_code', 'M-'.ltrim($code, 'Mm-'))
             ->first();
         if ($request === null) {

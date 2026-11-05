@@ -166,11 +166,11 @@ class OutgoingMailLinker
             return null;
         }
 
-        if (! preg_match('/\bM-\d{4}-\d{4,}\b/u', $haystack, $m)) {
+        $code = \App\Support\RequestCode::find($haystack);
+        if ($code === null) {
             return null;
         }
 
-        $code = $m[0];
         $request = Request::where('internal_code', $code)->first();
         if (! $request || ! $request->email_message_id) {
             return null;

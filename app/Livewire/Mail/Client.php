@@ -326,7 +326,7 @@ class Client extends Component
         }
 
         // 3. Номер заявки в теме — так его пишут и люди, и чужие тикет-системы.
-        if (preg_match('/\bM-\d{4}-\d{1,6}\b/iu', (string) $anchor->subject, $m) === 1) {
+        if (preg_match(\App\Support\RequestCode::REGEX, (string) $anchor->subject, $m) === 1) {
             $request = Request::query()
                 ->whereRaw('upper(internal_code) = ?', [mb_strtoupper($m[0])])
                 ->first(['id', 'internal_code', 'status', 'onec_number']);

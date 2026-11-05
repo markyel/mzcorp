@@ -440,7 +440,7 @@ class SupplierInquiryService
         $subject = (string) $message->subject;
 
         return preg_match('/(price request|запрос расценки)/iu', $subject) === 1
-            && preg_match('/\bM-\d{4}-\d+/u', $subject) === 1;
+            && \App\Support\RequestCode::find($subject) !== null;
     }
 
     /**
@@ -459,10 +459,10 @@ class SupplierInquiryService
         // дискриминатор — пара «отправитель = supplier_email инквайри» + «M-код
         // из темы = в теме инквайри» ниже. Клиент не значится supplier_email
         // инквайри своей же заявки → ложных привязок к клиентским письмам нет.
-        if (! preg_match('/\bM-\d{4}-\d+/u', (string) $message->subject, $m)) {
+        $code = \App\Support\RequestCode::find((string) $message->subject);
+        if ($code === null) {
             return null;
         }
-        $code = $m[0];
         $from = mb_strtolower(trim((string) $message->from_email));
         if ($from === '') {
             return null;
@@ -669,8 +669,7 @@ class SupplierInquiryService
         $codes = [];
         // M-код заявки (приоритетнее — уникальнее), затем док-номера 6–9 цифр
         // (наши RFQ несут [363530] / 000363395).
-        preg_match_all('/\bM-\d{4}-\d+/u', $subject, $m);
-        foreach ($m[0] ?? [] as $c) {
+        foreach (\App\Support\RequestCode::all($subject) as $c) {
             $codes[] = $c;
         }
         preg_match_all('/\b\d{6,9}\b/u', $subject, $m2);
@@ -720,8 +719,7 @@ class SupplierInquiryService
         // приоритетно); неоднозначность (несколько поставщиков на одну заявку по
         // M-коду) → пропускаем, там нужен адрес/домен.
         $strong = [];
-        preg_match_all('/\bM-\d{4}-\d+/u', $subject, $ms);
-        foreach ($ms[0] ?? [] as $c) {
+        foreach (\App\Support\RequestCode::all($subject) as $c) {
             $strong[] = $c;
         }
         preg_match_all('/\[(\d{6,9})\]/u', $subject, $mb);
@@ -787,9 +785,8 @@ class SupplierInquiryService
      */
     public static function subjectCodes(string $subject): array
     {
-        preg_match_all('/\bM-\d{4}-\d+/u', $subject, $m);
         preg_match_all('/\b\d{6,9}\b/u', $subject, $n);
-        $codes = array_merge($m[0] ?? [], array_map(fn ($c) => ltrim($c, '0'), $n[0] ?? []));
+        $codes = array_merge(\App\Support\RequestCode::all($subject), array_map(fn ($c) => ltrim($c, '0'), $n[0] ?? []));
 
         return array_values(array_unique(array_filter($codes, fn ($c) => $c !== '')));
     }
@@ -898,7 +895,7 @@ class SupplierInquiryService
     {
         $ids = [];
         foreach ($codes as $code) {
-            if (str_starts_with($code, 'M-')) {
+            if (\App\Support\RequestCode::is($code)) {
                 $id = RequestModel::query()->where('internal_code', $code)->value('id');
                 if ($id !== null) {
                     $ids[] = (int) $id;
