@@ -50,8 +50,12 @@ class ClientsImportOnecCommand extends Command
         $parsed = null;
         if ($this->option('discounts')) {
             $parsed = $discounts->parse((string) $this->option('discounts'));
-            if ($parsed['errors'] !== []) {
-                $this->error(implode('; ', $parsed['errors']));
+            // Замечания по строкам (нет ИНН, странная скидка) — не повод бросать файл.
+            foreach ($parsed['errors'] as $error) {
+                $this->warn('  скидки: '.$error);
+            }
+            if ($parsed['rows'] === []) {
+                $this->error('В файле скидок нет ни одной годной строки.');
 
                 return self::FAILURE;
             }

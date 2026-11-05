@@ -237,37 +237,51 @@ class OnecClientBaseImportService
                 }
             }
         }
-        $requests = [];
-        DB::table('requests')->whereNull('organization_id')->select(['id', 'internal_code', 'client_email'])->orderBy('id')
-            ->chunk(5000, function ($chunk) use (&$requests, $quoteClients, $byName, $orgKey, $plannedContacts, $domainOrgs, $inc) {
-                foreach ($chunk as $r) {
-                    $key = null;
-                    foreach ($quoteClients[$r->internal_code] ?? [] as $name) {
-                        $x = $byName[mb_strtolower($name)] ?? null;
-                        if ($x !== null && $x['kind'] === 'client') {
-                            $key = $orgKey($x);
-                            $inc('заявок: по КП из 1С');
-                            break;
-                        }
-                    }
+        $pending = DB::table('requests')->whereNull('organization_id')->get(['id', 'internal_code', 'client_email']);
+        $byQuote = [];
+        $learned = [];   // адрес → организации по заявкам, где организацию дал КП 1С
+        foreach ($pending as $r) {
+            foreach ($quoteClients[$r->internal_code] ?? [] as $name) {
+                $x = $byName[mb_strtolower($name)] ?? null;
+                if ($x !== null && $x['kind'] === 'client') {
+                    $byQuote[$r->id] = $orgKey($x);
                     $email = mb_strtolower(trim((string) $r->client_email));
-                    if ($key === null && isset($plannedContacts[$email]) && count($plannedContacts[$email]['orgs']) === 1) {
-                        $key = array_key_first($plannedContacts[$email]['orgs']);
-                        $inc('заявок: по адресу клиента');
+                    if ($email !== '') {
+                        $learned[$email][$byQuote[$r->id]] = ($learned[$email][$byQuote[$r->id]] ?? 0) + 1;
                     }
-                    $domain = substr(strrchr($email, '@') ?: '', 1);
-                    if ($key === null && count($domainOrgs[$domain] ?? []) === 1) {
-                        $key = array_key_first($domainOrgs[$domain]);
-                        $inc('заявок: по домену');
-                    }
-                    if ($key === null) {
-                        $inc('заявок: не определены');
-
-                        continue;
-                    }
-                    $requests[$r->id] = $key;
+                    break;
                 }
-            });
+            }
+        }
+        $requests = [];
+        foreach ($pending as $r) {
+            $key = $byQuote[$r->id] ?? null;
+            if ($key !== null) {
+                $inc('заявок: по КП из 1С');
+            }
+            $email = mb_strtolower(trim((string) $r->client_email));
+            if ($key === null && isset($plannedContacts[$email]) && count($plannedContacts[$email]['orgs']) === 1) {
+                $key = array_key_first($plannedContacts[$email]['orgs']);
+                $inc('заявок: по адресу клиента');
+            }
+            // Адрес у нескольких организаций: та, на которую этот адрес чаще всего получал КП в 1С.
+            if ($key === null && isset($learned[$email])) {
+                arsort($learned[$email]);
+                $key = array_key_first($learned[$email]);
+                $inc('заявок: по адресу, организация из его КП');
+            }
+            $domain = substr(strrchr($email, '@') ?: '', 1);
+            if ($key === null && count($domainOrgs[$domain] ?? []) === 1) {
+                $key = array_key_first($domainOrgs[$domain]);
+                $inc('заявок: по домену');
+            }
+            if ($key === null) {
+                $inc('заявок: не определены');
+
+                continue;
+            }
+            $requests[$r->id] = $key;
+        }
 
         return ['organizations' => $organizations, 'contacts' => $plannedContacts, 'requests' => $requests, 'stats' => $stats];
     }
