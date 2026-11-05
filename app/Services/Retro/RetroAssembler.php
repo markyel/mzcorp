@@ -270,6 +270,7 @@ class RetroAssembler
         $forwardedTo = array_combine(array_map(fn ($r) => $this->find($r), array_keys($forwardedTo)), array_values($forwardedTo));
         $anchors = [];
         $started = [];
+        $sameLetter = [];
         foreach ($threads as $root => $indexes) {
             usort($indexes, fn ($a, $b) => ($rows[$a]['ts'] ?? 0) <=> ($rows[$b]['ts'] ?? 0));
             $group = array_map(fn ($i) => $rows[$i], $indexes);
@@ -284,6 +285,13 @@ class RetroAssembler
                 $started[] = ['key' => $key, 'root' => $root, 'ts' => $first['ts'] ?? 0, 'client' => mb_strtolower($client)];
             } else {
                 $anchors[$key][] = ['root' => $root, 'ts' => $first['ts'] ?? 0, 'client' => mb_strtolower($client)];
+                // То же обращение второй раз (переслал себе же, продублировал): тема без Re/Fwd совпадает.
+                $subject = self::bareSubject($first['subject']);
+                if ($subject !== '' && isset($sameLetter[$key][$subject])) {
+                    $this->union($sameLetter[$key][$subject], $root);
+                    $stats['same_letter_joined'] = ($stats['same_letter_joined'] ?? 0) + 1;
+                }
+                $sameLetter[$key][$subject] ??= $root;
             }
         }
         foreach ($started as $thread) {
