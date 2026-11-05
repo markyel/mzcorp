@@ -1,0 +1,82 @@
+- [Отвечать по-русски](feedback_answer_in_russian.md) — весь текст пользователю на русском; коммиты на английском
+- [⚠ Потеря баз Beget](project_beget_db_loss_recovery.md) — 02.11.2026 базы потеряны; восстановление по deploy/recovery/PLAN.md, новый сервер Reg.ru
+- [SSH-пароль остаётся](feedback_ssh_password_stays.md) — вход по паролю на новом сервере не отключать, нужен с других компьютеров
+- [Prod deploy](reference_prod_deploy.md) — (до сбоя) ssh root@<IP>; pull от www-data + view/config clear + queue:restart + fpm reload; БД только на проде
+- [Prod outage: root-owned log](reference_prod_outage_root_log_owner.md) — root-tinker создал лог под root → воркеры встали; всё на проде от www-data
+- [419 при ответе поставщику](reference_session_419_fix.md) — computed `messages()` в Livewire = TypeError→419; не называть методы messages/rules/validationAttributes
+- [Откат авто-дедупа](reference_catalog_matching.md) — «↩ Откатить (расщепить N)»: restoreMergedDuplicates из parsing_merged_from (M-2026-12908)
+- [Send client КП/счёт](reference_send_client_document.md) — отправка КП/счёта с вкладок: тип по слоту → форс-статус Quoted/Invoiced + ParseOutboundQuoteJob
+- [Доставка в КП](reference_quotation_delivery_line.md) — delivery_* на Quotation, к итогу без скидки; total = грандтотал, «Итого со скидкой» = subtotal−discount
+- [Win driver = срок](reference_win_driver_delivery_term.md) — главный предиктор Win — срок в КП (склад 26% → >45 дн 9%), цена почти не влияет
+- [Catalog match tuning](project_catalog_match_tuning.md) — харнес catalog:match-eval; принято raw-name retrieval+LLM seed; корень — грубая таксономия 36 кат vs 231 part_type
+- [Lazy dialog event-open](reference_lazy_dialog_event_open.md) — lazy Livewire-диалог по #[On] теряет открытие (Safari); снять lazy
+- [Reply split (advanced status)](reference_reply_split_advanced_status.md) — ответ клиента в quoted+ плодил фрагмент; все активные статусы + clarifier; гард подтверждения заказа (M-2026-18707)
+- [Abandoned bucket](reference_abandoned_bucket.md) — «🕳 Заброшенные» = брошенные лиды и диагностика ошибок классификации (72% фантомов)
+- [Cited-quote invoice routing](reference_cited_quote_invoice_routing.md) — цитата нашего КП/счёта → заявка КП; только ЯВНЫЕ ссылки (с 07.10); правка роутера → mail:detector-replay
+- [Overdue split](reference_overdue_split.md) — «Просрочено» = наш долг (SlaBreach) vs «🤫 Клиент молчит» (isWaitingOnClient)
+- [Сессия 2026-07 + хвосты](project_session_2026_07.md) — коммиты июльской сессии + 5 открытых тем
+- [OpenAI proxy](reference_openai_proxy.md) — OpenAI через Cloudflare Worker (base_url без /v1 + X-Proxy-Key); AI встал → proxy_key/Worker/баланс
+- [Archived seed accounts](reference_archived_seed_accounts.md) — архивные seed-юзеры держат ~1100 заявок → «Все» ≠ сумме менеджеров; фильтр active
+- [Dealer sticky](project_dealer_sticky_fast_turnover.md) — автопометка дилера по потоку заявок (30 дн, порог 8)
+- [Correspondence export](reference_correspondence_export.md) — экспорт переписки PDF/ZIP; грабли dompdf (кириллица, alt картинок)
+- [Shared mail (выбывшие)](reference_shared_mail.md) — переписка недоступных менеджеров: shared_mail_assignments, назначают РОП/директор
+- [Forwarded requests](reference_forwarded_requests.md) — noreply@myzip.ru на info@: ForwardedRequestParser берёт реального отправителя
+- [Web-form parsing](reference_web_form_parsing.md) — 2 веб-формы сайта; клиент из ТЕЛА, не из From (M-2026-13360)
+- [Email storage pruning](reference_email_storage_pruning.md) — raw_source переполнил квоту → mail:prune-raw-source 04:30
+- [Quotation delivery term](reference_quotation_delivery_term.md) — срок в КП по stock vs qty; частичное наличие → 2 строки под одним номером
+- [Request access & delegation](feedback_request_access_delegation.md) — доступ только через Request::isAccessibleBy, не assigned_user_id
+- [Procurement module](reference_procurement_module.md) — «Снабжение»: роль procurement, топ M-позиций без актуальной цены, RFQ по M-артикулу
+- [Intent self-heal](reference_intent_classification_selfheal.md) — догоняющая классификация интента: cron mail:classify-intent-pending
+- [Auto-close inactive](reference_autoclose_inactive.md) — requests:auto-close-inactive 08:00, пороги 4/5/7 раб.дн; awaiting_invoice не покрыт
+- [Inbound decline auto-close](reference_inbound_decline_autoclose.md) — единственный путь closed_lost по отказу клиента; ELIGIBLE_STATUSES
+- [Outbound decline guard](reference_outbound_decline_guard.md) — «отказ менеджера» закрывал заявки по частичному отказу/с альтернативой (M-2026-20979); guardDecline: продолжение → уточнение, >1 позиции → плашка
+- [Inheritance/reanimation](reference_inheritance_reanimation_hybrid.md) — ответ в closed_lost: реанимация in-place vs наследование (CheckInheritanceJob)
+- [Possible new request](reference_possible_new_request.md) — новая номенклатура в пост-КП треде → плашка «🔀 Создать новую»
+- [Post-sale routing](reference_postsale_routing.md) — post_sale только по надёжному header/коду, иначе info@
+- [Invoice auto-issue](reference_invoice_autoissue.md) — авто-Invoice из исходящих счетов; гард договора по имени файла
+- [Lost invoices diagnosis](reference_lost_invoices_diagnosis.md) — «счёт не виден»: парсер failed или письмо не привязалось; quotes:reparse-failed
+- [Номер 1С](reference_onec_number.md) — обязательный onec_number, меняют РОП/директор, фильтр ?onec=
+- [Payment import](reference_payment_import.md) — импорт xlsx оплат в /invoices; грабля NBSP в суммах 1С
+- [Unlinked invoices](reference_unlinked_invoices.md) — /invoices/unlinked: наши счета без Invoice, привязка и новая заявка из счёта
+- [IQOT](reference_iqot_integration.md) — цены конкурентов по проигранным КП; выключено без ключа
+- [Catalog matching](reference_catalog_matching.md) — авто-матч A/B/C; MIN_ARTICLE_TOKEN_LEN=4; категория по part_type-тексту
+- [Match audit](reference_match_audit.md) — /dashboard/catalog/match-audit: ложные матчи против каталога в отправленном КП (ОТКРЫТО)
+- [Mail timezone](reference_mail_timezone.md) — рассинхрон MSK/UTC в sent_at; бэкфилл mail:fix-sent-at-tz не применяли
+- [References comma bug](reference_references_comma_bug.md) — запятые в References роняли исходящую; санитизация message-id
+- [Delegated activity notify](reference_delegated_activity_notify.md) — acting-менеджеру о письме по делегированной заявке; троттлинг 30 мин
+- [Support tickets](reference_support_tickets.md) — email-дайджест ответов (5 мин), in-app мгновенно
+- [Changelog](reference_changelog_updates.md) — /dashboard/updates, бейдж непрочитанного, admin-CRUD
+- [User avatars](reference_user_avatars.md) — 3 варианта аватарки; eager-select assignedUser с avatar-колонками
+- [Personal inbox delivery](reference_personal_inbox_delivery.md) — APPEND оригинала в личный ящик + 30-мин backfill; «в CRM есть, в почте нет»
+- [Item parsing pipeline](reference_item_parsing_pipeline.md) — unified-vs-split разбор позиций; relevance-гейт вложений; кейс 4011
+- [Vision downscale](reference_vision_image_downscale.md) — фото >1.5 МБ → 2048px JPEG (гард 413)
+- [Duplicate badge numeric](reference_duplicate_badge_numeric_token.md) — «⚠ дубль» не флагает позиции с разными числовыми токенами
+- [Clients section](reference_clients_section.md) — /dashboard/clients: organizations + contacts; requests.organization_id
+- [Liftway YML feed](reference_liftway_yml_feed.md) — фиды /feeds/liftway/{prices,in-transit,full}.yml для LazyLift; цена = закуп × 1.15
+- [Suppliers module](reference_suppliers_module.md) — детект RFQ при отправке → тред поставщика (supplier_reply); RFQ по позициям, напоминания, парсер офферов
+- [QuoteParts: один ящик, агенты](reference_quoteparts_dispatch_agents.md) — C:\Work\quoteparts (UTC!); один запрос = один ящик; агент UniSystem → origin_supplier; ложная пауза позиции
+- [Revival offer](reference_revival_offer.md) — оживляющее письмо closed_lost при падении цены ≥15%
+- [Outbound КП race](reference_outbound_kp_race.md) — «КП ушёл раньше заявки»; крон quotes:detect-missed-outbound
+- [Outbound quote parsing](reference_outbound_quote_parsing.md) — разбор наших КП/счетов; полнота длинных сводных
+- [Own-quote seed duplicates](reference_own_quote_seed_duplicates.md) — строка КП сеялась дублем; Step 3.5 single_pair (вслепую привязал ролик к шкиву — QP-6ZHY80, фикс a3618998)
+- [ОТКРЫТО: dual «Кол-во»](project_dual_quantity_column.md) — Vision путает 2 колонки «Кол-во» в КП
+- [Floating composer](reference_floating_composer.md) — окно ответа вне @switch, drag/resize через Alpine
+- [Mail client (Почта)](project_mail_client.md) — раздел «Почта» менеджера: решения, фазы P1–P3
+- [Pool infinite scroll](reference_pool_infinite_scroll.md) — бесконечная лента пула; фильтры в сессии, кроме q
+- [Tailwind arbitrary (грабли)](reference_tailwind_arbitrary_classes.md) — новые классы без пересборки CSS не работают → inline style
+- [Login arcade](reference_login_arcade.md) — «Лови заявки» на входе; публичные роуты, route:cache на деплое
+- [Branding/logos](reference_branding_logos.md) — лого mzCorp, cache-bust ?v=N
+- [Usage stats](reference_usage_stats.md) — /dashboard/usage: время и письма по менеджерам
+- [Manager analytics](reference_manager_analytics.md) — /dashboard/analytics: когорты по дате создания
+- [Дубль источника правды (грабли)](feedback_duplicated_source_of_truth.md) — копия логики рядом с enum расходится молча; чинить удалением дубля
+- [Честный знак](reference_honest_sign.md) — /dashboard/honest-sign: DataMatrix из PDF → GTIN/КИЗ
+- [Internal correspondence gate](reference_internal_correspondence_gate.md) — внутренняя переписка не меняет статус заявки (M-2026-6071)
+- [Request merge](reference_request_merge.md) — RequestMergeService: слияние заявок, режим «✉ Другой e-mail»
+- [Blade @php comment 500](reference_blade_php_comment_gotcha.md) — {{-- --}} внутри @php → 500; проверять view:cache
+- [Mail search perf](reference_mail_search_perf.md) — trgm GIN на всех ветках OR, body_plain из html
+- [Direct negatives](reference_direct_negatives.md) — /dashboard/direct: минус-фразы по визитам Метрики
+- [Outgoing send retry](reference_outgoing_send_retry.md) — SMTP недоступен → автоповтор (mail:send-queued); tinker с файлом по ssh виснет
+- [Прочее (durable)](reference_misc_durable.md) — оплата аннулированных счетов, принудительная заявка, мульти-фото, поиск каталога, AI-блок дашборда
+- [Пресс-релизы](reference_press_releases.md) — медиаплан → «Пресс-релизы»: база СМИ, рассылка по одному письму, ответы редакций не заявки (PressReplyHandler)
+- [Аутсорс-задачи](reference_marketing_assignments.md) — маркетинг → «Аутсорс-задачи»: инструкция+файлы → ZIP/PDF для исполнителей без MyLift
+- [myrope.ru](project_myrope_site.md) — записка владельцу: канаты на отдельный домен; канаты и ремни НЕ смешивать

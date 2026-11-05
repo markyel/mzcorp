@@ -38,7 +38,7 @@
 
 ## 1. Решения, которые нужны от заказчика
 
-1. Где поднимаем: **Reg.ru, «Производительный» NVMe, Москва, Ubuntu 24.04, 8 vCPU / 16 ГБ / 300 ГБ** (~9 000 ₽/мес + IP 187 ₽). Обе базы — на этом же сервере (свой PostgreSQL 16 + pgvector), не управляемые. Диск уточнить, если VPS Beget жив и станет известен объём `storage/app`.
+1. [x] Где поднимаем (заказан 04.11.2026, ждём выдачи): **выделенный сервер RD-59257, Москва, Волгоградский пр-т, Ubuntu Server 24.04: Xeon E3-1270v3 3,5 ГГц, 4 ядра / 8 потоков, 16 ГБ DDR3, 2 × 240 ГБ SSD** (5 810 ₽/мес с НДС по скидке 30 %, без скидки 8 300 ₽; цена при продлении не подтверждена; 1 IPv4 и безлимитный трафик 100 Мбит/с входят). Виртуальные серверы Reg.ru после аварии Beget раскуплены. Обе базы — на этом же сервере (свой PostgreSQL 16 + pgvector), не управляемые. Размер памяти — оценка без замеров, старый сервер недоступен. После выдачи проверить: конфигурацию, RAID1, SMART дисков, журнал ошибок железа. Снимков от провайдера нет, ресурсы кликом не расширить: копии вне этого сервера обязательны с первого дня (§9). Копирование 240 ГБ по каналу 100 Мбит/с занимает около 6 часов.
 2. Куда переносим DNS `mzcorp.ru`, `quoteparts.ru`, `quoteparts.net` (у Beget нельзя: вместе с ним лёг и DNS). Варианты: DNS Reg.ru, Яндекс Cloud DNS. У какого регистратора сами домены?
 3. Глубина восстановления заявок из почты: только новые с момента запуска, или пересоздать открытые за последние N недель (рекомендую 4 недели, см. §6).
 4. Переходим ли с VPS Beget совсем (рекомендую да) или Beget остаётся зеркалом.
@@ -48,7 +48,7 @@
 
 - [ ] Письмо в Beget: любые копии обеих баз и диска VPS на любую дату; статус VPS 84.54.31.54 и почты quoteparts.net.
 - [ ] Если VPS жив — **сразу** снять копию файлов и `.env`: `deploy/backup/full-backup.sh` (шаги с базами упадут, файлы и конфиги снимутся), затем `deploy/backup/pull-backup.sh` на компьютер.
-- [ ] Заказать сервер Reg.ru (решение 1), записать IP.
+- [x] Сервер заказан и выдан 04.11.2026 (решение 1), IP в панели Reg.ru. Железо совпало с заказом; RAID1 есть; SMART обоих SSD без ошибок (наработка 46 361 и 57 955 ч, индикатор износа 98 и 91 из 100), короткий самотест пройден. Тест памяти прошёл только частично, ошибок не показал.
 - [ ] Перенести DNS доменов к независимому провайдеру, TTL 300.
 - [ ] Собрать ключи, которые придётся получить заново (если `.env` с VPS не спасём):
 
@@ -93,8 +93,11 @@ curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin
 ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw allow 8443 && ufw enable
 ```
 
-- [ ] PostgreSQL: слушать только `localhost`. Настройки под 16 ГБ: `shared_buffers=4GB`, `effective_cache_size=10GB`, `work_mem=32MB`, `maintenance_work_mem=1GB`, `max_connections=100`.
-- [ ] Базы и пользователи (пароли — в менеджер паролей, не в git):
+- [x] Пакеты, PHP 8.3, Node 20, composer, ufw (22, 80, 443, 8443) поставлены 04.11.2026. Swapfile не нужен: провайдер настроил swap 16 ГБ на LVM.
+- [x] SSH: вход по паролю **не отключать** (решение заказчика 04.11: нужен доступ с других компьютеров), ключи работают рядом с паролем. fail2ban настроен: 6 попыток за 10 минут, бан на 10 минут.
+- [ ] Сменить пароль root из письма провайдера на свой длинный (заказчик сам, `passwd`).
+- [x] PostgreSQL 16.15 поставлен 04.11.2026: слушать только `localhost`. Настройки под 16 ГБ: `shared_buffers=4GB`, `effective_cache_size=10GB`, `work_mem=32MB`, `maintenance_work_mem=1GB`, `max_connections=100`.
+- [x] Базы и пользователи созданы 04.11.2026, pgvector 0.8.7. Пароли сгенерированы в `/root/db-passwords` на сервере; перенести в менеджер паролей (не в git):
   ```sql
   create user mylift with password '…';  create database "MyLift" owner mylift;
   create user quoteparts with password '…'; create database quoteparts owner quoteparts;
@@ -109,7 +112,8 @@ ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw allow 8443 && ufw enab
   - `mzcorp.ru`: конфиг `deploy/nginx/mzcorp.conf` (root `/var/www/mzcorp/public`, gzip для `application/json`);
   - `quoteparts.ru` (сотрудники и API, прямо);
   - `quoteparts.net` — 443 прямо и 8443 с PROXY protocol только от Гонконга (`mzhk` 43.225.57.182). Общий сниппет `snippets/quoteparts-app.conf` — восстановить по CLAUDE.md QuoteParts (или из `server-config.tgz`, если VPS спасён).
-- [ ] Сертификаты: `certbot --nginx -d mzcorp.ru -d www.mzcorp.ru -d quoteparts.ru -d quoteparts.net` (после переключения DNS).
+- [x] Сертификат mzcorp.ru + www выпущен 04.11.2026, www перенаправляется на mzcorp.ru (иначе разные сессии и ошибка 419). `certbot renew --dry-run` дважды упал: Let's Encrypt не дождался ответа DNS Beget (`query timed out looking up A`). Перенести DNS с Beget до следующего продления (примерно начало января 2027) и повторить проверку.
+- [ ] Сертификаты quoteparts.ru и quoteparts.net (после переключения DNS).
 - [ ] Гонконг (`ssh mzhk`): в `/etc/nginx/stream-passthrough.conf` заменить адрес бэкенда 84.54.31.54 → новый IP, `nginx -t && systemctl reload nginx`.
 
 ## 4. Этап 2 — приложения и пустые базы
@@ -129,9 +133,12 @@ sudo -u www-data bash -c 'npm ci && npm run build'
 sudo -u www-data php artisan storage:link && sudo -u www-data php artisan config:cache && sudo -u www-data php artisan route:cache && sudo -u www-data php artisan view:cache
 ```
 
-- [ ] **Нумерация заявок — продолжить выше старых номеров**, иначе новые заявки получат номера из старых писем (`M-2026-…` в темах привязываются по номеру): `insert into request_code_sequences (year, last_value, created_at, updated_at) values (2026, 30000, now(), now());` (последний известный — около M-2026-21800).
+Сделано 04.11.2026 на новом сервере: composer, минимальный `.env` (база, новый `APP_KEY`, без внешних ключей), все 293 миграции на пустой базе без ошибок (157 таблиц, vector- и trgm-индексы на месте), сидеры ролей, шаблонов и базы знаний, фронт, кеши. nginx отдаёт сайт по HTTP. `TestUsersSeeder` не запускать: это тестовые учётки. Permissions в таблице — 0 намеренно, права через Gates.
+
+- [x] **Нумерация заявок (выставлена 04.11: 30000) — продолжить выше старых номеров**, иначе новые заявки получат номера из старых писем (`M-2026-…` в темах привязываются по номеру): `insert into request_code_sequences (year, last_value, created_at, updated_at) values (2026, 30000, now(), now());` (последний известный — около M-2026-21800).
 - [ ] supervisor: `cp deploy/supervisor/mzcorp-worker.conf /etc/supervisor/conf.d/` (4× `mzcorp-worker` mail-sync,default; `mzcorp-default-worker`; `mzcorp-catalog-worker`), `supervisorctl reread && supervisorctl update`.
 - [ ] cron от `www-data`: `* * * * * cd /var/www/mzcorp && php artisan schedule:run >> /dev/null 2>&1`.
+- [x] Первый администратор создан 04.11.2026 (роль `admin`), пароль в `/root/mzcorp-admin-password` на сервере.
 - [ ] Сотрудники. Известно (имя → латиница): Роденков Александр (Alexander Rodenkov), Дмитрий (Dmitry, id 9), Курзаев Илья (Ilya Kurzaev, РОП), Васюхно Андрей (Andrey Vasukhno), Головнев Владимир (Vladimir Golovnev), Боев Андрей (Andrey Boev), Румянцев Дмитрий (Dmitry Rumyantsev), Агрызков Сергей (Sergey Agryzkov), Якубович Дмитрий (Dmitry Yakubovich), Яковлева Дарья (Daria Yakovleva), Соколова Ольга Андреевна (Olga Sokolova), Петрова Марина (Marina Petrova), Милючихин Владимир (Vladimir Milyuchikhin), Илья Юрков (Ilya Yurkov). Адреса — `имя.фамилия@myzip.ru` (проверить у каждого). Роли — подтвердить у заказчика. Создавать через «Администрирование → Менеджеры» или tinker под www-data.
 
 **QuoteParts** (`/var/www/quoteparts`, владелец `quoteparts`): новый deploy-ключ (`ssh-keygen -t ed25519 -f ~quoteparts/.ssh/github_quoteparts`, публичный — в GitHub → markyel/quoteparts → Deploy keys, read-only), `~quoteparts/.ssh/config` с `Host github.com`, затем:
@@ -155,6 +162,8 @@ sudo -u quoteparts bash -c 'cd /var/www/quoteparts && php artisan key:generate &
 - [ ] **Проверка:** тестовое письмо на info@ → заявка создана, распределена, письмо скопировано менеджеру в папку `MZ|<менеджер>`, на странице «Качество почты» решение записано.
 
 ## 6. Этап 4 — история (после того как приём новых заявок работает)
+
+> **Изменено 04.11.2026:** заказчик решил загрузить историю до включения системы. Шаги 2–4 ниже заменены планом `deploy/recovery/RETRO_PLAN.md`: готовые команды запускают раскладку в ящиках, а зеркало истории блокирует последующую загрузку.
 
 Порядок важен: сначала каталог (иначе позиции не сопоставятся), потом почта, потом заявки.
 
