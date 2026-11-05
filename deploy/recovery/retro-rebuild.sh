@@ -3,7 +3,7 @@
 #   nohup bash deploy/recovery/retro-rebuild.sh MyLift_retro > /var/tmp/retro-rebuild.log 2>&1 &
 #
 # Дочитывает новые письма, сохраняет загруженные тексты, копирует чистую базу MyLift
-# в указанную, собирает заявки, возвращает тексты и докачивает недостающие.
+# в указанную, собирает заявки, заполняет справочник поставщиков, возвращает тексты и докачивает недостающие.
 # Письма наружу не отправляет, почту не меняет. Базу, на которую смотрит сайт, сначала отключить.
 set -u
 TARGET="${1:?Укажите базу: MyLift_retro}"
@@ -41,6 +41,9 @@ GRANT ALL ON SCHEMA public TO "$U";
 DELETE FROM jobs;
 SQL
 sudo -u www-data php artisan retro:build --database="$TARGET" 2>&1 | cut -c1-520
+
+echo "=== $(date +%H:%M) поставщики"
+sudo -u www-data php artisan retro:suppliers --database="$TARGET" --apply 2>&1 | tail -n 3 | cut -c1-200
 
 if [ -f "$CACHE" ]; then
   echo "=== $(date +%H:%M) возвращаю тексты"
