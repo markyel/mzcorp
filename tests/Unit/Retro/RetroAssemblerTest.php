@@ -212,6 +212,103 @@ class RetroAssemblerTest extends TestCase
         $this->assertSame(RequestStatus::InProgress, $request['status']);
     }
 
+    public function test_marked_price_request_is_supplier_correspondence_and_never_the_client(): void
+    {
+        $result = $this->assembler()->assemble([
+            $this->sent('rfq@x', 1, ['to' => 'sales@supplier.ru', 'codes' => ['M-2026-1000'],
+                'subject' => 'Запрос расценки — [M-2026-1000] / [360001] [RFQ-ABCD12]']),
+            $this->inbound('offer@x', 2, ['from' => 'sales@supplier.ru', 'irt' => '<rfq@x>', 'refs' => '<rfq@x>',
+                'subject' => 'RE: Запрос расценки — [M-2026-1000] / [360001] [RFQ-ABCD12]']),
+        ]);
+
+        $request = $result['requests'][1000];
+        $this->assertNull($request['client_email'], 'Письма клиента в почте нет — клиента нет');
+        $this->assertSame([true, true], array_column($request['messages'], 'supplier'));
+        $this->assertSame('no_client', $request['review']['reason']);
+        $this->assertSame('sales@supplier.ru', $request['review']['previous']);
+    }
+
+    public function test_dealer_is_the_client_of_its_own_request_and_a_supplier_in_ours(): void
+    {
+        $result = $this->assembler()->assemble([
+            // Дилер — клиент своей заявки: получил наш КП.
+            $this->inbound('d1@x', 1, ['from' => 'buyer@dealer.ru', 'codes' => ['M-2026-2000']]),
+            $this->sent('d2@x', 2, ['to' => 'buyer@dealer.ru', 'irt' => '<d1@x>', 'refs' => '<d1@x>', 'foot' => ['M-2026-2000'],
+                'names' => ['Предложение МЗ-360002 от 2026-06-02_10-00-00.pdf']]),
+            // Он же отвечает на наш запрос расценки по чужой заявке.
+            $this->inbound('c1@x', 3, ['codes' => ['M-2026-1000']]),
+            $this->sent('rfq@x', 4, ['to' => 'buyer@dealer.ru', 'codes' => ['M-2026-1000'], 'subject' => 'Запрос расценки — [M-2026-1000]']),
+        ]);
+
+        $this->assertSame('buyer@dealer.ru', $result['requests'][2000]['client_email']);
+        $this->assertNull($result['requests'][2000]['review']);
+        $this->assertSame('ivan@client.ru', $result['requests'][1000]['client_email']);
+        $this->assertSame([false, true], array_column($result['requests'][1000]['messages'], 'supplier'));
+    }
+
+    public function test_client_that_would_change_is_kept_and_sent_to_review(): void
+    {
+        $result = $this->assembler()->assemble([
+            $this->inbound('offer@x', 1, ['from' => 'sales@supplier.ru', 'codes' => ['M-2026-1000'],
+                'subject' => 'RE: Price request — [M-2026-1000]']),
+            $this->inbound('client@x', 2, ['codes' => ['M-2026-1000']]),
+        ]);
+
+        $request = $result['requests'][1000];
+        $this->assertSame('client_changed', $request['review']['reason']);
+        $this->assertSame('ivan@client.ru', $request['review']['found']);
+        $this->assertSame('sales@supplier.ru', $request['client_email'], 'Клиента сами не меняем, только на проверку');
+    }
+
+    public function test_chain_without_number_joins_the_request_by_the_onec_number_of_our_quote(): void
+    {
+        $quote = 'Предложение МЗ-360001 от 2026-06-01_10-00-00.pdf';
+        $result = $this->assembler(['crash_date' => date('Y-m-d', self::NOW)])->assemble([
+            $this->sent('a@x', 1, ['foot' => ['M-2026-1000'], 'names' => [$quote]]),
+            // Тот же КП позже ушёл ответом из Яндекса, без подвала, в отдельной цепочке.
+            $this->inbound('b@x', 50),
+            $this->sent('c@x', 51, ['irt' => '<b@x>', 'refs' => '<b@x>', 'names' => [$quote]]),
+        ]);
+
+        $this->assertSame([1000], array_keys($result['requests']));
+        $this->assertCount(3, $result['requests'][1000]['messages']);
+        $this->assertSame(1, $result['stats']['attached_by_quote_file']);
+        $this->assertSame('quote_file', $result['rows'][1]['attached']);
+    }
+
+    public function test_onec_number_in_the_subject_joins_only_the_same_client(): void
+    {
+        $rows = [
+            $this->inbound('a@x', 1, ['codes' => ['M-2026-1000']]),
+            $this->sent('rfq@x', 2, ['to' => 'sales@supplier.ru', 'codes' => ['M-2026-1000'], 'subject' => 'Запрос расценки — [M-2026-1000] / [360002]']),
+            $this->inbound('b@x', 30, ['subject' => 'Уточнение по запросу (360002)']),
+            $this->inbound('c@x', 31, ['from' => 'petr@other.ru', 'subject' => 'Счёт 360002']),
+        ];
+        $result = $this->assembler(['crash_date' => date('Y-m-d', self::NOW)])->assemble($rows);
+
+        $this->assertSame(1, $result['stats']['attached_by_subject']);
+        $this->assertCount(3, $result['requests'][1000]['messages'], 'Письмо чужого клиента с тем же числом не присоединяется');
+    }
+
+    public function test_chains_from_the_crash_day_on_and_ambiguous_ones_are_not_joined(): void
+    {
+        $quote = 'Предложение МЗ-360001 от 2026-06-01_10-00-00.pdf';
+        $result = $this->assembler(['crash_date' => date('Y-m-d', self::NOW - 86400 * 10)])->assemble([
+            $this->sent('a@x', 1, ['foot' => ['M-2026-1000'], 'names' => [$quote]]),
+            $this->sent('b@x', 2, ['foot' => ['M-2026-2000'], 'names' => ['Предложение МЗ-360003 от 2026-06-01_10-00-00.pdf']]),
+            // После аварии — не трогаем.
+            $this->sent('late@x', 95, ['names' => [$quote]]),
+            // КП из двух разных заявок — номер неоднозначен.
+            $this->sent('two@x', 50, ['names' => [$quote, 'Предложение МЗ-360003 от 2026-06-01_10-00-00.pdf']]),
+        ]);
+
+        $this->assertCount(1, $result['requests'][1000]['messages']);
+        $this->assertCount(1, $result['requests'][2000]['messages']);
+        $this->assertSame(0, $result['stats']['attached_by_quote_file']);
+        $this->assertSame(1, $result['stats']['attach_ambiguous']);
+        $this->assertSame(2, $result['stats']['unassigned_rows']);
+    }
+
     public function test_idle_requests_close_with_a_reason_for_their_stage_and_keep_the_peak(): void
     {
         $result = $this->assembler(['idle_close_days' => 30])->assemble([

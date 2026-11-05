@@ -12,16 +12,37 @@ use App\Enums\RequestStatus;
  *
  * Порядок: номер письма берётся из его подвала или темы, письмо без номера
  * наследует его от ближайшего письма цепочки (сначала вверх, потом вниз).
- * Переписка заявки, в которой нет клиента, считается перепиской с поставщиком.
+ * Цепочка без номера, начатая до аварии, присоединяется к заявке по номеру 1С:
+ * из файла нашего КП или из темы, если её клиент совпадает с клиентом заявки.
+ * Новых номеров сборка не выдаёт.
+ *
+ * Поставщик определяется по маркировке письма (запрос расценки из CRM): такое
+ * письмо и его цепочка — переписка с поставщиком, клиентом не становятся. Клиент
+ * берётся только из немаркированных писем; если он пропал или сменился, заявка
+ * попадает в список на проверку, а клиент не меняется (решение заказчика 05.11).
+ * Переписка заявки, в которой нет клиента, тоже считается перепиской с поставщиком.
  */
 class RetroAssembler
 {
+    /** Тема нашего запроса поставщику: токен RFQ из CRM, тег QuoteParts или шаблон темы «Запрос расценки — / Price request —». */
+    private const SUPPLIER_MARK_RE = [
+        '/\[(?:RFQ|QP)-[A-Z0-9]{4,12}\]/i',
+        '/^\s*(?:(?:re|fw|fwd|ответ|отв)\s*:\s*)*(?:запрос расценки|price request)\s*[—–-]/iu',
+    ];
+
+    /** Пара «номер заявки / номер 1С» в теме: «[M-2026-21610] / [372377]». */
+    private const ONEC_PAIR_RE = '/\[M-(\d{4})-(\d+)\]\s*\/\s*\[(\d{5,7})\]/u';
+
+    /** Номер 1С в теме письма: шесть цифр, допускаются ведущие нули («000369619»). */
+    private const ONEC_IN_SUBJECT_RE = '/(?<!\d)0*([1-9]\d{5})(?!\d)/u';
+
     /** @var array<string, string> */
     private array $parent = [];
 
     /**
      * @param  array{internal_domains:list<string>, free_mail_domains:list<string>, service_sender_pattern:string,
-     *     supplier_min_requests:int, max_legacy_number:int, year:int, idle_close_days:int, mz_folder_owners:array<string,string>}  $config
+     *     supplier_min_requests:int, max_legacy_number:int, year:int, idle_close_days:int, mz_folder_owners:array<string,string>,
+     *     crash_date?:?string}  $config  crash_date — день аварии: цепочки без номера, начатые с этого дня, не присоединяются
      * @param  list<string>  $handlerEmails  Ящики сотрудников, которые ведут заявки: менеджеры и РОП.
      */
     public function __construct(
@@ -64,23 +85,193 @@ class RetroAssembler
             }
         }
 
+        $markedRoots = [];
+        foreach ($rows as $row) {
+            if ($this->isSupplierMarked($row)) {
+                $markedRoots[$this->rootOf($row)] = true;
+            }
+        }
+        $stats['supplier_marked_threads'] = count($markedRoots);
+
+        $groups = $this->groupByNumber($rows);
+        $heuristic = $this->likelySupplierAddresses($rows, $groups);
+        $marked = $this->markedSupplierAddresses($rows);
+        $stats['marked_suppliers'] = count($marked);
+        $suppliers = $heuristic + $marked;
+
+        $this->attachByOnecNumber($rows, $groups, $markedRoots, $suppliers, $marked, $stats);
+        $groups = $this->groupByNumber($rows);
+        $stats['unassigned_rows'] = count($rows) - array_sum(array_map('count', $groups));
+
+        $requests = [];
+        foreach ($groups as $number => $indexes) {
+            $requests[$number] = $this->buildRequest($number, $indexes, $rows, $suppliers, $heuristic, $marked, $markedRoots, $stats);
+        }
+        ksort($requests);
+
+        return ['requests' => $requests, 'rows' => $rows, 'stats' => $stats];
+    }
+
+    /** @return array<int, list<int>> номер → позиции писем */
+    private function groupByNumber(array $rows): array
+    {
         $groups = [];
         foreach ($rows as $i => $row) {
             if ($row['number'] !== null) {
                 $groups[$row['number']][] = $i;
             }
         }
-        $stats['unassigned_rows'] = count($rows) - array_sum(array_map('count', $groups));
 
-        $suppliers = $this->likelySupplierAddresses($rows, $groups);
+        return $groups;
+    }
 
-        $requests = [];
-        foreach ($groups as $number => $indexes) {
-            $requests[$number] = $this->buildRequest($number, $indexes, $rows, $suppliers, $stats);
+    private function isSupplierMarked(array $row): bool
+    {
+        foreach (self::SUPPLIER_MARK_RE as $re) {
+            if (preg_match($re, $row['subject'])) {
+                return true;
+            }
         }
-        ksort($requests);
 
-        return ['requests' => $requests, 'rows' => $rows, 'stats' => $stats];
+        return false;
+    }
+
+    /**
+     * Адреса из наших маркированных запросов и ответов на них, которые ни разу не получали
+     * наш КП или счёт: поставщики и в немаркированных письмах. Получавшие документ бывают
+     * и клиентами (дилеры), их определяет только маркировка письма.
+     */
+    private function markedSupplierAddresses(array $rows): array
+    {
+        $marked = [];
+        $gotDocument = [];
+        foreach ($rows as $row) {
+            if ($row['outbound'] && $this->documents($row) !== []) {
+                foreach ($this->externalRecipients($row) as $address) {
+                    $gotDocument[$this->addressKey($address)] = true;
+                }
+            }
+            if (! $this->isSupplierMarked($row)) {
+                continue;
+            }
+            $addresses = $row['outbound'] ? $this->externalRecipients($row) : ($this->isExternal($row['from_email']) ? [$row['from_email']] : []);
+            foreach ($addresses as $address) {
+                $marked[$this->addressKey($address)] = true;
+            }
+        }
+
+        return array_diff_key($marked, $gotDocument);
+    }
+
+    /**
+     * Цепочки без номера, начатые до аварии, получают настоящий номер по номеру 1С: из файла
+     * нашего КП — всегда, из темы — если клиент цепочки совпадает с клиентом заявки (шестизначные
+     * числа в темах часто совпадают случайно). Номер 1С ведёт к заявке через пару «[M-…] / [1С]»
+     * в теме или через КП с тем же номером в цепочке с номером. Неоднозначные не трогаем.
+     */
+    private function attachByOnecNumber(array &$rows, array $groups, array $markedRoots, array $suppliers, array $marked, array &$stats): void
+    {
+        $stats['attached_by_quote_file'] = 0;
+        $stats['attached_by_subject'] = 0;
+        $stats['attach_ambiguous'] = 0;
+
+        $bridge = [];
+        foreach ($rows as $row) {
+            if (preg_match_all(self::ONEC_PAIR_RE, $row['subject'], $pairs, PREG_SET_ORDER)) {
+                foreach ($pairs as $p) {
+                    if ((int) $p[1] === $this->config['year'] && isset($groups[(int) $p[2]])) {
+                        $bridge[(string) (int) $p[3]][(int) $p[2]] = true;
+                    }
+                }
+            }
+            if ($row['number'] !== null && $row['outbound']) {
+                foreach ($this->documents($row) as $document) {
+                    if ($document['type'] === 'quote') {
+                        $bridge[(string) (int) $document['number']][$row['number']] = true;
+                    }
+                }
+            }
+        }
+
+        $clients = [];
+        $threads = [];
+        $crashTs = ($this->config['crash_date'] ?? null) ? strtotime($this->config['crash_date'].' 00:00:00 Europe/Moscow') : PHP_INT_MAX;
+        foreach ($rows as $i => $row) {
+            if ($row['number'] === null) {
+                $threads[$this->rootOf($row)][] = $i;
+            }
+        }
+        foreach ($threads as $root => $indexes) {
+            if (isset($markedRoots[$root]) || min(array_map(fn ($i) => $rows[$i]['ts'] ?? 0, $indexes)) >= $crashTs) {
+                continue;
+            }
+            $byFile = [];
+            $bySubject = [];
+            $externals = [];
+            foreach ($indexes as $i) {
+                $row = $rows[$i];
+                foreach (array_merge($this->externalRecipients($row), $this->isExternal($row['from_email']) ? [$row['from_email']] : []) as $address) {
+                    $externals[$this->addressKey($address)] = true;
+                }
+                if ($row['outbound']) {
+                    foreach ($this->documents($row) as $document) {
+                        if ($document['type'] === 'quote') {
+                            $byFile += $bridge[(string) (int) $document['number']] ?? [];
+                        }
+                    }
+                }
+                if (preg_match_all(self::ONEC_IN_SUBJECT_RE, $row['subject'], $found)) {
+                    foreach ($found[1] as $onec) {
+                        $bySubject += $bridge[(string) (int) $onec] ?? [];
+                    }
+                }
+            }
+            foreach (array_keys($bySubject) as $number) {
+                $clients[$number] ??= $this->client($this->plainRows($groups[$number], $rows, $markedRoots), $suppliers, $marked)[0];
+                if ($clients[$number] === null || ! isset($externals[$this->addressKey($clients[$number])])) {
+                    unset($bySubject[$number]);
+                }
+            }
+            $candidates = $byFile + $bySubject;
+            if (count($candidates) !== 1) {
+                $stats['attach_ambiguous'] += count($candidates) > 1 ? 1 : 0;
+
+                continue;
+            }
+            $number = array_key_first($candidates);
+            $how = isset($byFile[$number]) ? 'quote_file' : 'subject';
+            $stats[$how === 'quote_file' ? 'attached_by_quote_file' : 'attached_by_subject']++;
+            foreach ($indexes as $i) {
+                $rows[$i]['number'] = $number;
+                $rows[$i]['attached'] = $how;
+            }
+        }
+    }
+
+    /** Письма заявки без маркированных цепочек поставщиков. */
+    private function plainRows(array $indexes, array $rows, array $markedRoots): array
+    {
+        $out = [];
+        foreach ($indexes as $i) {
+            if (! isset($markedRoots[$this->rootOf($rows[$i])])) {
+                $out[] = $rows[$i];
+            }
+        }
+
+        return $out;
+    }
+
+    /** @return list<array{type:string, number:string, date:?string}> наши КП и счета во вложениях письма */
+    private function documents(array $row): array
+    {
+        $out = [];
+        foreach ($row['names'] as $name) {
+            if (($document = RetroMailParser::documentFromFilename($name)) !== null) {
+                $out[] = $document;
+            }
+        }
+
+        return $out;
     }
 
     /** Номер ближайшего письма, на которое отвечает это. */
@@ -196,10 +387,23 @@ class RetroAssembler
         return $out;
     }
 
-    private function buildRequest(int $number, array $indexes, array $rows, array $suppliers, array &$stats): array
+    private function buildRequest(int $number, array $indexes, array $rows, array $suppliers, array $heuristic, array $marked, array $markedRoots, array &$stats): array
     {
         $group = array_map(fn ($i) => $rows[$i], $indexes);
-        [$clientEmail, $clientName, $clientFrom] = $this->client($group, $suppliers);
+        // Клиент — только из писем без маркировки поставщика. Если по прежнему правилу он был,
+        // а теперь пропал или стал другим — заявка на проверку, клиента сами не меняем.
+        [$clientEmail, $clientName, $clientFrom] = $this->client($this->plainRows($indexes, $rows, $markedRoots), $suppliers, $marked);
+        $previous = $this->client($group, $heuristic);
+        $review = null;
+        if ($clientEmail === null && $previous[0] !== null) {
+            $review = ['reason' => 'no_client', 'previous' => $previous[0]];
+        } elseif ($clientEmail !== null && $previous[0] !== null && $this->addressKey($clientEmail) !== $this->addressKey($previous[0])) {
+            $review = ['reason' => 'client_changed', 'previous' => $previous[0], 'found' => $clientEmail];
+            [$clientEmail, $clientName, $clientFrom] = $previous;
+        }
+        if ($review !== null) {
+            $stats['review_'.$review['reason']] = ($stats['review_'.$review['reason']] ?? 0) + 1;
+        }
         if ($clientEmail === null) {
             $stats['no_client']++;
         }
@@ -214,7 +418,11 @@ class RetroAssembler
         }
         $supplierChain = [];
         foreach ($chainExternal as $root => $addresses) {
-            $supplierChain[$root] = $clientEmail !== null && ! $this->anyMatchesClient(array_keys($addresses), $clientEmail);
+            $supplierChain[$root] = isset($markedRoots[$root])
+                || ($clientEmail !== null && ! $this->anyMatchesClient(array_keys($addresses), $clientEmail));
+        }
+        foreach ($group as $row) {
+            $supplierChain[$this->rootOf($row)] ??= isset($markedRoots[$this->rootOf($row)]);
         }
 
         $messages = [];
@@ -318,11 +526,15 @@ class RetroAssembler
             'quotes' => array_values($quotes),
             'invoices' => array_values($invoices),
             'messages' => $messages,
+            'review' => $review,
         ];
     }
 
-    /** @return array{0:?string, 1:?string, 2:bool} Адрес, имя, найден ли клиент по входящему письму. */
-    private function client(array $group, array $suppliers): array
+    /**
+     * @param  array<string, true>  $never  адреса, которые клиентом не бывают даже в крайнем случае (поставщики по маркировке)
+     * @return array{0:?string, 1:?string, 2:bool} Адрес, имя, найден ли клиент по входящему письму.
+     */
+    private function client(array $group, array $suppliers, array $never = []): array
     {
         // Надёжнее всего получатель нашего КП или счёта.
         foreach ($group as $row) {
@@ -350,8 +562,9 @@ class RetroAssembler
             }
         }
         // Остались только адреса, похожие на поставщиков: лучше такой клиент, чем никакого.
+        // Поставщик по маркировке клиентом не становится и здесь.
         foreach ($group as $row) {
-            if (! $row['outbound'] && $this->isExternal($row['from_email'])) {
+            if (! $row['outbound'] && $this->isExternal($row['from_email']) && ! isset($never[$this->addressKey($row['from_email'])])) {
                 return [$row['from_email'], $row['from_name'], true];
             }
         }

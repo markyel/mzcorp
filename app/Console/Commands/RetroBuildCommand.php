@@ -106,5 +106,30 @@ class RetroBuildCommand extends Command
         $this->line("Писем в заявках: $messages, из них с поставщиками: $supplier");
         $this->line("КП: $quotes, счетов: $invoices");
         $this->line('Прочее: '.json_encode($result['stats'], JSON_UNESCAPED_UNICODE));
+        $this->writeReview($requests);
+    }
+
+    /**
+     * Заявки на проверку (клиент пропал или сменился по правилу «клиент только из писем без
+     * маркировки поставщика») — CSV в журналах ретрозагрузки, не в репозиторий: там адреса клиентов.
+     */
+    private function writeReview(array $requests): void
+    {
+        $review = array_filter($requests, fn ($r) => ($r['review'] ?? null) !== null);
+        if ($review === []) {
+            return;
+        }
+        $dir = storage_path('logs/retro');
+        if (! is_dir($dir)) {
+            mkdir($dir, 0775, true);
+        }
+        $file = $dir.'/review-'.date('Ymd-His').'.csv';
+        $handle = fopen($file, 'w');
+        fputcsv($handle, ['code', 'reason', 'client_now', 'previous', 'found', 'status', 'subject']);
+        foreach ($review as $r) {
+            fputcsv($handle, [$r['code'], $r['review']['reason'], $r['client_email'], $r['review']['previous'] ?? '', $r['review']['found'] ?? '', $r['status']->value, $r['subject']]);
+        }
+        fclose($handle);
+        $this->line('На проверку: '.count($review).' заявок → '.$file);
     }
 }
