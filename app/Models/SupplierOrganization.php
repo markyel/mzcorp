@@ -15,7 +15,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class SupplierOrganization extends Model
 {
-    protected $fillable = ['name', 'notes', 'created_by_user_id'];
+    // inn — у организации, переведённой из клиентов (OrganizationToSupplierService).
+    protected $fillable = ['name', 'inn', 'notes', 'created_by_user_id'];
 
     public function suppliers(): HasMany
     {

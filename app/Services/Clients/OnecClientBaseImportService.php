@@ -184,9 +184,17 @@ class OnecClientBaseImportService
         };
         $orgKey = fn (array $x) => $x['inn'] !== '' ? 'inn:'.$x['inn'] : 'name:'.mb_strtolower($x['name']);
 
+        // Переведённые из клиентов в поставщики (OrganizationToSupplierService): по ИНН, без ИНН — по названию.
+        $supplierInns = DB::table('supplier_organizations')->whereNotNull('inn')->pluck('inn')->flip()->all();
+        $supplierNames = DB::table('supplier_organizations')->pluck('name')->map(fn ($n) => mb_strtolower(trim((string) $n)))->flip()->all();
+
         $organizations = [];
         $byName = [];
         foreach ($counterparties as $x) {
+            if ($x['kind'] === 'client' && ($x['inn'] !== '' ? isset($supplierInns[$x['inn']]) : isset($supplierNames[mb_strtolower($x['name'])]))) {
+                $x['kind'] = 'supplier';
+                $x['why'] = 'переведён в поставщики';
+            }
             $inc('контрагентов: '.$x['why']);
             $byName[mb_strtolower($x['name'])] = $x;
             if ($x['kind'] !== 'client') {

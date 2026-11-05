@@ -65,6 +65,10 @@
         },
     }"
      x-on:toast.window="push($event.detail)"
+     {{-- Сообщение, оставленное перед переходом на другую страницу (session()->flash('toast', …)). --}}
+     @if (session()->has('toast'))
+     x-init="$nextTick(() => push({ message: @js((string) session('toast')), type: 'success' }))"
+     @endif
      class="toast-stack"
      aria-live="polite">
     <template x-for="t in toasts" :key="t.id">

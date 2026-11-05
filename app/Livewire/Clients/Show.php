@@ -6,12 +6,15 @@ use App\Enums\ClientNotificationType;
 use App\Enums\InvoiceStatus;
 use App\Enums\OrganizationPricingMode;
 use App\Enums\RequestStatus;
+use App\Enums\Role;
 use App\Models\ClientContact;
 use App\Models\Invoice;
 use App\Models\Organization;
 use App\Models\Quotation;
 use App\Models\Request as RequestModel;
+use App\Models\SupplierOrganization;
 use App\Services\Clients\OrganizationRegistryService;
+use App\Services\Clients\OrganizationToSupplierService;
 use App\Services\Clients\RequestOrganizationResolver;
 use App\Services\Mail\ClientNotificationOptoutService;
 use Illuminate\Support\Collection;
@@ -61,6 +64,14 @@ class Show extends Component
     public string $editPhone = '';
 
     public bool $confirmingDelete = false;
+
+    /* --- Перевод в поставщики (OrganizationToSupplierService) --- */
+    public bool $convertingToSupplier = false;
+
+    public string $supplierOrgSearch = '';
+
+    /** Организация поставщика, к которой присоединить; null — создать новую. */
+    public ?int $intoSupplierOrganizationId = null;
 
     /** Контакт, у которого раскрыта панель «Автоуведомления» (id), либо null. */
     public ?int $openNotifContactId = null;
@@ -239,6 +250,46 @@ class Show extends Component
         unset($this->stats);
         unset($this->recentRequests);
         $this->dispatch('toast', message: 'Контакт отвязан от организации.', type: 'success');
+    }
+
+    /** Перевести в поставщики может руководство и снабжение: действие не отменяется кнопкой. */
+    #[Computed]
+    public function canConvertToSupplier(): bool
+    {
+        return (bool) auth()->user()?->hasAnyRole([
+            Role::HeadOfSales->value, Role::Director->value, Role::Admin->value, Role::Procurement->value,
+        ]);
+    }
+
+    /** Организации поставщиков для присоединения: по названию или ИНН, первые 8. */
+    #[Computed]
+    public function supplierOrgMatches(): Collection
+    {
+        $q = trim($this->supplierOrgSearch);
+        if (mb_strlen($q) < 2) {
+            return collect();
+        }
+
+        return SupplierOrganization::query()
+            ->where(fn ($w) => $w->where('name', 'ilike', '%'.$q.'%')->orWhere('inn', $q))
+            ->withCount('suppliers')->orderBy('name')->limit(8)->get(['id', 'name', 'inn']);
+    }
+
+    public function chooseSupplierOrganization(?int $id): void
+    {
+        $this->intoSupplierOrganizationId = $id;
+        $this->supplierOrgSearch = $id ? (string) SupplierOrganization::query()->whereKey($id)->value('name') : '';
+        unset($this->supplierOrgMatches);
+    }
+
+    public function convertToSupplier(OrganizationToSupplierService $service)
+    {
+        abort_unless($this->canConvertToSupplier, 403);
+        $result = $service->convert($this->organization, $this->intoSupplierOrganizationId, auth()->user());
+        session()->flash('toast', sprintf('«%s» теперь поставщик «%s»: адресов новых %d, привязано %d, заявок отвязано %d.',
+            $this->organization->name, $result['supplier_organization']->name, $result['suppliers_created'], $result['suppliers_attached'], $result['requests_unlinked']));
+
+        return $this->redirectRoute('suppliers.index', navigate: true);
     }
 
     public function deleteOrganization()

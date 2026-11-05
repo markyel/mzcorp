@@ -303,6 +303,50 @@
         </div>
     </div>
 
+    {{-- Перевод в поставщики --}}
+    @if($this->canConvertToSupplier)
+    <div class="ds-card">
+        <div class="ds-card-body">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div class="text-[12px] text-fg-3">Это не клиент, а поставщик? Адреса контактов перейдут в справочник поставщиков, ИНН — на организацию поставщика, и импорт из 1С больше не заведёт её клиентом.</div>
+                @unless($convertingToSupplier)
+                    <button type="button" wire:click="$set('convertingToSupplier', true)" class="btn btn-sm">Это поставщик</button>
+                @endunless
+            </div>
+            @if($convertingToSupplier)
+                <div class="mt-3 flex flex-col gap-2">
+                    <label class="text-[12px] text-fg-2">Присоединить к организации поставщика (если это тот же поставщик под другим названием) — или оставьте пустым, будет создана новая «{{ $organization->name }}»</label>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <input type="text" wire:model.live.debounce.300ms="supplierOrgSearch" placeholder="Название или ИНН поставщика" class="{{ $inputCls }}" style="min-width:280px;max-width:420px">
+                        @if($intoSupplierOrganizationId)
+                            <button type="button" wire:click="chooseSupplierOrganization(null)" class="btn btn-xs">не присоединять</button>
+                        @endif
+                    </div>
+                    @if(! $intoSupplierOrganizationId && $this->supplierOrgMatches->isNotEmpty())
+                        <div class="flex flex-col">
+                            @foreach($this->supplierOrgMatches as $so)
+                                <button type="button" wire:key="so-{{ $so->id }}" wire:click="chooseSupplierOrganization({{ $so->id }})"
+                                        class="text-left text-[12.5px] hover:underline py-0.5">
+                                    {{ $so->name }}@if($so->inn) <span class="text-fg-3">· ИНН {{ $so->inn }}</span>@endif <span class="text-fg-3">· адресов {{ $so->suppliers_count }}</span>
+                                </button>
+                            @endforeach
+                        </div>
+                    @endif
+                    <div class="text-[12px] text-fg-3">
+                        Заявок с этой организацией: {{ $this->stats['requests'] ?? 0 }} — они останутся, только без клиента. Контакты, не привязанные к другим клиентам, удалятся из клиентов.
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button type="button" wire:click="convertToSupplier"
+                                wire:confirm="Перевести «{{ $organization->name }}» в поставщики{{ $intoSupplierOrganizationId ? ' и присоединить к «'.$supplierOrgSearch.'»' : '' }}? Клиент будет удалён."
+                                class="btn btn-sm btn-primary">Перевести в поставщики</button>
+                        <button type="button" wire:click="$set('convertingToSupplier', false)" class="btn btn-sm">Отмена</button>
+                    </div>
+                </div>
+            @endif
+        </div>
+    </div>
+    @endif
+
     {{-- Удаление --}}
     <div class="ds-card">
         <div class="ds-card-body flex items-center justify-between gap-3 flex-wrap">
