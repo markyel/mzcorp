@@ -227,6 +227,7 @@ class RequestStatusReassessor
         $messages = EmailMessage::query()
             ->where('related_request_id', $request->id)
             ->whereNull('supplier_inquiry_id')
+            ->where(fn ($q) => $q->whereNull('category')->orWhere('category', '!=', \App\Enums\EmailCategory::SupplierReply->value))
             ->where('is_draft', false)
             ->orderByDesc('sent_at')
             ->orderByDesc('id')
@@ -282,6 +283,10 @@ class RequestStatusReassessor
         $messages = EmailMessage::query()
             ->where('related_request_id', $request->id)
             ->whereNull('supplier_inquiry_id')
+            // Переписка с поставщиком без запроса (category=supplier_reply) — не клиентская:
+            // её нет и в клиентском треде карточки. Без фильтра «Sorry, unable to supply it»
+            // поставщика модель читала как слово клиента (перезапуск 05.11.2026).
+            ->where(fn ($q) => $q->whereNull('category')->orWhere('category', '!=', \App\Enums\EmailCategory::SupplierReply->value))
             ->where('is_draft', false)
             // ПОСЛЕДНИЕ 24 письма (решает последнее содержательное), в хронологии.
             // Раньше брались первые 24 — в длинной переписке свежих писем модель

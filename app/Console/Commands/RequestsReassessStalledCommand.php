@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\EmailCategory;
 use App\Enums\RequestStatus;
 use App\Models\Request;
 use App\Services\Request\RequestStatusReassessor;
@@ -42,11 +43,13 @@ class RequestsReassessStalledCommand extends Command
             // есть клиентская переписка
             ->whereExists(fn ($q) => $q->selectRaw('1')->from('email_messages as em0')
                 ->whereColumn('em0.related_request_id', 'requests.id')
-                ->whereNull('em0.supplier_inquiry_id')->where('em0.is_draft', false))
-            // тишина: нет писем клиентского треда за последние N дней
+                ->whereNull('em0.supplier_inquiry_id')->where('em0.is_draft', false)
+                ->where(fn ($c) => $c->whereNull('em0.category')->orWhere('em0.category', '!=', EmailCategory::SupplierReply->value)))
+            // тишина: нет писем клиентского треда за последние N дней (письмо поставщика — не клиентский тред)
             ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('email_messages as em')
                 ->whereColumn('em.related_request_id', 'requests.id')
                 ->whereNull('em.supplier_inquiry_id')->where('em.is_draft', false)
+                ->where(fn ($c) => $c->whereNull('em.category')->orWhere('em.category', '!=', EmailCategory::SupplierReply->value))
                 ->where('em.sent_at', '>=', now()->subDays($days)))
             ->orderBy('id')
             ->limit($limit)
