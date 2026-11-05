@@ -927,6 +927,23 @@ class AssignmentService
             ->selectRaw('user_id, MAX(assigned_at) AS last_assigned_at')
             ->pluck('last_assigned_at', 'user_id');
 
+        // Режим наблюдения: назначений нет, только предложения (commit) — без них счётчик «сегодня»
+        // у всех ноль, и весь поток предлагался бы одному менеджеру. Считаем предложения как раздачу.
+        if (config('services.assignment_observe', false)) {
+            $suggestion = "parsing_meta::jsonb->'assignment_suggestion'";
+            $suggested = DB::table('requests')
+                ->whereRaw("($suggestion->>'reason') ~ '^auto_(proportional|twin)'")
+                ->whereRaw("($suggestion->>'at')::timestamptz >= ?", [now()->startOfDay()])
+                ->selectRaw("($suggestion->>'user_id')::bigint AS user_id, COUNT(*) AS n, MAX(($suggestion->>'at')::timestamptz) AS last_at")
+                ->groupByRaw("($suggestion->>'user_id')::bigint")
+                ->get();
+            foreach ($suggested as $row) {
+                $todayByUser[$row->user_id] = (int) ($todayByUser[$row->user_id] ?? 0) + (int) $row->n;
+                $last = $lastByUser[$row->user_id] ?? null;
+                $lastByUser[$row->user_id] = $last === null || (string) $row->last_at > (string) $last ? $row->last_at : $last;
+            }
+        }
+
         $weights = $managers->mapWithKeys(fn (User $u) => [
             $u->id => max(1, min(500, (int) ($u->load_weight ?? 100))) / 100.0,
         ]);
