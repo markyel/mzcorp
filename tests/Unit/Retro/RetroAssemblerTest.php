@@ -226,6 +226,8 @@ class RetroAssemblerTest extends TestCase
         $this->assertSame([true, true], array_column($request['messages'], 'supplier'));
         $this->assertSame('no_client', $request['review']['reason']);
         $this->assertSame('sales@supplier.ru', $request['review']['previous']);
+        $this->assertSame(self::MANAGER, $request['assigned'], 'Без писем клиенту ответственный — автор запроса поставщику');
+        $this->assertSame(self::MANAGER, $request['first_assigned']);
     }
 
     public function test_dealer_is_the_client_of_its_own_request_and_a_supplier_in_ours(): void

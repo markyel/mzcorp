@@ -430,6 +430,9 @@ class RetroAssembler
         $firstInbound = null;
         $lastAuthor = null;
         $firstAuthor = null;
+        // Автор наших запросов поставщикам — ответственный, если писем клиенту в почте нет.
+        $supplierFirstAuthor = null;
+        $supplierLastAuthor = null;
         $mzOwner = null;
         $quotes = [];
         $invoices = [];
@@ -457,6 +460,11 @@ class RetroAssembler
                 $mzOwner ??= $this->config['mz_folder_owners'][$row['folder']];
             }
             if ($isSupplier) {
+                if ($row['outbound'] && in_array($row['box'], $this->handlerEmails, true)) {
+                    $supplierFirstAuthor ??= $row['box'];
+                    $supplierLastAuthor = $row['box'];
+                }
+
                 continue;
             }
             $isCopy = $row['mid'] !== null && $primaryByMid[$row['mid']] !== $row['i'];
@@ -494,8 +502,8 @@ class RetroAssembler
         $last = $lastClientRow ?? $group[array_key_last($group)];
         $createdTs = $first['ts'] ?? $this->now;
         $lastTs = $last['ts'] ?? $createdTs;
-        $assigned = $lastAuthor ?? $mzOwner ?? $firstAuthor;
-        $firstAssigned = $mzOwner ?? $firstAuthor ?? $assigned;
+        $assigned = $lastAuthor ?? $mzOwner ?? $firstAuthor ?? $supplierLastAuthor;
+        $firstAssigned = $mzOwner ?? $firstAuthor ?? $supplierFirstAuthor ?? $assigned;
 
         [$status, $peak] = $this->status($invoices, $quotes, $hasReply, $assigned);
         $closed = null;
