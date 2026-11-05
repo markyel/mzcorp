@@ -69,6 +69,7 @@ php vendor/bin/phpunit tests/Unit/Retro --no-coverage
 
 - Код лежит в `/var/www/mzcorp`, работает от git, ветка `main`, локальных правок нет. Выкладка: от `www-data` `git pull`, затем `php artisan view:clear` и `php artisan config:cache`.
 - Воркеров mzCorp и QuoteParts нет. Cron root: ночная копия и пересылка из orders@ (ниже). `MAIL_MAILER=log`. Ключ OpenAI внесён 05.11 в оба `.env`. В очереди 1 задача (`ResolvePendingFromCatalogJob`).
+- **OpenAI только через прокси** `ai3.lazylift.ru:8443` (`OPENAI_BASE_URL` + `OPENAI_PROXY_KEY`, заголовок `X-Proxy-Key`): напрямую из России OpenAI отвечает 403 `unsupported_country_region_territory`. Ключ прокси — в nginx-конфиге самого прокси (`/etc/nginx/sites-available/ai3.conf`, вход по ключу mzcorp), в чат и репозиторий не выводить. Записан 05.11 в оба `.env`. Эмбеддинги каталога посчитаны 05.11: 31 256, около $0,10.
 - Только на сервере, в `.env`: `CATALOG_SYNC_URL`, `RETRO_MZ_FOLDER_OWNERS`, ключи Яндекса. В базе: токены ящиков. В `/root`: `db-passwords`, `mzcorp-admin-password`.
 - Индекс писем: `storage/app/retro`, 94 МБ. Из него сборка повторяется без чтения почты. Кеш текстов: `/var/lib/postgresql/retro-bodies.copy`. Журналы: `storage/logs/retro/`, `/var/tmp/retro-*`.
 - **Копии по расписанию есть с 05.11:** каждую ночь в 03:15 (cron root) `deploy/backup/nightly-db.sh` — дамп рабочей базы из `.env` с проверкой `pg_restore --list`, индекс `storage/app/retro` и `.env`, в `/root/backups/nightly/<дата>`, хранится 14 дней (~210 МБ в день). Скачать на компьютер: `bash deploy/backup/pull-backup.sh backups/nightly/<дата>`. Файлы писем (~12 ГБ) в ночную копию не входят — они скачиваются заново из почты; третий хостер не выбран.
@@ -77,16 +78,21 @@ php vendor/bin/phpunit tests/Unit/Retro --no-coverage
 
 - Код в `/var/www/quoteparts` (пользователь `quoteparts`, команды только через `sudo -u quoteparts`), база `quoteparts` собрана с нуля. Компания **MyZip** (`myzip`, #1), владелец — администратор mzCorp. Ключ API #1 «mzCorp» и вебхук на `/api/quoteparts/webhook` записаны в оба `.env`.
 - `quoteparts.net` (DNS у Reg.ru) работает через прокси в Гонконге, сертификат выпущен. `quoteparts.ru` ждёт смены DNS: домен и DNS у Beget, панель Beget лежит. Сертификата для `.ru` нет, в nginx только порт 80.
-- Ящики: `orders@myzip.ru` (внесистемные) подключён входом Яндекса. `myzip@` и `support@quoteparts.net` на почте Beget — пароли пропали вместе с базой, сбросить можно только из панели Beget. Обход без Beget: перенести почту `quoteparts.net` на Яндекс 360 через DNS Reg.ru.
+- Ящики: `orders@myzip.ru` (внесистемные) подключён входом Яндекса, `myzip@quoteparts.net` (основной ящик MyZip) — паролем. Пароли `myzip@` и `no-reply@` нашлись в архиве `mailpass.zip` (загрузки Claude, сессия 14.10); `no-reply@` записан в `MAIL_*` QuoteParts при `MAIL_MAILER=log`. Пароля `support@quoteparts.net` нет — только сброс в панели Beget.
+- Поставщики с кабинетом восстановлены 05.11 без писем (регистрация как у mzCorp, затем статус `active`): UniSystem (`org:6`, три адреса, агент, EUR), YuanQi (`org:35`, USD), OSS Китай (`sup:168`, USD). Условия не подтверждены — запросы спросят их явно. Войти поставщики смогут, когда включим отправку писем (код входа идёт с `no-reply@`). Внесистемных mzCorp заводит сам при первом запросе.
 
 **Временные обходы — вернуть при запуске QuoteParts:**
 
 1. `/etc/hosts`: строка `127.0.0.1 quoteparts.ru www.quoteparts.ru` — mzCorp ходит в QuoteParts внутри сервера, пока DNS `.ru` смотрит на Beget. Копия: `/root/hosts.2026-11-05-qp`.
 2. `.env` mzCorp: `QUOTEPARTS_URL=http://quoteparts.ru` (без сертификата `.ru`). Вернуть `https`, затем `config:cache`.
 3. **Пересылка из orders@** — cron root `20 * * * * /opt/orders-relay/run.sh`, лог `/var/log/orders-relay.log`, данные `/var/lib/orders-relay` (журнал отправленного `forward/sent.tsv`). Ответы поставщиков, пришедшие на orders@ с 02.11, уходят копией автору запроса (`X-QuoteParts-Mirror`, «Ответить» — поставщику напрямую), как это делал QuoteParts. 05.11 отправлено 36. **Убрать строку cron до запуска воркера QuoteParts**, иначе копии придут дважды.
-4. Позиция чтения orders@ в QuoteParts — 0: до запуска воркера поставить на последний UID, иначе он разберёт всю историю ящика.
+4. Позиции чтения `orders@` и `myzip@` в QuoteParts — 0: до запуска воркера поставить на последний UID, иначе он разберёт всю историю ящиков.
+
+Пересылка читает и `myzip@` (у него нет «Отправленных»: автор — по прежним копиям в mzCorp, затем по `orders@`, затем ответственный). 05.11 переслано 13 копий из `myzip@`.
 
 ## Ловушки перед следующими шагами
+
+- **Проверка готовности 05.11 — блокеры запуска:** (1) `mailbox_folder_states` пустая — выставить позиции по индексу ретрозагрузки, иначе письма между сканом (05.11 11:23) и запуском потеряются; (2) `deploy/supervisor/mzcorp-worker.conf` не установлен; (3) в `routes/console.php` 51 команда без выключателей: одна строка cron включит всё сразу, в том числе `auto-close-inactive` (закроет 54 открытые заявки), `check-attention` (2 494 без активности > 7 дней) и рассылки наружу (`notifications:dispatch-client`, `suppliers:remind`, `procurement:price-monitors`, `reports:weekly-generate --send`, `media:autopilot`, `direct:*`). Нужен список выключенных команд в `.env`.
 
 - **Кнопки отправки на сайте работают по-настоящему.** `MAIL_MAILER=log` не защищает отправку из карточки, которая идёт через ящик. Тестовое письмо 04.11 реально ушло.
 - **Пересборка стирает всё, что сделано в `MyLift_retro` через сайт.** `retro-rebuild.sh` удаляет базу и копирует её из `MyLift`. Ящики и пользователи сейчас в обеих базах совпадают. Подключение Милючихина, смена ролей и паролей, правки РОПа нужно делать в обеих базах или повторять после сборки.
