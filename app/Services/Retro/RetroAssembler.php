@@ -36,6 +36,9 @@ class RetroAssembler
     /** Ключ заявок без номера: выше любых настоящих номеров. */
     public const UNNUMBERED_KEY = 1000000;
 
+    /** Ключ заявок за дни аварии (MZгод-NNNNN): 2 000 000 + порядковый. */
+    public const CRASH_KEY = 2000000;
+
     /** Номер 1С в теме письма: шесть цифр, допускаются ведущие нули («000369619»). */
     private const ONEC_IN_SUBJECT_RE = '/(?<!\d)0*([1-9]\d{5})(?!\d)/u';
 
@@ -180,6 +183,201 @@ class RetroAssembler
         }
 
         return $requests;
+    }
+
+    /**
+     * Заявки за дни аварии (решение заказчика 05.11): CRM не работала, обращения на общий ящик
+     * пересылали менеджерам, дальше менеджер вёл переписку со своего ящика; часть клиентов писала
+     * менеджеру лично. Берутся цепочки без номера, начатые с crash_date, не переписка с поставщиком:
+     * письмо клиента в общем ящике связывается с его пересылкой менеджеру (тема без Re/Fw, пересылка
+     * не раньше письма и не позже трёх суток), цепочки одного клиента у одного менеджера — одна заявка.
+     * Ответственный — менеджер, писавший клиенту, иначе тот, кому переслали, иначе владелец ящика,
+     * куда клиент написал. Код — «MZгод-NNNNN» (решение заказчика), ключ — 2 000 000 + порядковый.
+     * Вызывать после assemble() на тех же строках.
+     *
+     * @param  list<string>  $sharedBoxes  общие ящики (info@): из них ответственный не берётся
+     * @return array{requests:array<int, array>, skipped:list<array>, stats:array<string, int>}
+     */
+    public function assembleCrash(array &$rows, array $sharedBoxes, int $firstSequence = 1, ?callable $accept = null): array
+    {
+        ['suppliers' => $suppliers, 'heuristic' => $heuristic, 'marked' => $marked, 'markedRoots' => $markedRoots] = $this->context;
+        $crashTs = strtotime(($this->config['crash_date'] ?? 'now').' 00:00:00 Europe/Moscow');
+        $shared = array_flip(array_map('mb_strtolower', $sharedBoxes));
+        $handlers = array_flip($this->handlerEmails);
+        $stats = ['forwards' => 0, 'forwards_linked' => 0, 'no_client' => 0];
+
+        // Цепочка, начатая до аварии, — продолжение старой переписки, а не новое обращение;
+        // переписка с поставщиком по маркировке — тоже не заявка. Считается до объединения цепочек.
+        $firstOfRoot = [];
+        foreach ($rows as $row) {
+            if ($row['number'] === null) {
+                $root = $this->rootOf($row);
+                $firstOfRoot[$root] = min($firstOfRoot[$root] ?? PHP_INT_MAX, $row['ts'] ?? 0);
+            }
+        }
+        $candidates = [];
+        foreach ($rows as $i => $row) {
+            $root = $this->rootOf($row);
+            if ($row['number'] === null && ($row['ts'] ?? 0) >= $crashTs && ! isset($markedRoots[$root]) && ($firstOfRoot[$root] ?? 0) >= $crashTs) {
+                $candidates[] = $i;
+            }
+        }
+
+        // Пересылка из общего ящика менеджеру ↔ письмо клиента в общем ящике.
+        $clientLetters = [];
+        foreach ($candidates as $i) {
+            $row = $rows[$i];
+            if (isset($shared[$row['box']]) && ! $row['outbound'] && $this->isClientAddress($row['from_email'], $suppliers)) {
+                $clientLetters[self::bareSubject($row['subject'])][] = $i;
+            }
+        }
+        $forwardedTo = [];   // корень цепочки → менеджер, которому переслали
+        foreach ($candidates as $i) {
+            $row = $rows[$i];
+            $manager = null;
+            if (isset($shared[$row['box']]) && $row['outbound']) {
+                $manager = array_values(array_filter($row['recipients'], fn ($a) => isset($handlers[$a])))[0] ?? null;
+            } elseif (isset($handlers[$row['box']]) && ! $row['outbound'] && isset($shared[$row['from_email']])) {
+                $manager = $row['box'];
+            }
+            if ($manager === null) {
+                continue;
+            }
+            $stats['forwards']++;
+            $original = null;
+            foreach ($clientLetters[self::bareSubject($row['subject'])] ?? [] as $j) {
+                if ($rows[$j]['ts'] <= $row['ts'] + 600 && $row['ts'] - $rows[$j]['ts'] < 3 * 86400) {
+                    $original = $j;
+                }
+            }
+            if ($original === null) {
+                continue;
+            }
+            $stats['forwards_linked']++;
+            $this->union($this->rootKey($rows[$original]), $this->rootKey($row));
+            $forwardedTo[$this->rootOf($rows[$original])] = $manager;
+        }
+
+        // Клиент и менеджер каждой цепочки; цепочки одного клиента у одного менеджера — одна заявка.
+        $threads = [];
+        foreach ($candidates as $i) {
+            $threads[$this->rootOf($rows[$i])][] = $i;
+        }
+        $forwardedTo = array_combine(array_map(fn ($r) => $this->find($r), array_keys($forwardedTo)), array_values($forwardedTo));
+        $byClientManager = [];
+        foreach ($threads as $root => $indexes) {
+            $group = array_map(fn ($i) => $rows[$i], $indexes);
+            [$client] = $this->client($group, $suppliers, $marked);
+            $manager = $this->crashManager($group, $handlers) ?? ($forwardedTo[$root] ?? null) ?? $this->crashMailboxOwner($group, $handlers);
+            if ($client !== null && $manager !== null) {
+                $byClientManager[$this->addressKey($client).'|'.$manager][] = $root;
+            }
+        }
+        foreach ($byClientManager as $roots) {
+            foreach (array_slice($roots, 1) as $root) {
+                $this->union($roots[0], $root);
+            }
+        }
+
+        $chains = [];
+        foreach ($candidates as $i) {
+            $chains[$this->rootOf($rows[$i])][] = $i;
+        }
+        $forwardedByChain = [];
+        foreach ($forwardedTo as $root => $manager) {
+            $forwardedByChain[$this->find($root)] ??= $manager;
+        }
+
+        $accepted = [];
+        $skipped = [];
+        foreach ($chains as $root => $indexes) {
+            usort($indexes, fn ($a, $b) => ($rows[$a]['ts'] ?? 0) <=> ($rows[$b]['ts'] ?? 0));
+            $group = array_map(fn ($i) => $rows[$i], $indexes);
+            [$client] = $this->client($group, $suppliers, $marked);
+            $manager = $this->crashManager($group, $handlers) ?? ($forwardedByChain[$root] ?? null) ?? $this->crashMailboxOwner($group, $handlers);
+            $reason = match (true) {
+                $client === null || ! $this->isClientAddress($client, $suppliers) => 'нет клиента',
+                $manager === null => 'нет менеджера',
+                $accept !== null && ! $accept($group) => 'уже в базе',
+                default => null,
+            };
+            if ($reason !== null) {
+                $skipped[] = ['reason' => $reason, 'first' => $group[0], 'count' => count($group), 'client' => $client];
+                $stats['skipped: '.$reason] = ($stats['skipped: '.$reason] ?? 0) + 1;
+
+                continue;
+            }
+            $accepted[] = ['first' => $group[0]['ts'] ?? 0, 'indexes' => $indexes, 'manager' => $manager, 'forwarded' => isset($forwardedByChain[$root])];
+        }
+        usort($accepted, fn ($a, $b) => $a['first'] <=> $b['first']);
+
+        $requests = [];
+        foreach ($accepted as $k => $chain) {
+            $sequence = $firstSequence + $k;
+            $number = self::CRASH_KEY + $sequence;
+            foreach ($chain['indexes'] as $i) {
+                $rows[$i]['number'] = $number;
+            }
+            $request = $this->buildRequest($number, $chain['indexes'], $rows, $suppliers, $heuristic, $marked, $markedRoots, $stats);
+            $request['code'] = sprintf('MZ%d-%05d', $this->config['year'], $sequence);
+            if ($request['assigned'] === null) {
+                $request['assigned'] = $chain['manager'];
+                $request['first_assigned'] ??= $chain['manager'];
+                if ($request['status'] === RequestStatus::New) {
+                    $request['status'] = RequestStatus::Assigned;
+                }
+            }
+            $request['crash_source'] = $chain['forwarded'] ? 'forwarded' : 'direct';
+            $requests[$number] = $request;
+        }
+
+        return ['requests' => $requests, 'skipped' => $skipped, 'stats' => $stats];
+    }
+
+    /** Менеджер, писавший клиенту из своего ящика (последний). */
+    private function crashManager(array $group, array $handlers): ?string
+    {
+        $manager = null;
+        foreach ($group as $row) {
+            if ($row['outbound'] && isset($handlers[$row['box']]) && $this->externalRecipients($row) !== []) {
+                $manager = $row['box'];
+            }
+        }
+
+        return $manager;
+    }
+
+    /**
+     * Письмо разложено в папку менеджера общего ящика (MZ|…) — её владелец; клиент написал
+     * менеджеру лично — владелец ящика, куда пришло первое письмо.
+     */
+    private function crashMailboxOwner(array $group, array $handlers): ?string
+    {
+        foreach ($group as $row) {
+            $owner = mb_strtolower((string) ($this->config['mz_folder_owners'][$row['folder']] ?? ''));
+            if ($owner !== '' && isset($handlers[$owner])) {
+                return $owner;
+            }
+        }
+        foreach ($group as $row) {
+            if (! $row['outbound'] && isset($handlers[$row['box']])) {
+                return $row['box'];
+            }
+        }
+
+        return null;
+    }
+
+    /** Тема без Re:/Fw:/Fwd:/Отв: — для связи пересылки с исходным письмом. */
+    public static function bareSubject(string $subject): string
+    {
+        return mb_strtolower(trim(preg_replace('/^\s*((re|fw|fwd|aw|wg|ответ|отв|пересл)\s*(\[\d+\])?\s*:\s*)+/iu', '', $subject)));
+    }
+
+    /** Узел цепочки письма для union (как rootOf, но без поиска корня). */
+    private function rootKey(array $row): string
+    {
+        return $row['mid'] ?? $row['in_reply_to'] ?? ($row['references'][0] ?? 'row-'.$row['i']);
     }
 
     /** @return array<int, list<int>> номер → позиции писем */
@@ -757,7 +955,7 @@ class RetroAssembler
     {
         $id = $row['mid'] ?? $row['in_reply_to'] ?? ($row['references'][0] ?? null);
 
-        return $id !== null ? $this->find($id) : 'row-'.$row['i'];
+        return $this->find($id ?? 'row-'.$row['i']);
     }
 
     private function find(string $x): string

@@ -350,6 +350,51 @@ class RetroAssemblerTest extends TestCase
         $this->assertSame(1000, $numbered['number'], 'Письма заявок с номером не трогаются');
     }
 
+    public function test_crash_days_requests_follow_the_forward_from_the_shared_box_and_direct_letters(): void
+    {
+        $info = 'info@myzip.ru';
+        $at = fn (string $box, string $folder, string $mid, int $day, array $extra) => RetroIndex::normalize($extra + [
+            'uid' => ++$this->uid, 'folder' => $folder, 'date' => date('r', self::NOW - 86400 * (100 - $day)), 'mid' => "<$mid>",
+        ], $box, 2026, 25000);
+        $assembler = $this->assembler(['crash_date' => date('Y-m-d', self::NOW - 86400 * 10)]);
+        $result = $assembler->assemble([
+            $this->sent('numbered@x', 30, ['foot' => ['M-2026-1000']]),
+            // Продолжение существующей заявки после аварии — остаётся в ней.
+            $this->inbound('numbered-re@x', 92, ['irt' => '<numbered@x>', 'refs' => '<numbered@x>']),
+            // Письмо на info@, пересылка менеджеру, менеджер пишет клиенту с КП новой цепочкой.
+            $at($info, 'INBOX', 'f1@x', 91, ['from' => 'Олег <oleg@f-client.ru>', 'to' => $info, 'subject' => 'Нужен датчик']),
+            $at($info, 'Sent', 'f1-fw@x', 91, ['from' => $info, 'to' => self::MANAGER, 'subject' => 'Fwd: Нужен датчик']),
+            $this->inbound('f1-fw@x', 91, ['from' => $info, 'subject' => 'Fwd: Нужен датчик']),
+            $this->sent('f1-q@x', 92, ['to' => 'oleg@f-client.ru', 'subject' => '372001', 'names' => ['Предложение МЗ-372001 от 2026-11-03_10-00-00.pdf']]),
+            // Переслано другому менеджеру, он ещё не ответил.
+            $at($info, 'INBOX', 'f2@x', 93, ['from' => 'nina@g-client.ru', 'to' => $info, 'subject' => 'Кнопка вызова']),
+            $at($info, 'Sent', 'f2-fw@x', 93, ['from' => $info, 'to' => 'other@myzip.ru', 'subject' => 'FW: Кнопка вызова']),
+            // Клиент написал менеджеру лично.
+            $this->inbound('d1@x', 94, ['from' => 'pavel@h-client.ru', 'subject' => 'Цена на ролик']),
+            // Ответ на старую переписку без номера — не новое обращение.
+            $this->inbound('old@x', 50, ['from' => 'olga@c-client.ru']),
+            $this->inbound('old-re@x', 93, ['from' => 'olga@c-client.ru', 'irt' => '<old@x>', 'refs' => '<old@x>']),
+            // Письмо на info@ без пересылки и ответа — менеджера нет.
+            $at($info, 'INBOX', 'lost@x', 95, ['from' => 'spam@ads.ru', 'to' => $info, 'subject' => 'Реклама']),
+        ]);
+        $rows = $result['rows'];
+        $crash = $assembler->assembleCrash($rows, [$info], 3);
+        $requests = array_values($crash['requests']);
+
+        $this->assertSame(['MZ2026-00003', 'MZ2026-00004', 'MZ2026-00005'], array_column($requests, 'code'));
+        $this->assertSame(['oleg@f-client.ru', 'nina@g-client.ru', 'pavel@h-client.ru'], array_column($requests, 'client_email'));
+        $this->assertSame([self::MANAGER, 'other@myzip.ru', self::MANAGER], array_column($requests, 'assigned'));
+        $this->assertSame(['forwarded', 'forwarded', 'direct'], array_column($requests, 'crash_source'));
+        $this->assertSame(RequestStatus::Quoted, $requests[0]['status']);
+        $this->assertSame('372001', $requests[0]['onec_number']);
+        $this->assertCount(4, $requests[0]['messages'], 'Письмо клиента, пересылка (две копии) и КП менеджера');
+        $this->assertSame(RequestStatus::Assigned, $requests[1]['status']);
+        $this->assertSame(RetroAssembler::CRASH_KEY + 3, array_key_first($crash['requests']));
+        $this->assertSame(['нет менеджера'], array_column($crash['skipped'], 'reason'));
+        $numbered = array_values(array_filter($rows, fn ($r) => $r['mid'] === 'numbered-re@x'))[0];
+        $this->assertSame(1000, $numbered['number'], 'Продолжение заявки с номером остаётся в ней');
+    }
+
     public function test_idle_requests_close_with_a_reason_for_their_stage_and_keep_the_peak(): void
     {
         $result = $this->assembler(['idle_close_days' => 30])->assemble([
