@@ -260,26 +260,62 @@ class RetroAssembler
             $forwardedTo[$this->rootOf($rows[$original])] = $manager;
         }
 
-        // Клиент и менеджер каждой цепочки; цепочки одного клиента у одного менеджера — одна заявка.
+        // Цепочка, которую начал менеджер (КП новым письмом после пересылки), — к ближайшему
+        // предыдущему обращению того же клиента у того же менеджера. Обращения клиента не склеиваются:
+        // у крупного клиента в одни сутки бывает десяток разных заявок к одному менеджеру.
         $threads = [];
         foreach ($candidates as $i) {
             $threads[$this->rootOf($rows[$i])][] = $i;
         }
         $forwardedTo = array_combine(array_map(fn ($r) => $this->find($r), array_keys($forwardedTo)), array_values($forwardedTo));
-        $byClientManager = [];
+        $anchors = [];
+        $started = [];
         foreach ($threads as $root => $indexes) {
+            usort($indexes, fn ($a, $b) => ($rows[$a]['ts'] ?? 0) <=> ($rows[$b]['ts'] ?? 0));
             $group = array_map(fn ($i) => $rows[$i], $indexes);
             [$client] = $this->client($group, $suppliers, $marked);
             $manager = $this->crashManager($group, $handlers) ?? ($forwardedTo[$root] ?? null) ?? $this->crashMailboxOwner($group, $handlers);
-            if ($client !== null && $manager !== null) {
-                $byClientManager[$this->addressKey($client).'|'.$manager][] = $root;
+            if ($client === null || $manager === null) {
+                continue;
+            }
+            $key = $this->addressKey($client).'|'.$manager;
+            $first = $group[0];
+            if ($first['outbound'] && isset($handlers[$first['box']])) {
+                $started[] = ['key' => $key, 'root' => $root, 'ts' => $first['ts'] ?? 0, 'client' => mb_strtolower($client)];
+            } else {
+                $anchors[$key][] = ['root' => $root, 'ts' => $first['ts'] ?? 0, 'client' => mb_strtolower($client)];
             }
         }
-        foreach ($byClientManager as $roots) {
-            foreach (array_slice($roots, 1) as $root) {
-                $this->union($roots[0], $root);
+        foreach ($started as $thread) {
+            // Сначала обращение с тем же адресом, потом с тем же доменом; из них — ближайшее раньше.
+            $best = null;
+            foreach ($anchors[$thread['key']] ?? [] as $anchor) {
+                if ($anchor['ts'] > $thread['ts'] || $thread['ts'] - $anchor['ts'] >= 7 * 86400) {
+                    continue;
+                }
+                $rank = [$anchor['client'] === $thread['client'] ? 1 : 0, $anchor['ts']];
+                if ($best === null || $rank > $best['rank']) {
+                    $best = $anchor + ['rank' => $rank];
+                }
+            }
+            if ($best !== null) {
+                $this->union($best['root'], $thread['root']);
+                $stats['manager_threads_joined'] = ($stats['manager_threads_joined'] ?? 0) + 1;
             }
         }
+
+        // Рассылка: то же письмо (отправитель + тема) пришло в несколько наших ящиков, или реклама с эмодзи в теме.
+        $deliveries = [];
+        foreach ($candidates as $i) {
+            $row = $rows[$i];
+            if (! $row['outbound']) {
+                $deliveries[$row['from_email'].'|'.self::bareSubject($row['subject'])][$row['box']] = true;
+            }
+        }
+        $isBulk = function (array $row) use ($deliveries): bool {
+            return count($deliveries[$row['from_email'].'|'.self::bareSubject($row['subject'])] ?? []) > 1
+                || preg_match('/^\s*[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}]/u', $row['subject']) === 1;
+        };
 
         $chains = [];
         foreach ($candidates as $i) {
@@ -298,11 +334,21 @@ class RetroAssembler
             [$client] = $this->client($group, $suppliers, $marked);
             $manager = $this->crashManager($group, $handlers) ?? ($forwardedByChain[$root] ?? null) ?? $this->crashMailboxOwner($group, $handlers);
             $chosen = $unassigned !== null && $unassigned($group);
+            $answered = false;
+            $documents = false;
+            foreach ($group as $row) {
+                $answered = $answered || ($row['outbound'] && $this->externalRecipients($row) !== []);
+                $documents = $documents || ($row['outbound'] && $this->documents($row) !== []);
+            }
+            $inbound = array_values(array_filter($group, fn ($row) => ! $row['outbound']));
             $reason = match (true) {
                 $accept !== null && ! $accept($group) => 'уже в базе',
                 $chosen => null,
                 $client === null || ! $this->isClientAddress($client, $suppliers) => 'нет клиента',
                 $manager === null => 'нет менеджера',
+                ! $answered && $inbound !== [] && count(array_filter($inbound, $isBulk)) === count($inbound) => 'рассылка',
+                // Запрос поставщику без маркировки CRM: начали мы, наших КП и счетов нет, в теме номер 1С.
+                $group[0]['outbound'] && ! $documents && preg_match('/(?<!\d)0*3[5-7]\d{4}(?!\d)/', $group[0]['subject']) === 1 => 'запрос поставщику',
                 default => null,
             };
             if ($reason !== null) {

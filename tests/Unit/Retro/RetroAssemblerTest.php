@@ -403,6 +403,39 @@ class RetroAssemblerTest extends TestCase
         $this->assertSame([], $chosen['skipped']);
     }
 
+    public function test_crash_days_keep_separate_requests_of_one_client_and_drop_mailings_and_supplier_requests(): void
+    {
+        $other = 'other@myzip.ru';
+        $at = fn (string $box, string $folder, string $mid, int $day, array $extra) => RetroIndex::normalize($extra + [
+            'uid' => ++$this->uid, 'folder' => $folder, 'date' => date('r', self::NOW - 86400 * (100 - $day) + $this->uid * 60), 'mid' => "<$mid>",
+        ], $box, 2026, 25000);
+        $assembler = $this->assembler(['crash_date' => date('Y-m-d', self::NOW - 86400 * 10)]);
+        $result = $assembler->assemble([
+            // Две разные заявки крупного клиента одному менеджеру в один день.
+            $this->inbound('m1@x', 92, ['from' => 'a@meteor.ru', 'subject' => 'Вкладыш башмака']),
+            $this->inbound('m2@x', 92, ['from' => 'b@meteor.ru', 'subject' => 'Доводчик двери']),
+            // КП новым письмом после второго обращения — к нему.
+            $this->sent('m2-q@x', 93, ['to' => 'b@meteor.ru', 'subject' => '372555', 'names' => ['Предложение МЗ-372555 от 2026-11-03_10-00-00.pdf']]),
+            // Рассылка в два ящика.
+            $this->inbound('ad1@x', 92, ['from' => '333@teko-com.ru', 'subject' => 'Вам в подарок 10%']),
+            $at($other, 'INBOX', 'ad1@x-2', 92, ['from' => '333@teko-com.ru', 'to' => $other, 'subject' => 'Вам в подарок 10%']),
+            // Запрос поставщику без маркировки CRM.
+            $this->sent('rfq@x', 93, ['to' => 'info@snab-lift.ru', 'subject' => 'Запрос 000372683']),
+            $this->inbound('rfq-re@x', 94, ['from' => 'info@snab-lift.ru', 'subject' => 'Re: Запрос 000372683', 'irt' => '<rfq@x>', 'refs' => '<rfq@x>']),
+        ]);
+        $rows = $result['rows'];
+        $crash = $assembler->assembleCrash($rows, ['info@myzip.ru']);
+        $requests = array_values($crash['requests']);
+
+        $this->assertSame(['Вкладыш башмака', 'Доводчик двери'], array_column($requests, 'subject'));
+        $this->assertCount(1, $requests[0]['messages']);
+        $this->assertCount(2, $requests[1]['messages'], 'КП новым письмом — ко второму обращению');
+        $this->assertSame(RequestStatus::Quoted, $requests[1]['status']);
+        $reasons = array_column($crash['skipped'], 'reason');
+        sort($reasons);
+        $this->assertSame(['запрос поставщику', 'рассылка', 'рассылка'], $reasons);
+    }
+
     public function test_idle_requests_close_with_a_reason_for_their_stage_and_keep_the_peak(): void
     {
         $result = $this->assembler(['idle_close_days' => 30])->assemble([
