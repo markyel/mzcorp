@@ -68,10 +68,23 @@ php vendor/bin/phpunit tests/Unit/Retro --no-coverage
 ## Что сейчас на сервере
 
 - Код лежит в `/var/www/mzcorp`, работает от git, ветка `main`, локальных правок нет. Выкладка: от `www-data` `git pull`, затем `php artisan view:clear` и `php artisan config:cache`.
-- Воркеров, cron и фоновых процессов нет. `MAIL_MAILER=log`. Ключа OpenAI нет. В очереди 1 задача (`ResolvePendingFromCatalogJob`).
+- Воркеров mzCorp и QuoteParts нет. Cron root: ночная копия и пересылка из orders@ (ниже). `MAIL_MAILER=log`. Ключ OpenAI внесён 05.11 в оба `.env`. В очереди 1 задача (`ResolvePendingFromCatalogJob`).
 - Только на сервере, в `.env`: `CATALOG_SYNC_URL`, `RETRO_MZ_FOLDER_OWNERS`, ключи Яндекса. В базе: токены ящиков. В `/root`: `db-passwords`, `mzcorp-admin-password`.
 - Индекс писем: `storage/app/retro`, 94 МБ. Из него сборка повторяется без чтения почты. Кеш текстов: `/var/lib/postgresql/retro-bodies.copy`. Журналы: `storage/logs/retro/`, `/var/tmp/retro-*`.
 - **Копии по расписанию есть с 05.11:** каждую ночь в 03:15 (cron root) `deploy/backup/nightly-db.sh` — дамп рабочей базы из `.env` с проверкой `pg_restore --list`, индекс `storage/app/retro` и `.env`, в `/root/backups/nightly/<дата>`, хранится 14 дней (~210 МБ в день). Скачать на компьютер: `bash deploy/backup/pull-backup.sh backups/nightly/<дата>`. Файлы писем (~12 ГБ) в ночную копию не входят — они скачиваются заново из почты; третий хостер не выбран.
+
+### QuoteParts (с 05.11)
+
+- Код в `/var/www/quoteparts` (пользователь `quoteparts`, команды только через `sudo -u quoteparts`), база `quoteparts` собрана с нуля. Компания **MyZip** (`myzip`, #1), владелец — администратор mzCorp. Ключ API #1 «mzCorp» и вебхук на `/api/quoteparts/webhook` записаны в оба `.env`.
+- `quoteparts.net` (DNS у Reg.ru) работает через прокси в Гонконге, сертификат выпущен. `quoteparts.ru` ждёт смены DNS: домен и DNS у Beget, панель Beget лежит. Сертификата для `.ru` нет, в nginx только порт 80.
+- Ящики: `orders@myzip.ru` (внесистемные) подключён входом Яндекса. `myzip@` и `support@quoteparts.net` на почте Beget — пароли пропали вместе с базой, сбросить можно только из панели Beget. Обход без Beget: перенести почту `quoteparts.net` на Яндекс 360 через DNS Reg.ru.
+
+**Временные обходы — вернуть при запуске QuoteParts:**
+
+1. `/etc/hosts`: строка `127.0.0.1 quoteparts.ru www.quoteparts.ru` — mzCorp ходит в QuoteParts внутри сервера, пока DNS `.ru` смотрит на Beget. Копия: `/root/hosts.2026-11-05-qp`.
+2. `.env` mzCorp: `QUOTEPARTS_URL=http://quoteparts.ru` (без сертификата `.ru`). Вернуть `https`, затем `config:cache`.
+3. **Пересылка из orders@** — cron root `20 * * * * /opt/orders-relay/run.sh`, лог `/var/log/orders-relay.log`, данные `/var/lib/orders-relay` (журнал отправленного `forward/sent.tsv`). Ответы поставщиков, пришедшие на orders@ с 02.11, уходят копией автору запроса (`X-QuoteParts-Mirror`, «Ответить» — поставщику напрямую), как это делал QuoteParts. 05.11 отправлено 36. **Убрать строку cron до запуска воркера QuoteParts**, иначе копии придут дважды.
+4. Позиция чтения orders@ в QuoteParts — 0: до запуска воркера поставить на последний UID, иначе он разберёт всю историю ящика.
 
 ## Ловушки перед следующими шагами
 
