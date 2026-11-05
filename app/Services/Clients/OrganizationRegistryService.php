@@ -269,7 +269,7 @@ class OrganizationRegistryService
     {
         $changed = [];
         $set = function (string $field, ?string $value) use ($org, &$changed): void {
-            $value = $value !== null && trim($value) !== '' ? trim($value) : null;
+            $value = $value !== null && trim($value) !== '' ? self::fit($field, trim($value)) : null;
             if ((string) $org->{$field} !== (string) $value) {
                 $changed[$field] = ['from' => $org->{$field}, 'to' => $value];
                 $org->{$field} = $value;
@@ -321,12 +321,28 @@ class OrganizationRegistryService
     public function adoptOfficial(Organization $org): void
     {
         if ($org->registry_short_name) {
-            $org->name = $org->registry_short_name;
+            $org->name = self::fit('name', $org->registry_short_name);
         }
         if ($org->registry_address) {
-            $org->address = $org->registry_address;
+            $org->address = self::fit('address', $org->registry_address);
         }
         $org->save();
+    }
+
+    /**
+     * Длина полей organizations: юридический адрес в выписке бывает длиннее 255,
+     * а в рабочее поле он идёт целиком (сверка 05.11.2026 упала на таком).
+     */
+    private const FIELD_LIMITS = [
+        'name' => 255, 'address' => 255, 'registry_short_name' => 255, 'registry_director' => 255,
+        'registry_full_name' => 500, 'registry_address' => 500, 'kpp' => 20, 'ogrn' => 15,
+    ];
+
+    private static function fit(string $field, string $value): string
+    {
+        $limit = self::FIELD_LIMITS[$field] ?? null;
+
+        return $limit !== null && mb_strlen($value) > $limit ? rtrim(mb_substr($value, 0, $limit - 1)).'…' : $value;
     }
 
     /**
