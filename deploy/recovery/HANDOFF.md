@@ -11,12 +11,10 @@ git clone https://github.com/markyel/mzcorp.git
 ```
 
 ```bash
-cd mzcorp && git checkout recovery/retro-import
+cd mzcorp && composer install
 ```
 
-```bash
-composer install
-```
+Работа идёт в `main`: ветка `recovery/retro-import` влита и больше не нужна. Уже склонированный проект обновить через `git pull`, прежде чем что-либо менять: 05.11 сессии на разных компьютерах не видели работу друг друга, и код появился в двух ветках.
 
 ```bash
 php vendor/bin/phpunit tests/Unit/Retro --no-coverage
@@ -63,18 +61,11 @@ php vendor/bin/phpunit tests/Unit/Retro --no-coverage
 
 ## Что сейчас на сервере
 
-- Код лежит в `/var/www/mzcorp`: git стоит на `main@21fc1785`, поверх архивом выложены файлы ветки. Прикладной код совпадает с `90ae89c1` по контрольным суммам. На сервере нет `deploy/recovery/retro-rebuild.sh`, `deploy/recovery/tools` и тестов `tests/Unit/Retro`.
-- Выкладка правок, пока сервер не переведён на git (из Git Bash, в корне проекта):
-
-  ```bash
-  tar cf - <файлы> | ssh root@<IP> 'sudo -u www-data tar xf - -C /var/www/mzcorp'
-  ```
-
-  Затем от `www-data`: `php artisan view:clear` и `php artisan config:cache`.
+- Код лежит в `/var/www/mzcorp`, работает от git, ветка `main`, локальных правок нет. Выкладка: от `www-data` `git pull`, затем `php artisan view:clear` и `php artisan config:cache`.
 - Воркеров, cron и фоновых процессов нет. `MAIL_MAILER=log`. Ключа OpenAI нет. В очереди 1 задача (`ResolvePendingFromCatalogJob`).
 - Только на сервере, в `.env`: `CATALOG_SYNC_URL`, `RETRO_MZ_FOLDER_OWNERS`, ключи Яндекса. В базе: токены ящиков. В `/root`: `db-passwords`, `mzcorp-admin-password`.
 - Индекс писем: `storage/app/retro`, 94 МБ. Из него сборка повторяется без чтения почты. Кеш текстов: `/var/lib/postgresql/retro-bodies.copy`. Журналы: `storage/logs/retro/`, `/var/tmp/retro-*`.
-- **Резервных копий нет.** Индекс, база и файлы существуют только на этом сервере.
+- **Копий по расписанию нет.** Есть одна ручная копия базы от 05.11 09:21: `/root/backup-2026-11-05-0921` и на втором рабочем компьютере. Файлы писем (11 ГБ) и индекс `storage/app/retro` существуют только на этом сервере.
 
 ## Ловушки перед следующими шагами
 
@@ -109,10 +100,11 @@ php vendor/bin/phpunit tests/Unit/Retro --no-coverage
 4. **КП и счета вне цепочек:** около 680 и 700 после 25 мая. Привязка по клиенту или список на разбор. **Импорт оплат:** сначала сверить код с заявками `closed_lost` и счетами `expired`, закрытые с причиной `invoice_unpaid` могут оказаться оплаченными.
 5. **Финальная сборка:** выложить `retro-rebuild.sh`, собрать, импортировать каталог, решить, какая база станет рабочей.
 6. **Этап 6, запуск, строго по `RETRO_PLAN.md`:** копии базы вне сервера до всего остального, досканировать письма, ключ OpenAI, эмбеддинги каталога, `mail:send-queued --dry-run`, очистка `jobs`, состояния папок на последний UID, воркеры, затем cron по частям. Опасные команды держать выключенными: `requests:auto-close-inactive`, `requests:check-attention`, `requests:reassess-stalled`, `requests:recover-unassigned`, `invoices:check-expiry`, `mail:prune-raw-source`, `mail:backfill-manager-deliveries`.
-7. **Люди и код:** влить ветку в `main` (в `main` её ещё нет, PR нет), перевести сервер на git, снять локальные правки, дать менеджерам вход.
+7. **Люди:** дать менеджерам вход.
 8. **Вне загрузки:** перенести DNS с Beget до начала января 2027 (иначе не продлится сертификат), сменить пароль root, клиенты через DaData, `mail:history-mirror`, QuoteParts (`PLAN.md`, §7), интеграции (§8), сторож доступности (§9).
 
 ## Мелочи
 
-- В истории ветки в одном промежуточном коммите осталось название учётки, в текущих файлах его нет. Это не секрет.
+- В истории остались название учётки (промежуточный коммит) и IP нового сервера (`14b73093`), в текущих файлах их нет. Вычистить можно только перезаписью `main`; проще сделать репозиторий приватным.
+- В `authorized_keys` на сервере два разных ключа с одинаковой подписью `claude-mzcorp-deploy@boag`, по одному на компьютер. Отзывать по отпечатку.
 - `scripts/prod-backup.sh` в рабочей папке не закоммичен и не нужен: его перекрывает `deploy/backup/`. Удалять только с согласия заказчика.
