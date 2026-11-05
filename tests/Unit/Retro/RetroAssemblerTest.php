@@ -330,6 +330,8 @@ class RetroAssemblerTest extends TestCase
             $this->sent('a-q@x', 36, ['to' => 'anna@a-client.ru', 'irt' => '<a@x>', 'refs' => '<a@x>'] + $quote(3)),
             // Без нашего документа — не заявка.
             $this->inbound('chat@x', 50, ['from' => 'olga@c-client.ru']),
+            // КП переслан только коллеге — не сделка.
+            $this->sent('inner@x', 52, ['to' => 'other@myzip.ru'] + $quote(6)),
             // Запрос поставщику — не заявка.
             $this->sent('rfq@x', 50, ['to' => 'sales@supplier.ru', 'subject' => 'Запрос расценки — [360009]'] + $quote(4)),
             // После аварии — не трогаем.

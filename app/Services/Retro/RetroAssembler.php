@@ -150,9 +150,10 @@ class RetroAssembler
             if (isset($markedRoots[$root]) || $first < $launchTs || $first >= $crashTs) {
                 continue;
             }
+            // Наш КП или счёт, ушедший наружу: пересылка документа коллеге — не сделка.
             $hasDocument = false;
             foreach ($indexes as $i) {
-                if ($rows[$i]['outbound'] && $this->documents($rows[$i]) !== []) {
+                if ($rows[$i]['outbound'] && $this->documents($rows[$i]) !== [] && $this->externalRecipients($rows[$i]) !== []) {
                     $hasDocument = true;
                     break;
                 }
