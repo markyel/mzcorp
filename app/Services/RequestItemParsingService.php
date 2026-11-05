@@ -362,7 +362,7 @@ class RequestItemParsingService
      *     `^паллет` ловил позицию как транспортный поддон, хотя «паллета
      *     траволатора» — это плоская несущая пластина дорожки.
      */
-    private function isServiceItem(?string $name): bool
+    public static function isServiceItem(?string $name): bool
     {
         $name = mb_strtolower(trim((string) $name));
         if ($name === '') {
