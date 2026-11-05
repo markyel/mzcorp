@@ -38,6 +38,14 @@ class SystemNotificationMailer
         if ($to === '') {
             return false;
         }
+        // Автоматические служебные письма можно выключить целиком (services.mail_outbound.system_notifications);
+        // письма, которые отправляет человек (объявление, обращение в поддержку, код по запросу клиента), — уходят.
+        if (! config('services.mail_outbound.system_notifications', true)
+            && ! in_array($mailable::class, (array) config('services.mail_outbound.system_notifications_by_person', []), true)) {
+            Log::info('SystemNotificationMailer: automatic notification switched off', ['to' => $to, 'mail' => class_basename($mailable)]);
+
+            return false;
+        }
 
         $mailbox = $this->sharedMailbox();
         if ($mailbox === null) {

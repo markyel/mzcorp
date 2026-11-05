@@ -531,6 +531,17 @@ return [
         // Shared-ящик для fallback'а, когда у assigned менеджера нет своего
         // OAuth-подключённого personal mailbox'а. Резолвится по точному email'у.
         'shared_email' => env('MAIL_OUTBOUND_SHARED_EMAIL', 'mail@myzip.ru'),
+        // Автоматические служебные письма (SystemNotificationMailer): делегирование, копии rfq@,
+        // заявки из бота, cost-plus, привязки организаций, QuoteParts, дайджесты. false — не уходят
+        // (колокольчик на сайте остаётся); письма по действию человека из списка ниже уходят всегда.
+        // Перезапуск после аварии 05.11.2026: выключены, включать по решению заказчика.
+        'system_notifications' => (bool) env('MAIL_SYSTEM_NOTIFICATIONS', true),
+        'system_notifications_by_person' => [
+            \App\Mail\ManagerAnnouncementMail::class,
+            \App\Mail\SupportTicketCreatedMail::class,
+            \App\Mail\SupportTicketResolvedMail::class,
+            \App\Mail\BotVerificationCodeMail::class,
+        ],
         // Список наших mailbox-адресов в lowercase (для Reply-all фильтра —
         // не отправлять на самих себя). Пусто = берём все Mailbox.email из БД.
         'our_emails' => array_filter(array_map(

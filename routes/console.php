@@ -534,3 +534,18 @@ Schedule::job(new \App\Jobs\QuoteParts\SyncQuotePartsPoolJob)
 Schedule::job(new \App\Jobs\QuoteParts\SyncQuotePartsRfqsJob)
     ->everyTenMinutes()
     ->onOneServer();
+
+// Выключатель задач расписания (перезапуск после аварии 05.11.2026): задачи из SCHEDULE_DISABLED
+// (имена команд — «suppliers:remind», задач-классов — «SyncQuotePartsRfqsJob», через запятую)
+// cron пропускает. Так выключены автоматические письма и напоминания и команды, закрывающие
+// заявки; включать по одной — убрать имя из списка и обновить config:cache.
+// Проверить: php artisan schedule:list (у выключенных пометка в описании).
+$disabledTasks = array_filter(array_map('trim', explode(',', (string) config('app.schedule_disabled', ''))));
+if ($disabledTasks !== []) {
+    foreach (app(\Illuminate\Console\Scheduling\Schedule::class)->events() as $event) {
+        $name = \App\Support\ScheduledTaskName::of($event);
+        if (in_array($name, $disabledTasks, true)) {
+            $event->skip(fn () => true)->description('ВЫКЛЮЧЕНО (SCHEDULE_DISABLED): '.$name);
+        }
+    }
+}

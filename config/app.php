@@ -67,6 +67,10 @@ return [
 
     'timezone' => env('APP_TIMEZONE', 'Europe/Moscow'),
 
+    // Задачи расписания, которые cron пропускает (routes/console.php, ScheduledTaskName):
+    // имена команд и задач-классов через запятую. Пусто — работает всё.
+    'schedule_disabled' => env('SCHEDULE_DISABLED', ''),
+
     /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration
