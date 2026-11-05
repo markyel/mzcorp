@@ -121,7 +121,7 @@
 
 ## Что хранится вне репозитория
 
-На сервере, в `.env`: `CATALOG_SYNC_URL`, `RETRO_MZ_FOLDER_OWNERS`, ключи Яндекса. В базе: токены ящиков. На сервере в `/root`: `db-passwords`, `mzcorp-admin-password`. В `storage/app/retro`: индекс писем, из него сборка повторяется без чтения почты. Копий по расписанию пока нет, это пункт этапа 6; ручная копия базы от 05.11 описана в `HANDOFF.md`.
+На сервере, в `.env`: `CATALOG_SYNC_URL`, `RETRO_MZ_FOLDER_OWNERS`, ключи Яндекса. В базе: токены ящиков. На сервере в `/root`: `db-passwords`, `mzcorp-admin-password`. В `storage/app/retro`: индекс писем, из него сборка повторяется без чтения почты. **Копии по расписанию есть с 05.11:** каждую ночь в 03:15 (cron root) `deploy/backup/nightly-db.sh` — дамп рабочей базы из `.env` с проверкой `pg_restore --list`, индекс `storage/app/retro` и `.env`, в `/root/backups/nightly/<дата>`, хранится 14 дней (~210 МБ в день). Скачать на компьютер: `bash deploy/backup/pull-backup.sh backups/nightly/<дата>`. Файлы писем (~12 ГБ) в ночную копию не входят — они скачиваются заново из почты; третий хостер не выбран.
 
 Заметки ассистента: копия в `claude-memory/` с вырезанными адресами и IP.
 

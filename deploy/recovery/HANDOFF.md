@@ -71,7 +71,7 @@ php vendor/bin/phpunit tests/Unit/Retro --no-coverage
 - Воркеров, cron и фоновых процессов нет. `MAIL_MAILER=log`. Ключа OpenAI нет. В очереди 1 задача (`ResolvePendingFromCatalogJob`).
 - Только на сервере, в `.env`: `CATALOG_SYNC_URL`, `RETRO_MZ_FOLDER_OWNERS`, ключи Яндекса. В базе: токены ящиков. В `/root`: `db-passwords`, `mzcorp-admin-password`.
 - Индекс писем: `storage/app/retro`, 94 МБ. Из него сборка повторяется без чтения почты. Кеш текстов: `/var/lib/postgresql/retro-bodies.copy`. Журналы: `storage/logs/retro/`, `/var/tmp/retro-*`.
-- **Копий по расписанию нет.** Есть одна ручная копия базы от 05.11 09:21: `/root/backup-2026-11-05-0921` и на втором рабочем компьютере. Файлы писем (11 ГБ) и индекс `storage/app/retro` существуют только на этом сервере.
+- **Копии по расписанию есть с 05.11:** каждую ночь в 03:15 (cron root) `deploy/backup/nightly-db.sh` — дамп рабочей базы из `.env` с проверкой `pg_restore --list`, индекс `storage/app/retro` и `.env`, в `/root/backups/nightly/<дата>`, хранится 14 дней (~210 МБ в день). Скачать на компьютер: `bash deploy/backup/pull-backup.sh backups/nightly/<дата>`. Файлы писем (~12 ГБ) в ночную копию не входят — они скачиваются заново из почты; третий хостер не выбран.
 
 ## Ловушки перед следующими шагами
 
