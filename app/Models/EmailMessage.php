@@ -96,10 +96,14 @@ class EmailMessage extends Model
         return static::withHistory()->where($field ?? $this->getRouteKeyName(), $value)->first();
     }
 
-    /** Письмо из истории, тело и вложения которого ещё не скачаны с сервера. */
+    /**
+     * Письмо из истории или восстановленное из почты (ретрозагрузка, см.
+     * App\Services\Retro), тело и вложения которого ещё не скачаны с сервера.
+     */
     public function needsBodyFetch(): bool
     {
-        return (bool) $this->is_history && $this->body_fetched_at === null;
+        return $this->body_fetched_at === null
+            && ((bool) $this->is_history || isset($this->detected_artifacts['retro']));
     }
 
     protected function casts(): array

@@ -474,6 +474,30 @@ class Detail extends Component
         return $draft;
     }
 
+    /**
+     * Письмо, восстановленное из почты (App\Services\Retro): вложения и полный
+     * текст скачиваются с сервера при первом запросе. Чтение через FT_PEEK,
+     * см. MailHistoryMirrorService::fetchBody.
+     */
+    public function loadRetroMessage(int $id): void
+    {
+        $row = $this->thread->firstWhere('id', $id);
+        if ($row === null || ! $row->needsBodyFetch()) {
+            return;
+        }
+        if (! app(\App\Services\Mail\MailHistoryMirrorService::class)->fetchBody($row)) {
+            $this->dispatch('toast', message: 'Не удалось загрузить письмо с почтового сервера.', type: 'error');
+
+            return;
+        }
+        $this->thread = $this->thread->map(fn ($m) => $m->id === $id
+            ? EmailMessage::query()->with([
+                'attachments:id,email_message_id,filename,size_bytes,mime_type,content_id,is_inline',
+                'mailbox:id,email,name',
+            ])->find($id) ?? $m
+            : $m)->values();
+    }
+
     /** $thread — snapshot из mount(): подменяем письмо, чтобы статус обновился без перезагрузки. */
     private function replaceThreadMessage(?EmailMessage $fresh): void
     {
