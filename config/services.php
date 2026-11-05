@@ -955,6 +955,10 @@ return [
     | Распределение заявок. См. AssignmentService::pickWeightedLeastLoadedManager.
     | РОП может переопределить через UI «Настройки» — DB-override.
     */
+    // Режим наблюдения раздачи (AssignmentService::commit): true — система только предлагает менеджера
+    // (parsing_meta.assignment_suggestion + лог), заявка остаётся без ответственного. Перезапуск 05.11.2026.
+    'assignment_observe' => (bool) env('ASSIGNMENT_OBSERVE', false),
+
     'assignment' => [
         // Адреса-агрегаторы (не конечный клиент): веб-форма сайта, маркетплейсы.
         // За одним таким From стоят РАЗНЫЕ конечные клиенты, поэтому client-

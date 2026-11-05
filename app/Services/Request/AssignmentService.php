@@ -257,6 +257,22 @@ class AssignmentService
             return null;
         }
 
+        // Режим наблюдения (ASSIGNMENT_OBSERVE=true, перезапуск после аварии 05.11.2026): раздача только
+        // предлагает — кому и почему записывается в заявку и в лог, заявка остаётся без ответственного,
+        // без уведомления, доставки письма и письма клиенту. Сравнивается с тем, кому заявку отдали люди.
+        if (config('services.assignment_observe', false)) {
+            DB::table('requests')->where('id', $request->id)->update(['parsing_meta' => DB::raw(
+                "coalesce(parsing_meta::jsonb, '{}'::jsonb) || ".DB::getPdo()->quote(json_encode(['assignment_suggestion' => [
+                    'user_id' => $manager->id, 'email' => $manager->email, 'reason' => $reason, 'at' => now()->toIso8601String(),
+                ]], JSON_UNESCAPED_UNICODE)).'::jsonb'
+            )]);
+            Log::info('AssignmentService: observation — suggested, not assigned', [
+                'request_id' => $request->id, 'internal_code' => $request->internal_code, 'manager' => $manager->email, 'reason' => $reason,
+            ]);
+
+            return null;
+        }
+
         DB::transaction(function () use ($request, $manager, $byUserId, $reason) {
             $request->assigned_user_id = $manager->id;
             $request->status = RequestStatus::Assigned;
