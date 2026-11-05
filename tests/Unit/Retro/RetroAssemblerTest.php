@@ -311,6 +311,43 @@ class RetroAssemblerTest extends TestCase
         $this->assertSame(2, $result['stats']['unassigned_rows']);
     }
 
+    public function test_chains_without_a_number_become_r_requests_only_after_launch_with_our_document(): void
+    {
+        $quote = fn (int $n) => ['names' => ["Предложение МЗ-36000$n от 2026-06-01_10-00-00.pdf"]];
+        $assembler = $this->assembler([
+            'launch_date' => date('Y-m-d', self::NOW - 86400 * 90),
+            'crash_date' => date('Y-m-d', self::NOW - 86400 * 10),
+        ]);
+        $result = $assembler->assemble([
+            $this->sent('numbered@x', 30, ['foot' => ['M-2026-1000']]),
+            // До запуска — не заявка.
+            $this->inbound('early@x', 5, ['from' => 'early@client.ru']),
+            $this->sent('early-q@x', 6, ['to' => 'early@client.ru', 'irt' => '<early@x>', 'refs' => '<early@x>'] + $quote(1)),
+            // После запуска, клиент писал, менеджер ответил КП из почты, без номера.
+            $this->inbound('b@x', 40, ['from' => 'Пётр <petr@b-client.ru>', 'subject' => 'Нужен ролик']),
+            $this->sent('b-q@x', 41, ['to' => 'petr@b-client.ru', 'irt' => '<b@x>', 'refs' => '<b@x>'] + $quote(2)),
+            $this->inbound('a@x', 35, ['from' => 'anna@a-client.ru']),
+            $this->sent('a-q@x', 36, ['to' => 'anna@a-client.ru', 'irt' => '<a@x>', 'refs' => '<a@x>'] + $quote(3)),
+            // Без нашего документа — не заявка.
+            $this->inbound('chat@x', 50, ['from' => 'olga@c-client.ru']),
+            // Запрос поставщику — не заявка.
+            $this->sent('rfq@x', 50, ['to' => 'sales@supplier.ru', 'subject' => 'Запрос расценки — [360009]'] + $quote(4)),
+            // После аварии — не трогаем.
+            $this->sent('late@x', 95, ['to' => 'late@client.ru'] + $quote(5)),
+        ]);
+        $rows = $result['rows'];
+        $requests = $assembler->assembleUnnumbered($rows, 7);
+
+        $this->assertSame(['R-2026-0007', 'R-2026-0008'], array_column($requests, 'code'));
+        $this->assertSame(['anna@a-client.ru', 'petr@b-client.ru'], array_column($requests, 'client_email'));
+        $this->assertSame(self::MANAGER, array_values($requests)[1]['assigned']);
+        $this->assertSame(RequestStatus::Quoted, array_values($requests)[1]['status']);
+        $this->assertSame('Нужен ролик', array_values($requests)[1]['subject']);
+        $this->assertSame(RetroAssembler::UNNUMBERED_KEY + 7, array_key_first($requests));
+        $numbered = array_values(array_filter($rows, fn ($r) => $r['mid'] === 'numbered@x'))[0];
+        $this->assertSame(1000, $numbered['number'], 'Письма заявок с номером не трогаются');
+    }
+
     public function test_idle_requests_close_with_a_reason_for_their_stage_and_keep_the_peak(): void
     {
         $result = $this->assembler(['idle_close_days' => 30])->assemble([

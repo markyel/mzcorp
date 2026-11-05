@@ -33,11 +33,17 @@ class RetroAssembler
     /** Пара «номер заявки / номер 1С» в теме: «[M-2026-21610] / [372377]». */
     private const ONEC_PAIR_RE = '/\[M-(\d{4})-(\d+)\]\s*\/\s*\[(\d{5,7})\]/u';
 
+    /** Ключ заявок без номера: выше любых настоящих номеров. */
+    public const UNNUMBERED_KEY = 1000000;
+
     /** Номер 1С в теме письма: шесть цифр, допускаются ведущие нули («000369619»). */
     private const ONEC_IN_SUBJECT_RE = '/(?<!\d)0*([1-9]\d{5})(?!\d)/u';
 
     /** @var array<string, string> */
     private array $parent = [];
+
+    /** Поставщики и цепочки поставщиков последней сборки — для дособирания цепочек без номера. */
+    private array $context = [];
 
     /**
      * @param  array{internal_domains:list<string>, free_mail_domains:list<string>, service_sender_pattern:string,
@@ -100,6 +106,7 @@ class RetroAssembler
         $suppliers = $heuristic + $marked;
 
         $this->attachByOnecNumber($rows, $groups, $markedRoots, $suppliers, $marked, $stats);
+        $this->context = compact('suppliers', 'heuristic', 'marked', 'markedRoots');
         $groups = $this->groupByNumber($rows);
         $stats['unassigned_rows'] = count($rows) - array_sum(array_map('count', $groups));
 
@@ -110,6 +117,68 @@ class RetroAssembler
         ksort($requests);
 
         return ['requests' => $requests, 'rows' => $rows, 'stats' => $stats];
+    }
+
+    /**
+     * Заявки из цепочек без номера (решение заказчика 05.11): переписка шла мимо CRM, номер
+     * заявки ни в одно письмо не попал и утерян. Берутся цепочки, начатые после запуска
+     * системы и до аварии, не переписка с поставщиком, с нашим КП или счётом; $accept может
+     * сузить отбор (например, только с оплаченным счётом). Собираются по тем же правилам,
+     * что и заявки с номером; код — «R-год-NNNN» по порядку создания начиная с $firstSequence,
+     * ключ — 1 000 000 + порядковый (не пересекается с настоящими номерами). Вызывать после
+     * assemble() на тех же строках.
+     *
+     * @param  list<array>  $rows  строки из результата assemble(); письмам цепочек проставляется временный номер
+     * @param  callable(list<array>): bool|null  $accept
+     * @return array<int, array> ключ → заявка (как в assemble())
+     */
+    public function assembleUnnumbered(array &$rows, int $firstSequence = 1, ?callable $accept = null): array
+    {
+        ['suppliers' => $suppliers, 'heuristic' => $heuristic, 'marked' => $marked, 'markedRoots' => $markedRoots] = $this->context;
+        $launchTs = ($this->config['launch_date'] ?? null) ? strtotime($this->config['launch_date'].' 00:00:00 Europe/Moscow') : 0;
+        $crashTs = ($this->config['crash_date'] ?? null) ? strtotime($this->config['crash_date'].' 00:00:00 Europe/Moscow') : PHP_INT_MAX;
+
+        $threads = [];
+        foreach ($rows as $i => $row) {
+            if ($row['number'] === null) {
+                $threads[$this->rootOf($row)][] = $i;
+            }
+        }
+        $chains = [];
+        foreach ($threads as $root => $indexes) {
+            $first = min(array_map(fn ($i) => $rows[$i]['ts'] ?? 0, $indexes));
+            if (isset($markedRoots[$root]) || $first < $launchTs || $first >= $crashTs) {
+                continue;
+            }
+            $hasDocument = false;
+            foreach ($indexes as $i) {
+                if ($rows[$i]['outbound'] && $this->documents($rows[$i]) !== []) {
+                    $hasDocument = true;
+                    break;
+                }
+            }
+            if (! $hasDocument || ($accept !== null && ! $accept(array_map(fn ($i) => $rows[$i], $indexes)))) {
+                continue;
+            }
+            usort($indexes, fn ($a, $b) => ($rows[$a]['ts'] ?? 0) <=> ($rows[$b]['ts'] ?? 0));
+            $chains[] = ['first' => $first, 'indexes' => $indexes];
+        }
+        usort($chains, fn ($a, $b) => $a['first'] <=> $b['first']);
+
+        $stats = ['no_client' => 0];
+        $requests = [];
+        foreach ($chains as $k => $chain) {
+            $sequence = $firstSequence + $k;
+            $number = self::UNNUMBERED_KEY + $sequence;
+            foreach ($chain['indexes'] as $i) {
+                $rows[$i]['number'] = $number;
+            }
+            $request = $this->buildRequest($number, $chain['indexes'], $rows, $suppliers, $heuristic, $marked, $markedRoots, $stats);
+            $request['code'] = sprintf('R-%d-%04d', $this->config['year'], $sequence);
+            $requests[$number] = $request;
+        }
+
+        return $requests;
     }
 
     /** @return array<int, list<int>> номер → позиции писем */
