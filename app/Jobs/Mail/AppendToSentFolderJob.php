@@ -51,6 +51,9 @@ class AppendToSentFolderJob implements ShouldQueue
 
     public function handle(MailboxConnector $connector): void
     {
+        if (! \App\Services\Mail\ImapWriteGuard::allowed('append to Sent', ['email_message_id' => $this->emailMessageId])) {
+            return;
+        }
         $message = EmailMessage::with('mailbox')->find($this->emailMessageId);
         if ($message === null) {
             Log::warning('AppendToSentFolderJob: message not found', [

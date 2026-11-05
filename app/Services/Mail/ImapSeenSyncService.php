@@ -94,7 +94,7 @@ class ImapSeenSyncService
     public function storeSeen(Mailbox $mailbox, string $folderPath, array $uids, bool $seen): void
     {
         $uids = array_values(array_unique(array_filter(array_map('intval', $uids))));
-        if ($uids === []) {
+        if ($uids === [] || ! ImapWriteGuard::allowed('store seen flag', ['mailbox' => $mailbox->email, 'folder' => $folderPath, 'count' => count($uids), 'seen' => $seen])) {
             return;
         }
         $client = null;

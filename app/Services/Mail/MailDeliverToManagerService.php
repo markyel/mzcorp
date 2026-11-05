@@ -49,6 +49,9 @@ class MailDeliverToManagerService
 
     public function deliver(EmailMessage $message, User $manager): bool
     {
+        if (! ImapWriteGuard::allowed('append copy to manager inbox', ['email_message_id' => $message->id, 'manager' => $manager->email])) {
+            return false;
+        }
         // Trace-аудит: создаём pending-запись с первого шага. На каждом
         // ветвлении обновляем status. Цель — выявить silent-failures, при
         // которых IMAP APPEND произошёл, но `inbox_deliveries[]` не записался

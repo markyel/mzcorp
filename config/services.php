@@ -657,6 +657,10 @@ return [
         |                             от MailFolderRouter/MailReassignArchiver).
         */
         'folder_sync_enabled' => (bool) env('MAIL_FOLDER_SYNC', true),
+        // Режим наблюдения (ImapWriteGuard): false — система ничего не пишет в почтовые ящики
+        // (перемещение в папки менеджеров, копии в личные ящики, архив при переназначении,
+        // метки, копии в «Отправленные», отметки «прочитано»), только читает и решает.
+        'imap_writes' => (bool) env('MAIL_IMAP_WRITES', true),
         // Как часто (минуты) тянуть папки/расположение писем с сервера на ящик.
         // Флаги \Seen тянутся каждый цикл mail:sync независимо от этого.
         'folder_sync_interval_minutes' => (int) env('MAIL_FOLDER_SYNC_INTERVAL_MINUTES', 10),

@@ -55,6 +55,9 @@ class MailReassignArchiverService
 
     public function archive(EmailMessage $original, User $oldManager): bool
     {
+        if (! ImapWriteGuard::allowed('archive from old manager inbox', ['email_message_id' => $original->id, 'old_manager' => $oldManager->email])) {
+            return false;
+        }
         $oldEmail = mb_strtolower(trim((string) $oldManager->email));
         if ($oldEmail === '') {
             return false;

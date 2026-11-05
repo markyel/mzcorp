@@ -40,6 +40,9 @@ class MailLabelService
         if (! $mailbox) {
             return false;
         }
+        if (! ImapWriteGuard::allowed('apply label', ['email_message_id' => $message->id, 'label' => $label])) {
+            return false;
+        }
 
         $client = null;
         try {

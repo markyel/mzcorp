@@ -42,6 +42,9 @@ class MailFolderRouter
         if (! $mailbox) {
             return null;
         }
+        if (! ImapWriteGuard::allowed('route to manager folder', ['email_message_id' => $message->id, 'mailbox' => $mailbox->email, 'manager' => $manager?->email])) {
+            return null;
+        }
 
         // MZ|<Lastname> подпапки имеют смысл ТОЛЬКО на общем ящике
         // (info@myzip.ru): они нужны секретарю чтобы видеть распределение
