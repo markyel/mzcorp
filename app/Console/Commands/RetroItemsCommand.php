@@ -95,7 +95,6 @@ class RetroItemsCommand extends Command
                     'base_unit_price' => $item['price'],
                     'discount_percent' => $item['discount'],
                     'line_total' => $item['sum'],
-                    'is_analog' => false,
                     'matched_catalog_item_id' => $catalogId,
                     'match_source' => $catalogId !== null ? 'retro_article' : null,
                     'created_at' => now(),
