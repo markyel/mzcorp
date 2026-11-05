@@ -27,6 +27,7 @@ class RetroCrashCommand extends Command
 {
     protected $signature = 'retro:crash
         {--database= : Имя базы (обязательно)}
+        {--include= : Файл со строками «ящик|папка|uid»: цепочки без менеджера, которые всё же заявки (заводятся без ответственного)}
         {--apply : Записать; без флага только отчёт}';
 
     protected $description = 'Заявки MZ… за дни аварии: обращения на info@ с пересылкой менеджеру и письма менеджерам лично';
@@ -59,6 +60,14 @@ class RetroCrashCommand extends Command
         $last = (int) DB::table('requests')->where('internal_code', 'like', "MZ$year-%")
             ->selectRaw("max(cast(split_part(internal_code, '-', 2) as integer)) as n")->value('n');
 
+        $include = [];
+        if ($this->option('include')) {
+            foreach (file((string) $this->option('include'), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                $include[mb_strtolower(trim($line))] = true;
+            }
+        }
+        $key = fn (array $row) => mb_strtolower($row['box']).'|'.mb_strtolower($row['folder']).'|'.$row['uid'];
+
         // assemble() уже связал R-цепочки до аварии; заявки R здесь не собираем — только дни аварии.
         $crash = $assembler->assembleCrash($rows, $shared, $last + 1, function (array $chain) use ($known) {
             foreach ($chain as $row) {
@@ -68,6 +77,14 @@ class RetroCrashCommand extends Command
             }
 
             return true;
+        }, $include === [] ? null : function (array $chain) use ($include, $key) {
+            foreach ($chain as $row) {
+                if (isset($include[$key($row)])) {
+                    return true;
+                }
+            }
+
+            return false;
         });
         $requests = $crash['requests'];
 
@@ -135,9 +152,9 @@ class RetroCrashCommand extends Command
         fclose($handle);
         $skip = "$dir/crash-skipped-$stamp.csv";
         $handle = fopen($skip, 'w');
-        fputcsv($handle, ['reason', 'date', 'box', 'folder', 'from', 'client', 'letters', 'subject']);
+        fputcsv($handle, ['reason', 'date', 'box', 'folder', 'uid', 'from', 'client', 'letters', 'subject']);
         foreach ($skipped as $s) {
-            fputcsv($handle, [$s['reason'], date('d.m.Y H:i', $s['first']['ts'] ?? 0), $s['first']['box'], $s['first']['folder'], $s['first']['from_email'], $s['client'], $s['count'], $s['first']['subject']]);
+            fputcsv($handle, [$s['reason'], date('d.m.Y H:i', $s['first']['ts'] ?? 0), $s['first']['box'], $s['first']['folder'], $s['first']['uid'], $s['first']['from_email'], $s['client'], $s['count'], $s['first']['subject']]);
         }
         fclose($handle);
         $this->line("Список: $file\nПропущенные: $skip");

@@ -393,6 +393,14 @@ class RetroAssemblerTest extends TestCase
         $this->assertSame(['нет менеджера'], array_column($crash['skipped'], 'reason'));
         $numbered = array_values(array_filter($rows, fn ($r) => $r['mid'] === 'numbered-re@x'))[0];
         $this->assertSame(1000, $numbered['number'], 'Продолжение заявки с номером остаётся в ней');
+
+        // Выбранное вручную письмо без менеджера — заявка без ответственного.
+        $rows = $result['rows'];
+        $chosen = $assembler->assembleCrash($rows, [$info], 1, null, fn (array $chain) => in_array('lost@x', array_column($chain, 'mid'), true));
+        $last = array_values($chosen['requests'])[3];
+        $this->assertSame(['chosen', null, 'spam@ads.ru'], [$last['crash_source'], $last['assigned'], $last['client_email']]);
+        $this->assertSame(RequestStatus::New, $last['status']);
+        $this->assertSame([], $chosen['skipped']);
     }
 
     public function test_idle_requests_close_with_a_reason_for_their_stage_and_keep_the_peak(): void

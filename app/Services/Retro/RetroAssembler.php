@@ -196,9 +196,11 @@ class RetroAssembler
      * Вызывать после assemble() на тех же строках.
      *
      * @param  list<string>  $sharedBoxes  общие ящики (info@): из них ответственный не берётся
+     * @param  callable(list<array>): bool|null  $unassigned  цепочки без менеджера (или без клиента), которые всё же заявки —
+     *                                                    по списку, выбранному вручную: заводятся без ответственного
      * @return array{requests:array<int, array>, skipped:list<array>, stats:array<string, int>}
      */
-    public function assembleCrash(array &$rows, array $sharedBoxes, int $firstSequence = 1, ?callable $accept = null): array
+    public function assembleCrash(array &$rows, array $sharedBoxes, int $firstSequence = 1, ?callable $accept = null, ?callable $unassigned = null): array
     {
         ['suppliers' => $suppliers, 'heuristic' => $heuristic, 'marked' => $marked, 'markedRoots' => $markedRoots] = $this->context;
         $crashTs = strtotime(($this->config['crash_date'] ?? 'now').' 00:00:00 Europe/Moscow');
@@ -295,10 +297,12 @@ class RetroAssembler
             $group = array_map(fn ($i) => $rows[$i], $indexes);
             [$client] = $this->client($group, $suppliers, $marked);
             $manager = $this->crashManager($group, $handlers) ?? ($forwardedByChain[$root] ?? null) ?? $this->crashMailboxOwner($group, $handlers);
+            $chosen = $unassigned !== null && $unassigned($group);
             $reason = match (true) {
+                $accept !== null && ! $accept($group) => 'уже в базе',
+                $chosen => null,
                 $client === null || ! $this->isClientAddress($client, $suppliers) => 'нет клиента',
                 $manager === null => 'нет менеджера',
-                $accept !== null && ! $accept($group) => 'уже в базе',
                 default => null,
             };
             if ($reason !== null) {
@@ -320,14 +324,14 @@ class RetroAssembler
             }
             $request = $this->buildRequest($number, $chain['indexes'], $rows, $suppliers, $heuristic, $marked, $markedRoots, $stats);
             $request['code'] = sprintf('MZ%d-%05d', $this->config['year'], $sequence);
-            if ($request['assigned'] === null) {
+            if ($request['assigned'] === null && $chain['manager'] !== null) {
                 $request['assigned'] = $chain['manager'];
                 $request['first_assigned'] ??= $chain['manager'];
                 if ($request['status'] === RequestStatus::New) {
                     $request['status'] = RequestStatus::Assigned;
                 }
             }
-            $request['crash_source'] = $chain['forwarded'] ? 'forwarded' : 'direct';
+            $request['crash_source'] = $chain['manager'] === null ? 'chosen' : ($chain['forwarded'] ? 'forwarded' : 'direct');
             $requests[$number] = $request;
         }
 
