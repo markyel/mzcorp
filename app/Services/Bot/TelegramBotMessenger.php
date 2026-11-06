@@ -183,6 +183,7 @@ class TelegramBotMessenger implements BotMessenger
 
     private function http(): PendingRequest
     {
-        return Http::timeout(20)->retry(3, 2000, fn ($e) => MediaPublisherService::isConnectFailure($e), throw: false);
+        return Http::timeout(20)->withOptions(\App\Support\TelegramHttp::options())
+            ->retry(3, 2000, fn ($e) => MediaPublisherService::isConnectFailure($e), throw: false);
     }
 }

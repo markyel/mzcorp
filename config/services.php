@@ -469,6 +469,12 @@ return [
         'scope' => env('VK_ID_SCOPE', 'wall photos groups'),
     ],
 
+    // Telegram Bot API (боты заявок, медиаплан): прокси, если сервер не достаёт
+    // до api.telegram.org напрямую. См. App\Support\TelegramHttp.
+    'telegram' => [
+        'proxy' => env('TELEGRAM_PROXY', ''),
+    ],
+
     'max' => [
         'api_base' => env('MAX_API_BASE', 'https://platform-api2.max.ru'),
         // Корневой сертификат Минцифры: им подписаны сервера MAX. Доверие — только в запросах к MAX.

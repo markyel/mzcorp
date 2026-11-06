@@ -145,7 +145,7 @@ class MediaPublisherService
                 return ['ok' => true, 'message' => 'ВК отвечает: '.$name.'. '.$this->vkPhotoStatus($channel, $groupId)];
             }
 
-            $r = Http::timeout(self::TIMEOUT)
+            $r = Http::timeout(self::TIMEOUT)->withOptions(\App\Support\TelegramHttp::options())
                 ->get('https://api.telegram.org/bot'.$channel->secret('bot_token').'/getChat', [
                     'chat_id' => $channel->secret('chat_id'),
                 ])->json();
@@ -840,7 +840,7 @@ class MediaPublisherService
             if ($images !== []) {
                 $fits = mb_strlen($html ? strip_tags($text) : $text) <= 1024;
                 $media = [];
-                $request = $this->retryConnect(Http::timeout(self::TIMEOUT * 3));
+                $request = $this->retryConnect(Http::timeout(self::TIMEOUT * 3)->withOptions(\App\Support\TelegramHttp::options()));
 
                 // Картинки грузим файлами, а не ссылками. По ссылке Telegram
                 // качает их сам со своей стороны и на седьмой картинке ответил
@@ -883,7 +883,7 @@ class MediaPublisherService
                 }
             }
 
-            $r = $this->retryConnect(Http::timeout(self::TIMEOUT))
+            $r = $this->retryConnect(Http::timeout(self::TIMEOUT)->withOptions(\App\Support\TelegramHttp::options()))
                 ->post($api.'sendMessage', array_filter([
                     'chat_id' => $chatId,
                     'text' => mb_substr($text, 0, 4096),
