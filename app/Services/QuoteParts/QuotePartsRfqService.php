@@ -248,11 +248,8 @@ class QuotePartsRfqService
         if ($keys->isEmpty()) {
             return collect();
         }
-        $orgIds = $keys->filter(fn ($k) => str_starts_with($k, 'org:'))->map(fn ($k) => (int) substr($k, 4));
-        $supIds = $keys->filter(fn ($k) => str_starts_with($k, 'sup:'))->map(fn ($k) => (int) substr($k, 4));
 
-        return \App\Models\SupplierOrganization::query()->whereIn('id', $orgIds)->pluck('name', 'id')->mapWithKeys(fn ($n, $id) => ['org:'.$id => $n])
-            ->merge(Supplier::query()->whereIn('id', $supIds)->get(['id', 'name', 'email'])->mapWithKeys(fn ($s) => ['sup:'.$s->id => $s->name ?: $s->email]));
+        return app(\App\Services\Supplier\SupplierKeys::class)->names($keys);
     }
 
     /**
@@ -300,19 +297,11 @@ class QuotePartsRfqService
     public function supplierLanguages(iterable $keys): array
     {
         $keys = collect($keys)->filter()->unique()->values();
-        $orgIds = $keys->filter(fn ($k) => str_starts_with($k, 'org:'))->map(fn ($k) => (int) substr($k, 4));
-        $supIds = $keys->filter(fn ($k) => str_starts_with($k, 'sup:'))->map(fn ($k) => (int) substr($k, 4));
-
-        $rows = Supplier::query()
-            ->where(fn ($q) => $q->whereIn('supplier_organization_id', $orgIds)->orWhereIn('id', $supIds))
-            ->get(['id', 'supplier_organization_id', 'language']);
+        $resolver = app(\App\Services\Supplier\SupplierKeys::class);
 
         $out = [];
         foreach ($keys as $key) {
-            $mine = str_starts_with($key, 'org:')
-                ? $rows->where('supplier_organization_id', (int) substr($key, 4))
-                : $rows->where('id', (int) substr($key, 4));
-            $out[$key] = $mine->contains('language', 'en') ? 'en' : 'ru';
+            $out[$key] = $resolver->suppliers((string) $key)->contains('language', 'en') ? 'en' : 'ru';
         }
 
         return $out;

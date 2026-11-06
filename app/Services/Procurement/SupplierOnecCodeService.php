@@ -89,7 +89,15 @@ class SupplierOnecCodeService
     {
         $out = [];
         $manual = SupplierOnecCode::query()->whereIn('supplier_key', $keys)->with('counterparty')->get()->keyBy('supplier_key');
+        $resolver = app(\App\Services\Supplier\SupplierKeys::class);
         foreach ($keys as $key) {
+            // Код 1С — у самого поставщика (организации), с 06.11.2026 это его постоянный ключ.
+            $org = $resolver->organization($key);
+            if ($org?->onec_code) {
+                $out[$key] = ['code' => $org->onec_code, 'name' => (string) ($org->onec_name ?: $org->name), 'by' => 'supplier'];
+
+                continue;
+            }
             if ($m = $manual->get($key)) {
                 $out[$key] = ['code' => $m->code, 'name' => (string) ($m->counterparty?->name ?? $m->code), 'by' => 'manual'];
 
@@ -159,14 +167,12 @@ class SupplierOnecCodeService
     /** Названия поставщика в нашем справочнике: организация и её адреса / сам поставщик. */
     public function registryNames(string $key): array
     {
-        [$kind, $id] = array_pad(explode(':', $key, 2), 2, '');
+        $resolver = app(\App\Services\Supplier\SupplierKeys::class);
 
-        return array_values(array_unique(array_filter(match ($kind) {
-            'org' => [SupplierOrganization::query()->whereKey((int) $id)->value('name'),
-                ...Supplier::query()->where('supplier_organization_id', (int) $id)->pluck('name')->all()],
-            'sup' => [Supplier::query()->whereKey((int) $id)->value('name')],
-            default => [],
-        })));
+        return array_values(array_unique(array_filter([
+            $resolver->organization($key)?->name,
+            ...$resolver->suppliers($key)->pluck('name')->all(),
+        ])));
     }
 
     /** Код по названию (поставщик не из справочника, напр. адрес письма без привязки) — только однозначный. */

@@ -180,6 +180,52 @@ class QuotePartsClient
      * @param  array{dispatch_mode:string, contacts: list<array{email:string, name:?string, topics:list<string>, position:int}>}  $payload
      * @return array<string, mixed> the link as QuoteParts returns it
      */
+    /**
+     * Профиль, условия, карточка компании и сам ключ поставщика (временный «mz:{id}» → код 1С).
+     * QuoteParts — место хранения поставщиков, mzcorp правит их через API (06.11.2026).
+     *
+     * @param  array<string, mixed>  $payload  external_id, company_name, country, locale, terms{}, profile{}
+     */
+    public function updateSupplier(string $key, array $payload): array
+    {
+        $response = $this->http()->patch('/api/v1/supplier-links/'.rawurlencode($key), $payload);
+
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял изменения поставщика.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts supplier: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /** Матрица ассортимента поставщика (наши категории и веса); null — очистить. */
+    public function setSupplierMatrix(string $key, ?array $matrix): array
+    {
+        $response = $this->http()->put('/api/v1/supplier-links/'.rawurlencode($key).'/matrix', ['matrix' => $matrix]);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts matrix: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
+     * Все поставщики (или изменённые с момента) — профиль, условия, матрица, контакты с телефонами.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function allSupplierLinks(?string $updatedSince = null): array
+    {
+        $response = $this->http()->get('/api/v1/supplier-links', array_filter(['updated_since' => $updatedSince]));
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts links: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return (array) $response->json('links', []);
+    }
+
     public function setContacts(string $key, array $payload): array
     {
         $response = $this->http()->put('/api/v1/supplier-links/'.rawurlencode($key).'/contacts', $payload);

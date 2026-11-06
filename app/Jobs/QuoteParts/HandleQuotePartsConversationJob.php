@@ -47,13 +47,6 @@ class HandleQuotePartsConversationJob implements ShouldQueue
 
     private function supplierOf(string $key): ?Supplier
     {
-        if (str_starts_with($key, 'org:')) {
-            return Supplier::query()->where('supplier_organization_id', (int) substr($key, 4))->orderBy('id')->first();
-        }
-        if (str_starts_with($key, 'sup:')) {
-            return Supplier::query()->find((int) substr($key, 4));
-        }
-
-        return null;
+        return app(\App\Services\Supplier\SupplierKeys::class)->suppliers($key)->first();
     }
 }

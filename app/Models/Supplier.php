@@ -87,7 +87,10 @@ class Supplier extends Model
      */
     public function quotepartsKey(): string
     {
-        return $this->supplier_organization_id ? 'org:'.$this->supplier_organization_id : 'sup:'.$this->id;
+        // Постоянный ключ организации (код 1С или «mz:{id}»); прежняя схема — пока ключ не проставлен.
+        $key = $this->supplier_organization_id ? $this->organization?->qp_key : null;
+
+        return $key ?: ($this->supplier_organization_id ? 'org:'.$this->supplier_organization_id : 'sup:'.$this->id);
     }
 
     /**

@@ -400,20 +400,23 @@ class PriceExportService
     public function names1c(array $keys): array
     {
         $out = [];
+        $resolver = app(\App\Services\Supplier\SupplierKeys::class);
         foreach ($keys as $key) {
-            [$kind, $id] = array_pad(explode(':', $key, 2), 2, '');
-            $supplierIds = match ($kind) {
-                'org' => Supplier::query()->where('supplier_organization_id', (int) $id)->pluck('id')->all(),
-                'sup' => [(int) $id],
-                default => [],
-            };
+            if (str_starts_with($key, 'email:')) {
+                $out[$key] = substr($key, 6);
+
+                continue;
+            }
+            $org = $resolver->organization($key);
+            if ($org?->onec_name) {
+                $out[$key] = $org->onec_name;
+
+                continue;
+            }
+            $supplierIds = $resolver->suppliers($key)->pluck('id')->all();
             $name = $supplierIds === [] ? null : DB::table('catalog_supplier_prices')->whereIn('supplier_id', $supplierIds)
                 ->selectRaw('supplier_name_1c, count(*) c')->groupBy('supplier_name_1c')->orderByDesc('c')->value('supplier_name_1c');
-            $name ??= match ($kind) {
-                'org' => SupplierOrganization::query()->whereKey((int) $id)->value('name'),
-                'sup' => Supplier::query()->whereKey((int) $id)->value('name') ?: Supplier::query()->whereKey((int) $id)->value('email'),
-                default => $id,
-            };
+            $name ??= $resolver->names([$key])->get($key);
             if ($name) {
                 $out[$key] = $name;
             }
