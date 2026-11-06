@@ -80,3 +80,6 @@
 - [Пресс-релизы](reference_press_releases.md) — медиаплан → «Пресс-релизы»: база СМИ, рассылка по одному письму, ответы редакций не заявки (PressReplyHandler)
 - [Аутсорс-задачи](reference_marketing_assignments.md) — маркетинг → «Аутсорс-задачи»: инструкция+файлы → ZIP/PDF для исполнителей без MyLift
 - [myrope.ru](project_myrope_site.md) — записка владельцу: канаты на отдельный домен; канаты и ремни НЕ смешивать
+- [Telegram заблокирован с Reg.ru — обход через mzhk](telegram-blocked-route-via-mzhk.md) — исходящие tg-tunnel SOCKS, вебхук через quoteparts.net/relay, очередь bot
+- [Поставщики переезжают в QuoteParts — решения](suppliers-move-to-quoteparts-decisions.md) — источник QP, правка в mzCorp через API, ключ = код 1С, матрица и телефон в QP, претенденты вручную
+- [Ввод секретов через ssh cat >](secret-entry-check-terminal-free.md) — проверять, что прошлая команда ввода завершилась; PowerShell: Ctrl+Z, Enter
