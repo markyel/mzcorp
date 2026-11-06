@@ -105,6 +105,8 @@ return [
             // Нижняя граница лимита ответа в резерве: рассуждающие модели Reg.cloud тратят часть лимита
             // на скрытое рассуждение, при малом лимите ответ пустой (Reg.cloud: безопасный минимум 1500).
             'min_max_tokens' => (int) env('OPENAI_FALLBACK_MIN_MAX_TOKENS', 1000),
+            // Сколько картинок резерв принимает в одном запросе (Reg.cloud — 1); больше — шлём по одной.
+            'max_images' => (int) env('OPENAI_FALLBACK_MAX_IMAGES', 1),
         ],
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
         'mail_classifier_model' => env('OPENAI_MAIL_CLASSIFIER_MODEL', 'gpt-4o-mini'),

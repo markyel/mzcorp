@@ -121,6 +121,20 @@ class OpenAIFallbackGateway
             Log::error('OpenAI primary unavailable — requests go through the fallback gateway', ['why' => mb_substr($why, 0, 300)]);
         }
 
+        // Резерв принимает не больше N картинок в запросе (Reg.cloud — одну: «Too many images: at most
+        // 1 image(s) per request», скан PDF на 10 позиций не разбирался вовсе). Шлём по картинке с тем же
+        // текстом и складываем ответы (mergeJsonAnswers).
+        $maxImages = max(1, (int) config('services.openai.fallback.max_images', 1));
+        if ($path === '/v1/chat/completions' && self::imageCount($payload) > $maxImages) {
+            return $this->postImagesOneByOne($payload, $timeout);
+        }
+
+        return $this->send($path, $payload, $timeout);
+    }
+
+    /** @param  array<string, mixed>  $payload */
+    private function send(string $path, array $payload, int $timeout): Response
+    {
         return Http::withHeaders([
             'Authorization' => 'Bearer '.config('services.openai.fallback.api_key'),
             'Content-Type' => 'application/json',
@@ -128,5 +142,100 @@ class OpenAIFallbackGateway
             ->retry(2, fn (int $attempt) => 2000 * $attempt, fn ($e) => $e instanceof \Illuminate\Http\Client\RequestException
                 && in_array($e->response?->status(), [429, 500, 502, 503], true), throw: false)
             ->post(rtrim((string) config('services.openai.fallback.base_url'), '/').$path, $payload);
+    }
+
+    /** Больше картинок за один разбор не шлём: лимит площадки — 20 запросов в минуту на аккаунт. */
+    private const MAX_IMAGE_REQUESTS = 10;
+
+    /** @param  array<string, mixed>  $payload */
+    public static function imageCount(array $payload): int
+    {
+        $n = 0;
+        foreach ((array) ($payload['messages'] ?? []) as $message) {
+            foreach (is_array($message['content'] ?? null) ? $message['content'] : [] as $part) {
+                $n += (($part['type'] ?? null) === 'image_url') ? 1 : 0;
+            }
+        }
+
+        return $n;
+    }
+
+    /**
+     * Запрос с несколькими картинками — несколькими запросами по одной (текст тот же), ответы
+     * складываются. Ответ — как от шлюза: первый успешный, с объединённым содержимым и расходом.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function postImagesOneByOne(array $payload, int $timeout): Response
+    {
+        $total = self::imageCount($payload);
+        $answers = [];
+        $first = null;
+        $usage = [];
+        for ($keep = 0; $keep < min($total, self::MAX_IMAGE_REQUESTS); $keep++) {
+            $one = $payload;
+            $seen = 0;
+            foreach ($one['messages'] as $m => $message) {
+                if (! is_array($message['content'] ?? null)) {
+                    continue;
+                }
+                $one['messages'][$m]['content'] = array_values(array_filter($message['content'], function ($part) use (&$seen, $keep) {
+                    if (($part['type'] ?? null) !== 'image_url') {
+                        return true;
+                    }
+
+                    return $seen++ === $keep;
+                }));
+            }
+            $response = $this->send('/v1/chat/completions', $one, $timeout);
+            if (! $response->successful()) {
+                Log::warning('OpenAI fallback: image request failed', ['image' => $keep + 1, 'of' => $total, 'status' => $response->status()]);
+
+                continue;
+            }
+            $data = (array) $response->json();
+            $first ??= $data;
+            $answers[] = (string) data_get($data, 'choices.0.message.content', '');
+            foreach ((array) ($data['usage'] ?? []) as $k => $v) {
+                $usage[$k] = is_numeric($v) ? ($usage[$k] ?? 0) + $v : $v;
+            }
+        }
+        if ($total > self::MAX_IMAGE_REQUESTS) {
+            Log::warning('OpenAI fallback: too many images, the rest skipped', ['images' => $total, 'sent' => self::MAX_IMAGE_REQUESTS]);
+        }
+        if ($first === null) {
+            return $this->send('/v1/chat/completions', $payload, $timeout); // ни одной удачной — вернём честную ошибку площадки
+        }
+        data_set($first, 'choices.0.message.content', self::mergeJsonAnswers($answers));
+        $first['usage'] = $usage;
+
+        return new Response(new \GuzzleHttp\Psr7\Response(200, ['Content-Type' => 'application/json'], json_encode($first, JSON_UNESCAPED_UNICODE)));
+    }
+
+    /**
+     * Ответы по отдельным картинкам — в один: если все JSON-объекты, списки под одинаковыми ключами
+     * объединяются («items» с каждой картинки), прочие поля — из первого ответа, где они есть;
+     * иначе тексты через пустую строку.
+     *
+     * @param  list<string>  $answers
+     */
+    public static function mergeJsonAnswers(array $answers): string
+    {
+        $decoded = array_map(fn ($a) => json_decode(trim(preg_replace('/^```(?:json)?|```$/m', '', $a)), true), $answers);
+        if ($decoded === [] || in_array(null, array_map(fn ($d) => is_array($d) && ! array_is_list($d) ? $d : null, $decoded), true)) {
+            return implode("\n\n", array_filter(array_map('trim', $answers)));
+        }
+        $merged = [];
+        foreach ($decoded as $d) {
+            foreach ($d as $key => $value) {
+                if (! array_key_exists($key, $merged)) {
+                    $merged[$key] = $value;
+                } elseif (is_array($merged[$key]) && array_is_list($merged[$key]) && is_array($value) && array_is_list($value)) {
+                    $merged[$key] = array_merge($merged[$key], $value);
+                }
+            }
+        }
+
+        return json_encode($merged, JSON_UNESCAPED_UNICODE);
     }
 }
