@@ -154,7 +154,7 @@
                     <button type="button" wire:click="addSupplier" class="btn btn-sm btn-primary shrink-0">Добавить</button>
                     @error('newEmail') <div class="w-full text-[11px] text-red-600">{{ $message }}</div> @enderror
                 </div>
-                <div class="text-[11.5px] text-fg-3 mt-1.5">Наше исходящее письмо получателю из реестра + подтверждение LLM «это запрос расценки» → тред регистрируется автоматически, ответы поставщика не создают заявок.</div>
+                <div class="text-[11.5px] text-fg-3 mt-1.5">Поставщик с адресом сразу заводится в QuoteParts (без писем). Новые адреса из переписки с поставщиками появляются ниже претендентами — их подтверждает человек.</div>
             </div>
             {{-- Группы поставщиков: фильтр реестра и быстрый выбор в запросах цены. --}}
             <div class="px-4 pb-3">
@@ -182,6 +182,31 @@
                 @error('newGroupName') <div class="text-[11px] text-red-600 mt-1">{{ $message }}</div> @enderror
                 <div class="text-[11px] text-fg-4 mt-1">Группу выбирают целиком при запросе цены — в заявке (вкладка «Поставщики») и в «Снабжении». Состав группы правится в колонке «Группы» ниже.</div>
             </div>
+            {{-- Претенденты: новые адреса из переписки с поставщиками ждут решения человека. --}}
+            @if($this->candidates->isNotEmpty())
+                <div class="px-4 pb-3">
+                    <div class="border border-border rounded-md" style="max-width:1000px">
+                        <div class="px-3 py-2 text-[12.5px] font-semibold border-b border-border">Претенденты в контакты поставщиков · {{ $this->candidates->count() }}</div>
+                        @foreach($this->candidates as $c)
+                            <div wire:key="cand-{{ $c->id }}" class="px-3 py-2 border-b border-border-subtle flex flex-wrap items-center gap-2 text-[12.5px]">
+                                <span class="mono">{{ $c->email }}</span>
+                                @if($c->name)<span class="text-fg-2">{{ $c->name }}</span>@endif
+                                <span class="text-fg-4">{{ \App\Models\SupplierContactCandidate::SOURCES[$c->source] ?? $c->source }}{{ $c->context ? ' · '.mb_strimwidth($c->context, 0, 60, '…') : '' }}</span>
+                                <span class="ml-auto inline-flex flex-wrap items-center gap-1">
+                                    @if($c->suggestedOrganization)
+                                        <button type="button" wire:click="acceptCandidate({{ $c->id }}, {{ $c->suggestedOrganization->id }})" class="btn btn-xs btn-primary">к «{{ mb_strimwidth($c->suggestedOrganization->name, 0, 30, '…') }}»</button>
+                                    @endif
+                                    <input type="text" wire:model="candidateTarget.{{ $c->id }}" wire:keydown.enter="acceptCandidate({{ $c->id }})" placeholder="код 1С или название"
+                                           class="h-[26px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500" style="width:170px">
+                                    <button type="button" wire:click="acceptCandidate({{ $c->id }})" class="btn btn-xs">к поставщику</button>
+                                    <button type="button" wire:click="acceptCandidate({{ $c->id }}, null, true)" class="btn btn-xs">новый поставщик</button>
+                                    <button type="button" wire:click="rejectCandidate({{ $c->id }})" class="btn btn-xs text-fg-3">не поставщик</button>
+                                </span>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
             {{-- Поставщики — организации, копия QuoteParts (переезд поставщиков, 06.11.2026). Карточка —
                  профиль, условия, код 1С, контакты по темам; объединение — в карточке. --}}
             @php

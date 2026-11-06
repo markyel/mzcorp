@@ -186,7 +186,7 @@ class CloseLostDialog extends Component
                         'Поставщик из заявки '.$req->internal_code,
                         \App\Enums\BlocklistKind::Supplier,
                     );
-                    $supplierRegistry->registerEmail($supplierBlockEmail, $req->emailMessage?->from_name, auth()->user());
+                    $supplierRegistry->registerEmail($supplierBlockEmail, $req->emailMessage?->from_name, auth()->user(), 'close_lost', 'заявка '.$req->internal_code);
                     session()->flash('status', 'Закрыто как переписка с поставщиком; ящик занесён в стоп-лист (поставщик) — его письма больше не создают заявок, но читаются.');
                 } else {
                     session()->flash('status', 'Закрыто как переписка с поставщиком (помечен только этот тред).');

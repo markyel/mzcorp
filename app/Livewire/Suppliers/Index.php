@@ -421,6 +421,47 @@ class Index extends Component
         return $q->orderByRaw('lower(name)')->paginate(40);
     }
 
+    /** Претенденты в контакты поставщиков — адреса из переписки, ждущие решения человека. */
+    #[Computed]
+    public function candidates()
+    {
+        return \App\Models\SupplierContactCandidate::query()->where('status', \App\Models\SupplierContactCandidate::PENDING)
+            ->with('suggestedOrganization:id,name')->orderByDesc('id')->limit(50)->get();
+    }
+
+    /** @var array<int, string> претендент → код 1С или название поставщика, к которому добавить */
+    public array $candidateTarget = [];
+
+    public function acceptCandidate(int $id, ?int $orgId = null, bool $asNew = false): void
+    {
+        $candidate = \App\Models\SupplierContactCandidate::query()->findOrFail($id);
+        if (! $asNew && $orgId === null) {
+            $q = trim((string) ($this->candidateTarget[$id] ?? ''));
+            $orgs = $q === '' ? collect() : \App\Models\SupplierOrganization::query()
+                ->where(fn ($w) => $w->where('onec_code', $q)->orWhere('qp_key', $q)->orWhere('name', 'ilike', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $q).'%'))
+                ->limit(2)->get(['id', 'name']);
+            if ($orgs->count() !== 1) {
+                $this->dispatch('toast', message: $orgs->isEmpty() ? 'Поставщик не найден — укажите код 1С или точнее название.' : 'Под это подходят несколько поставщиков — уточните.', type: 'error');
+
+                return;
+            }
+            $orgId = (int) $orgs->first()->id;
+        }
+        try {
+            $org = app(\App\Services\Supplier\SupplierRegistry::class)->decide($candidate, $asNew ? null : $orgId, auth()->user());
+            $this->dispatch('toast', message: $candidate->email.' — контакт поставщика «'.$org?->name.'».', type: 'success');
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', message: 'Не удалось: '.$e->getMessage(), type: 'error');
+        }
+        unset($this->candidates, $this->organizations);
+    }
+
+    public function rejectCandidate(int $id): void
+    {
+        app(\App\Services\Supplier\SupplierRegistry::class)->decide(\App\Models\SupplierContactCandidate::query()->findOrFail($id), null, auth()->user(), reject: true);
+        unset($this->candidates);
+    }
+
     /** @return array<int, list<string>> организация → группы */
     #[Computed]
     public function organizationGroups(): array

@@ -101,7 +101,7 @@ class SupplierInquiryService
                 ]);
             }
             $this->attachMessage($inquiry, $sent);
-            $this->registry->registerEmail($supplierEmail, $supplierName, $by);
+            $this->registry->registerEmail($supplierEmail, $supplierName, $by, 'outbound_rfq', $sent->subject);
 
             return $inquiry;
         });
@@ -170,7 +170,7 @@ class SupplierInquiryService
             // Bootstrap реестра: помеченный вручную поставщик попадает в список,
             // чтобы его будущие исходящие RFQ ловились send-time автоматически.
             if ($supplierEmail !== '') {
-                $this->registry->registerEmail($supplierEmail, $supplierName, $by);
+                $this->registry->registerEmail($supplierEmail, $supplierName, $by, 'marked_thread');
             }
 
             return $inquiry;
