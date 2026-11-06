@@ -101,10 +101,11 @@ class QuotePartsPanel extends Component
         }
         $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $term).'%';
 
-        return Supplier::query()->whereNotNull('email')
-            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like))
+        return Supplier::query()->whereNotNull('email')->with('organization:id,name')
+            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like)
+                ->orWhereHas('organization', fn ($o) => $o->where('name', 'ilike', $like)))
             ->whereNull('quoteparts_link_id')->whereNotIn('id', $this->extraSupplierIds)
-            ->orderBy('name')->limit(12)->get(['id', 'name', 'email']);
+            ->orderBy('name')->limit(12)->get(['id', 'name', 'email', 'supplier_organization_id']);
     }
 
     public function addSupplier(int $id): void

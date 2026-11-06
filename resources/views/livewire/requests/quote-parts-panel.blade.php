@@ -53,7 +53,7 @@
                                     @foreach($this->foundSuppliers as $f)
                                         <button type="button" wire:key="qpf-{{ $f->id }}" wire:click="addSupplier({{ $f->id }})"
                                                 class="block w-full text-left px-2 py-1 text-[13px] hover:bg-surface-2">
-                                            {{ $f->name ?: $f->email }} <span class="text-fg-4">{{ $f->email }}</span>
+                                            {{ $f->name ?: ($f->organization?->name ?: $f->email) }} <span class="text-fg-4">{{ $f->email }}</span>
                                         </button>
                                     @endforeach
                                 </div>

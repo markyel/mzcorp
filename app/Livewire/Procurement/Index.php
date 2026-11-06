@@ -1002,9 +1002,11 @@ class Index extends Component
         $existing = collect($this->supplierOptions())->pluck('id')->all();
 
         return Supplier::query()
-            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like))
+            ->with('organization:id,name')
+            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like)
+                ->orWhereHas('organization', fn ($o) => $o->where('name', 'ilike', $like)))
             ->whereNotIn('id', $existing ?: [0])
-            ->orderBy('name')->limit(8)->get(['id', 'name', 'email']);
+            ->orderBy('name')->limit(8)->get(['id', 'name', 'email', 'supplier_organization_id']);
     }
 
     public function addSupplier(int $supplierId): void

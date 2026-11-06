@@ -864,10 +864,13 @@ class SupplierDispatchPanel extends Component
         $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
         $existing = collect($this->supplierOptions())->pluck('id')->all();
 
+        // Название часто есть только у организации («BUENO» на двух адресах без своего имени).
         return Supplier::query()
-            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like))
+            ->with('organization:id,name')
+            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like)
+                ->orWhereHas('organization', fn ($o) => $o->where('name', 'ilike', $like)))
             ->whereNotIn('id', $existing ?: [0])
-            ->orderBy('name')->limit(8)->get(['id', 'name', 'email']);
+            ->orderBy('name')->limit(8)->get(['id', 'name', 'email', 'supplier_organization_id']);
     }
 
     /** Развернуть / свернуть карточку товара с историей поставщиков. */
