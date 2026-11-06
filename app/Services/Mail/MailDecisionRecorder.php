@@ -43,6 +43,7 @@ class MailDecisionRecorder
         'post_sale_unlinked' => ['none', 'Постпродажа без надёжной привязки к заказу — оставлено во входящих'],
         'thread_spin_off' => ['created', 'Новая заявка в старом треде (интент клиента)'],
         'thread_reply' => ['linked', 'Ответ клиента в тред существующей заявки'],
+        'supplier_in_client_thread' => ['supplier', 'Ответ поставщика в треде клиентской заявки — во вкладку «Поставщики»'],
         'request_created' => ['created', 'Создана новая заявка'],
         'request_existing' => ['linked', 'Заявка по письму уже была'],
         'request_rejected' => ['none', 'Процессор заявку не создал (пустое письмо / поставщик / стоп-лист)'],

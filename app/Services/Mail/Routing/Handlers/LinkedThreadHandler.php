@@ -4,6 +4,8 @@ namespace App\Services\Mail\Routing\Handlers;
 
 use App\Enums\ClientNotificationType;
 use App\Enums\DetectorType;
+use App\Enums\EmailCategory;
+use App\Enums\MailDirection;
 use App\Enums\MailboxType;
 use App\Enums\RequestStatus;
 use App\Jobs\Mail\DeliverToManagerInboxJob;
@@ -88,6 +90,25 @@ final class LinkedThreadHandler implements InboundRoutingHandler
         $linkedRequest = $ctx->linkedRequest;
         if ($linkedRequest === null) {
             return null;
+        }
+
+        // Ответ поставщика в треде клиентской заявки: менеджер слал запрос цены из почтовой программы
+        // в цепочке письма клиента (поставщики в скрытой копии), запроса поставщику в системе нет —
+        // SupplierReplyHandler его не узнал. Отправитель — адрес из справочника поставщиков, не клиент
+        // заявки и не контакт клиентов: письмо остаётся при заявке, но во вкладке «Поставщики»
+        // (category=supplier_reply), без статуса, разбора позиций и переподчинения. Кейс MZ2026-00452.
+        if ($this->isSupplierInClientThread($message, $linkedRequest)) {
+            $message->forceFill([
+                'category' => EmailCategory::SupplierReply->value,
+                'categorized_at' => now(),
+            ])->save();
+            Log::info('MailRouter: supplier reply in a client request thread — supplier tab', [
+                'email_message_id' => $message->id,
+                'request_id' => $linkedRequest->id,
+                'from_email' => $message->from_email,
+            ]);
+
+            return new RoutingDecision('supplier_in_client_thread', $linkedRequest->id);
         }
 
         // Жёсткое правило sticky direct_mailbox для reply'ев (Foundation §1.5):
@@ -359,6 +380,34 @@ final class LinkedThreadHandler implements InboundRoutingHandler
      * клиента. Гарды: origin mailbox — Personal; owner существует, не archived,
      * не в долгом unavailable; текущий assigned_user_id !== owner_user_id.
      */
+    /**
+     * Отправитель — адрес из справочника поставщиков, не клиент заявки (тот же домен, на бесплатной
+     * почте — тот же адрес) и не контакт клиентов: у двойных адресов (дилер, «Метеор») письмо клиентское.
+     */
+    private function isSupplierInClientThread(EmailMessage $message, Request $request): bool
+    {
+        if ($message->direction !== MailDirection::Inbound) {
+            return false;
+        }
+        $from = mb_strtolower(trim((string) $message->from_email));
+        if ($from === '' || ! \App\Models\Supplier::query()->whereRaw('LOWER(email) = ?', [$from])->exists()) {
+            return false;
+        }
+        if (\App\Models\ClientContact::query()->whereRaw('LOWER(email) = ?', [$from])->exists()) {
+            return false;
+        }
+        $free = array_map('mb_strtolower', (array) config('services.mail.free_mail_domains', []));
+        $key = function (string $email) use ($free): string {
+            $email = mb_strtolower(trim($email));
+            $domain = (string) substr(strrchr($email, '@') ?: '', 1);
+
+            return in_array($domain, $free, true) ? $email : $domain;
+        };
+        $client = trim((string) $request->client_email);
+
+        return $client === '' || $key($from) !== $key($client);
+    }
+
     private function applyStickyDirectMailboxOnReply(EmailMessage $message, Request $request): void
     {
         $mailbox = $message->mailbox;
