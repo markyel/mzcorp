@@ -983,11 +983,14 @@ class SupplierDispatchPanel extends Component
                 array_values(array_filter($group['ids'], fn ($id) => ! empty($this->selectedSuppliers[$id]))),
                 array_map(fn ($o) => (int) $o['id'], array_filter($this->supplierOptions, fn ($o) => ! empty($o['matched']))),
             );
-            $pick = SupplierOrganizationService::onePerOrganization($group['ids'], $prefer);
-            foreach ($group['ids'] as $id) {
-                if (in_array($id, $pick, true)) {
-                    $this->selectedSuppliers[$id] = true;
-                }
+            // Поставщик — организация (06.11.2026): от неё — уже отмеченный адрес или представитель
+            // (первый контакт «Расценка»); остальные адреса — по кнопке «все адреса».
+            $rows = Supplier::query()->whereIn('id', $group['ids'])->whereNotNull('email')->get();
+            $pick = $rows->groupBy(fn ($s) => $s->supplier_organization_id ? 'o'.$s->supplier_organization_id : 's'.$s->id)
+                ->map(fn ($g) => $g->first(fn ($s) => in_array((int) $s->id, $prefer, true))?->id ?? SupplierMatchService::representatives($g)->first()?->id)
+                ->filter()->map(fn ($id) => (int) $id)->values()->all();
+            foreach ($pick as $id) {
+                $this->selectedSuppliers[$id] = true;
                 if (! in_array($id, $this->addedSupplierIds, true)) {
                     $this->addedSupplierIds[] = $id;
                 }
@@ -997,6 +1000,39 @@ class SupplierDispatchPanel extends Component
         if (! $group['selected']) {
             $this->autoTranslateIfEnglish();
         }
+    }
+
+    /** Показать все адреса поставщика — чтобы отметить, кому именно отправить. */
+    public function showOrganizationAddresses(int $organizationId): void
+    {
+        foreach (Supplier::query()->where('supplier_organization_id', $organizationId)->whereNotNull('email')
+            ->orderByRaw('contact_position nulls last')->orderBy('id')->limit(30)->pluck('id') as $id) {
+            if (! in_array((int) $id, $this->addedSupplierIds, true)) {
+                $this->addedSupplierIds[] = (int) $id;
+            }
+        }
+        unset($this->supplierOptions);
+    }
+
+    /**
+     * Адреса, выбранные человеком: у поставщика отмечен не только представитель (или не он) —
+     * запрос уходит на отмеченные ящики. Отмечен один представитель — получателя выбирает QuoteParts.
+     *
+     * @param  list<int>  $supplierIds
+     * @return list<int>
+     */
+    private function explicitAddresses(array $supplierIds): array
+    {
+        $explicit = [];
+        foreach (Supplier::query()->whereIn('id', $supplierIds)->get(['id', 'supplier_organization_id'])
+            ->groupBy(fn ($s) => (int) $s->supplier_organization_id) as $orgId => $rows) {
+            $ids = $rows->pluck('id')->map(fn ($v) => (int) $v)->all();
+            if ($orgId === 0 || $ids !== [SupplierMatchService::representativeId($orgId)]) {
+                array_push($explicit, ...$ids);
+            }
+        }
+
+        return $explicit;
     }
 
     public function addSupplier(int $supplierId): void
@@ -1323,7 +1359,8 @@ class SupplierDispatchPanel extends Component
             }
         }
         try {
-            $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true, files: $files, notes: $notes, letters: $letters);
+            $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true, files: $files, notes: $notes, letters: $letters,
+                explicitSupplierIds: $this->explicitAddresses($supplierIds));
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('QuoteParts RFQ refused', ['request_id' => $req->id, 'offsystem' => $letters !== [], 'error' => $e->getMessage()]);
 

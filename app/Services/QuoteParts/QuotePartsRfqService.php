@@ -44,7 +44,12 @@ class QuotePartsRfqService
      * @param  bool  $automatic  автоматический перезапрос (мониторинг цен): ящик поставщика выбирает QuoteParts по его
      *                           режиму (главный / по очереди); иначе запрос уходит только на отмеченные адреса
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = [], array $letters = [], bool $automatic = false): QuotePartsRfq
+    /**
+     * @param  list<int>|null  $explicitSupplierIds  адреса, отмеченные человеком: только их ящики получают
+     *                                               запрос; остальным поставщикам получателя выбирает
+     *                                               QuoteParts (тема «Расценка»). null — все отмеченные адреса.
+     */
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = [], array $letters = [], bool $automatic = false, ?array $explicitSupplierIds = null): QuotePartsRfq
     {
         // routed — поставщики, принявшие приглашение, из обычной рассылки (QuotePartsRouting): у любого сотрудника.
         if ($routed ? ! QuotePartsRouting::enabled() : ! QuotePartsPilot::enabledFor($by)) {
@@ -86,7 +91,8 @@ class QuotePartsRfqService
             'suppliers' => $suppliers->all(),
             // Один запрос — один ящик (решение 26.10.2026): отмеченный менеджером адрес, напоминания — туда же.
             // Автоматический перезапрос адресов не передаёт — ящик выбирает режим поставщика в QuoteParts.
-            'addresses' => $automatic ? null : self::addresses($rows),
+            // С 06.11.2026 по умолчанию получателя выбирает QuoteParts: адреса — только отмеченные вручную.
+            'addresses' => $automatic ? null : (self::addresses($explicitSupplierIds === null ? $rows : $rows->whereIn('id', $explicitSupplierIds)) ?: null),
             'reply_by' => $replyBy,
             'message' => $message ?: null,
             'external_ref' => $request?->internal_code,

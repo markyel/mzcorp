@@ -53,7 +53,7 @@ class SupplierMatchService
             ->whereNotNull('assortment_matrix')
             ->get()
             ->filter(fn (Supplier $s) => $this->matches($s, $brand, $categoryTerms, false))
-            ->values();
+            ->pipe(fn (Collection $c) => self::representatives($c));
     }
 
     public function relevantSuppliers(RequestItem $item): Collection
@@ -73,7 +73,32 @@ class SupplierMatchService
             ->whereNotNull('assortment_matrix')
             ->get()
             ->filter(fn (Supplier $s) => $this->matches($s, $brand, $categoryTerms, $brandCanonical))
+            ->pipe(fn (Collection $c) => self::representatives($c));
+    }
+
+    /**
+     * Один адрес на поставщика (организацию): матрица у поставщика общая и лежит на всех его
+     * адресах, а запрос уходит поставщику. Представитель — первый контакт с темой «Расценка» по
+     * порядку, т. е. тот, кому QuoteParts и так отправит запрос (режим «основной контакт»).
+     *
+     * @param  Collection<int, Supplier>  $suppliers
+     * @return Collection<int, Supplier>
+     */
+    public static function representatives(Collection $suppliers): Collection
+    {
+        return $suppliers->groupBy(fn (Supplier $s) => $s->supplier_organization_id ? 'o'.$s->supplier_organization_id : 's'.$s->id)
+            ->map(fn (Collection $g) => $g->sortBy(fn (Supplier $s) => [
+                in_array('quoting', (array) ($s->contact_topics ?: []), true) ? 0 : 1,
+                $s->contact_position ?? 999,
+                $s->id,
+            ])->first())
             ->values();
+    }
+
+    /** Представитель поставщика по организации (см. representatives). */
+    public static function representativeId(int $organizationId): ?int
+    {
+        return self::representatives(Supplier::query()->where('supplier_organization_id', $organizationId)->whereNotNull('email')->get())->first()?->id;
     }
 
     /**

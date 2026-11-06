@@ -284,7 +284,15 @@ class Index extends Component
             $quantities[$cid] = $q > 0 ? $q : 1.0;
         }
         try {
-            $rfq = app(QuotePartsRfqService::class)->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), [], routed: true, files: $files, letters: $letters);
+            // Отмечен один представитель поставщика — получателя выбирает QuoteParts; иначе — отмеченные адреса.
+            $explicit = [];
+            foreach (Supplier::query()->whereIn('id', $supplierIds)->get(['id', 'supplier_organization_id'])->groupBy(fn ($s) => (int) $s->supplier_organization_id) as $orgId => $g) {
+                $ids = $g->pluck('id')->map(fn ($v) => (int) $v)->all();
+                if ($orgId === 0 || $ids !== [\App\Services\Supplier\SupplierMatchService::representativeId($orgId)]) {
+                    array_push($explicit, ...$ids);
+                }
+            }
+            $rfq = app(QuotePartsRfqService::class)->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), [], routed: true, files: $files, letters: $letters, explicitSupplierIds: $explicit);
         } catch (Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('QuoteParts RFQ refused', ['procurement' => true, 'offsystem' => $letters !== [], 'error' => $e->getMessage()]);
 
@@ -914,11 +922,14 @@ class Index extends Component
                 array_values(array_filter($group['ids'], fn ($id) => ! empty($this->selectedSuppliers[$id]))),
                 array_map(fn ($o) => (int) $o['id'], array_filter($this->supplierOptions, fn ($o) => ! empty($o['matched']))),
             );
-            $pick = SupplierOrganizationService::onePerOrganization($group['ids'], $prefer);
-            foreach ($group['ids'] as $id) {
-                if (in_array($id, $pick, true)) {
-                    $this->selectedSuppliers[$id] = true;
-                }
+            // Поставщик — организация (06.11.2026): от неё — уже отмеченный адрес или представитель
+            // (первый контакт «Расценка»), получателя выберет QuoteParts.
+            $rows = Supplier::query()->whereIn('id', $group['ids'])->whereNotNull('email')->get();
+            $pick = $rows->groupBy(fn ($s) => $s->supplier_organization_id ? 'o'.$s->supplier_organization_id : 's'.$s->id)
+                ->map(fn ($g) => $g->first(fn ($s) => in_array((int) $s->id, $prefer, true))?->id ?? \App\Services\Supplier\SupplierMatchService::representatives($g)->first()?->id)
+                ->filter()->map(fn ($id) => (int) $id)->values()->all();
+            foreach ($pick as $id) {
+                $this->selectedSuppliers[$id] = true;
                 if (! in_array($id, $this->addedSupplierIds, true)) {
                     $this->addedSupplierIds[] = $id;
                 }

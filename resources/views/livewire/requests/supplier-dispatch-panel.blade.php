@@ -172,9 +172,11 @@
                             @php $orgIds = array_column(array_filter($orgOpts, fn ($x) => $x['org_id'] === $o['org_id']), 'id'); $orgAll = $orgIds !== [] && collect($orgIds)->every(fn ($sid) => ! empty($selectedSuppliers[$sid])); @endphp
                             <div wire:key="sup-org-{{ $o['org_id'] }}" class="flex items-center gap-2 px-3 py-1.5 bg-surface-2">
                                 <span class="text-[12.5px] font-semibold text-fg-1">🏢 {{ $o['org_name'] }}</span>
-                                <span class="text-[11px] text-fg-3">адресов в списке: {{ $o['org_size'] }}</span>
-                                <button type="button" wire:click="toggleOrganizationSuppliers({{ $o['org_id'] }})" class="btn btn-xs ml-auto"
-                                        title="Отметить или снять все адреса организации — письмо уйдёт на каждый">{{ $orgAll ? 'снять всех' : 'выбрать всех' }}</button>
+                                <span class="text-[11px] text-fg-3" title="Отмечен один адрес — кому именно отправить, выберет QuoteParts (первый контакт «Расценка»). Отмечено несколько или другой — запрос уйдёт на отмеченные.">адресов в списке: {{ $o['org_size'] }}</span>
+                                <button type="button" wire:click="showOrganizationAddresses({{ $o['org_id'] }})" class="btn btn-xs ml-auto"
+                                        title="Показать все адреса поставщика, чтобы отметить, кому именно отправить">все адреса</button>
+                                <button type="button" wire:click="toggleOrganizationSuppliers({{ $o['org_id'] }})" class="btn btn-xs"
+                                        title="Отметить или снять все адреса в списке — запрос уйдёт на каждый">{{ $orgAll ? 'снять всех' : 'выбрать всех' }}</button>
                             </div>
                         @endif
                         @php $prevOrgOpt = $o['org_id']; @endphp
