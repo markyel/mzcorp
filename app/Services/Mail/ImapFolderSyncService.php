@@ -438,7 +438,29 @@ class ImapFolderSyncService
                 $done = 0;
                 $movedHere = 0;
                 foreach (array_chunk($todo, $chunk) as $part) {
-                    foreach ($this->fetchMessageIds($client, $part) as $uid => $mid) {
+                    // Яндекс рвёт соединение посреди прохода («empty response»), и все
+                    // следующие FETCH падают в мёртвое соединение: 06.11.2026 проход по
+                    // 96 тыс. писем «закончился» за 84 с, ничего не найдя. Порция без
+                    // единого Message-ID — признак сбоя: переподключаемся и повторяем.
+                    $mids = $this->fetchMessageIds($client, $part);
+                    for ($attempt = 1; $attempt <= 3 && array_filter($mids) === []; $attempt++) {
+                        sleep(5 * $attempt);
+                        try {
+                            $client->disconnect();
+                        } catch (\Throwable) {
+                        }
+                        try {
+                            $client = $this->connector->imapClient($mailbox);
+                            $conn = $client->getConnection();
+                            $client->openFolder($folder->imap_path, force_select: true);
+                            $mids = $this->fetchMessageIds($client, $part);
+                        } catch (\Throwable $e) {
+                            Log::warning('ImapFolderSyncService: backfill reconnect failed', [
+                                'mailbox_id' => $mailbox->id, 'folder' => $folder->imap_path, 'attempt' => $attempt, 'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
+                    foreach ($mids as $uid => $mid) {
                         $row = $mid !== null ? $this->findByMessageId($mailbox, $mid) : null;
                         if ($row && $this->rehome($row, $folder->imap_path, (int) $uid, $folder->id)) {
                             $movedHere++;
