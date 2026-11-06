@@ -159,6 +159,13 @@ class SupplierCcInboxService
     /** Уведомить ответственного менеджера письмом с rfq-ящика. */
     private function notifyManager(Request $request, EmailMessage $message): void
     {
+        // Автоматическое служебное письмо — под общим выключателем (MAIL_SYSTEM_NOTIFICATIONS),
+        // хотя уходит не через SystemNotificationMailer, а с самого rfq@.
+        if (! config('services.mail_outbound.system_notifications', true)) {
+            Log::info('SupplierCcInbox: manager notice switched off', ['request_id' => $request->id, 'email_message_id' => $message->id]);
+
+            return;
+        }
         $manager = $request->assignedUser;
         if ($manager === null || trim((string) $manager->email) === '') {
             Log::info('SupplierCcInbox: no assigned manager to notify', ['request_id' => $request->id]);
