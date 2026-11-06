@@ -38,7 +38,12 @@ class SuppliersQuotePartsRegisterCommand extends Command
             ->whereHas('suppliers', fn ($q) => $q->whereNotNull('email'))
             ->with(['suppliers' => fn ($q) => $q->whereNotNull('email')->orderByRaw("case when source = 'onec' then 1 else 0 end")->orderBy('id')])
             ->orderBy('id')->get()
-            ->reject(fn ($o) => $existing->has($o->qp_key));
+            // Заведённых не трогаем — кроме заведённых в переписке без части наших адресов
+            // (регистрация прошла, контакты — нет): их контакты доводим до наших.
+            ->reject(fn ($o) => $existing->has($o->qp_key) && (
+                ($existing[$o->qp_key]['status'] ?? null) !== 'mail'
+                || count($existing[$o->qp_key]['contacts'] ?? []) >= min(30, $o->suppliers->count())
+            ));
         if ((int) $this->option('limit') > 0) {
             $orgs = $orgs->take((int) $this->option('limit'));
         }
