@@ -109,6 +109,18 @@ class SupplierMirrorService
                     'quoteparts_status' => $link['status'] ?? null,
                     'quoteparts_agent' => (bool) ($link['is_agent'] ?? false),
                 ]);
+                // Матрица и описание ассортимента — у поставщика в QuoteParts; подбор под позицию
+                // (SupplierMatchService) читает их с адресов — раскладываем по всем.
+                if (array_key_exists('assortment_matrix', $link) && $link['assortment_matrix'] !== null) {
+                    Supplier::query()->where('supplier_organization_id', $org->id)->update([
+                        'assortment_matrix' => json_encode($link['assortment_matrix'], JSON_UNESCAPED_UNICODE),
+                        'matrix_built_at' => $link['matrix_updated_at'] ?? now(),
+                    ]);
+                }
+                $description = $link['profile']['assortment_description'] ?? null;
+                if ($description !== null) {
+                    Supplier::query()->where('supplier_organization_id', $org->id)->update(['assortment_description' => $description]);
+                }
             });
         } catch (Throwable $e) {
             Log::warning('QuoteParts mirror: supplier not applied', ['key' => $org->qp_key, 'error' => $e->getMessage()]);

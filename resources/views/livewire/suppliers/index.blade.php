@@ -14,12 +14,12 @@
                 @endforeach
             </div>
             <span class="flex-1"></span>
-            <span class="text-[11.5px] text-fg-3 mono">{{ $tab === 'registry' ? $this->suppliers->total() : ($tab === 'nomenclature' ? $this->positions->total() : $this->inquiries->total()) }}</span>
+            <span class="text-[11.5px] text-fg-3 mono">{{ $tab === 'registry' ? $this->organizations->total() : ($tab === 'nomenclature' ? $this->positions->total() : $this->inquiries->total()) }}</span>
         </div>
 
         <div class="px-4 pb-3">
             <input type="search" wire:model.live.debounce.300ms="search"
-                   placeholder="{{ $tab === 'registry' ? 'Поиск: email / домен / название' : ($tab === 'nomenclature' ? 'Поиск: M-артикул / название / артикул' : 'Поиск: M-артикул / заявка / поставщик / тема') }}"
+                   placeholder="{{ $tab === 'registry' ? 'Поиск: название / код 1С / ИНН / адрес' : ($tab === 'nomenclature' ? 'Поиск: M-артикул / название / артикул' : 'Поиск: M-артикул / заявка / поставщик / тема') }}"
                    class="h-[30px] w-full max-w-[440px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
         </div>
 
@@ -182,109 +182,51 @@
                 @error('newGroupName') <div class="text-[11px] text-red-600 mt-1">{{ $message }}</div> @enderror
                 <div class="text-[11px] text-fg-4 mt-1">Группу выбирают целиком при запросе цены — в заявке (вкладка «Поставщики») и в «Снабжении». Состав группы правится в колонке «Группы» ниже.</div>
             </div>
-            {{-- Организации: адреса одной компании объединяются под общим названием.
-                 Подсказки — адреса на одном корпоративном домене, ещё не объединённые. --}}
+            {{-- Поставщики — организации, копия QuoteParts (переезд поставщиков, 06.11.2026). Карточка —
+                 профиль, условия, код 1С, контакты по темам; объединение — в карточке. --}}
             @php
-                $sugg = $this->domainSuggestions;
-                // Локаль приложения английская — trans_choice русские формы не выберет.
-                $ruPlural = fn (int $n, string $one, string $few, string $many) => ($n % 100 >= 11 && $n % 100 <= 19) ? $many : match ($n % 10) { 1 => $one, 2, 3, 4 => $few, default => $many };
+                $statusLabel = ['active' => 'в кабинете', 'mail' => 'через QuoteParts', 'invited' => 'приглашён', 'terms_discussed' => 'обсуждает условия', 'declined' => 'отказался'];
+                $orgGroups = $this->organizationGroups;
             @endphp
-            @if($sugg !== [])
-                <div class="px-4 pb-3" x-data="{ open: false }">
-                    <button type="button" @click="open = !open" class="text-[12px] text-sky-700 hover:underline">
-                        <span x-text="open ? '▾' : '▸'"></span> Похоже на одну организацию: {{ count($sugg) }} {{ $ruPlural(count($sugg), 'домен', 'домена', 'доменов') }} с несколькими адресами
-                    </button>
-                    <div x-show="open" x-cloak class="mt-2 border border-border rounded-md divide-y divide-border-subtle max-w-[900px]">
-                        @foreach($sugg as $sg)
-                            <div wire:key="sugg-{{ $sg['domain'] }}" class="px-3 py-2 flex items-start gap-3 flex-wrap">
-                                <div class="flex-1 min-w-[260px]">
-                                    <div class="text-[12.5px] text-fg-1"><span class="mono">{{ $sg['domain'] }}</span> <span class="text-fg-3">→ «{{ $sg['name'] }}»</span></div>
-                                    <div class="text-[11px] text-fg-4 mono">{{ $sg['suppliers']->map(fn ($x) => $x->email ?: $x->domain)->implode(', ') }}</div>
-                                </div>
-                                <button type="button" wire:click="mergeDomain(@js($sg['domain']))" class="btn btn-xs btn-primary shrink-0"
-                                        title="Объединить все адреса домена в одну организацию">Объединить {{ $sg['suppliers']->count() }}</button>
-                            </div>
-                        @endforeach
-                    </div>
-                </div>
-            @endif
-            @if(count($selected) > 0)
-                <div class="px-4 pb-3">
-                    <div class="flex flex-wrap items-center gap-2 border border-sky-300 rounded-md px-3 py-2 bg-sky-50 max-w-[900px]">
-                        <span class="text-[12.5px] text-fg-1">Отмечено адресов: <b>{{ count($selected) }}</b></span>
-                        <input type="text" wire:model="mergeName" wire:keydown.enter="mergeSelected" placeholder="{{ $this->mergePlaceholder }}"
-                               class="h-[28px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500 flex-1 min-w-[200px]">
-                        <button type="button" wire:click="mergeSelected" class="btn btn-sm btn-primary" @disabled(count($selected) < 2)
-                                title="Объединить отмеченные адреса в одну организацию. Пустое название — берётся из подсказки.">Объединить в организацию</button>
-                        <button type="button" wire:click="$set('selected', [])" class="btn btn-sm">Снять отметки</button>
-                    </div>
-                </div>
-            @endif
             <div class="overflow-x-auto">
                 <table class="w-full text-[12.5px]">
-                    <thead class="text-fg-3 text-[10.5px] uppercase tracking-wider border-y border-border">
+                    <thead class="text-fg-3 text-[12px] border-y border-border">
                         <tr>
-                            <th class="w-[28px] pl-3 py-2" title="Отметить адреса для объединения в организацию"></th>
-                            <th class="text-left px-3 py-2">E-mail</th>
-                            <th class="text-left px-3 py-2">Домен</th>
-                            <th class="text-left px-3 py-2">Название</th>
+                            <th class="text-left px-3 py-2">Поставщик</th>
+                            <th class="text-left px-3 py-2">Код 1С</th>
+                            <th class="text-left px-3 py-2">QuoteParts</th>
+                            <th class="text-right px-3 py-2">Контакты</th>
+                            <th class="text-left px-3 py-2">Валюта</th>
                             <th class="text-left px-3 py-2">Группы</th>
-                            <th class="text-left px-3 py-2">Добавил</th>
-                            <th class="text-right px-3 py-2"></th>
                         </tr>
                     </thead>
                     <tbody>
-                        @php $prevOrg = null; $orgSizes = $this->organizationSizes; @endphp
-                        @forelse($this->suppliers as $s)
-                            @php $org = $s->organization; @endphp
-                            @if($org && $org->id !== $prevOrg)
-                                <tr wire:key="org-{{ $org->id }}-{{ $s->id }}" class="bg-surface-2 border-b border-border-subtle">
-                                    <td class="pl-3 py-1.5"></td>
-                                    <td colspan="6" class="px-3 py-1.5" x-data="{ edit: false, name: @js($org->name) }">
-                                        <span x-show="!edit" class="inline-flex items-center gap-2">
-                                            <span class="text-[12.5px] font-semibold text-fg-1" @dblclick="edit = true" title="Организация · двойной клик — переименовать">🏢 {{ $org->name }}</span>
-                                            <span class="text-[11px] text-fg-3">{{ $orgSizes[$org->id] ?? 1 }} {{ $ruPlural($orgSizes[$org->id] ?? 1, 'адрес', 'адреса', 'адресов') }}</span>
-                                            <button type="button" @click="edit = true" class="text-[11px] text-fg-4 hover:text-sky-700">переименовать</button>
-                                        </span>
-                                        <input x-show="edit" x-cloak x-model="name" @keydown.enter="$wire.renameOrganization({{ $org->id }}, name); edit = false" @keydown.escape="edit = false" @blur="edit = false"
-                                               class="h-[26px] px-2 border border-border rounded bg-surface text-[12.5px] w-[320px] outline-none focus:border-sky-500">
-                                    </td>
-                                </tr>
-                            @endif
-                            @php $prevOrg = $org?->id; @endphp
-                            <tr wire:key="sup-{{ $s->id }}" class="border-b border-border-subtle hover:bg-hover">
-                                <td class="pl-3 py-2"><input type="checkbox" wire:model.live="selected" value="{{ $s->id }}" class="align-middle"></td>
-                                <td class="px-3 py-2 mono {{ $org ? 'pl-7' : '' }}"><a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="text-sky-700 hover:underline">{{ $s->email ?: '—' }}</a></td>
-                                <td class="px-3 py-2 mono text-fg-2">{{ $s->domain ?: '—' }}</td>
-                                <td class="px-3 py-2 text-fg-2"><a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="hover:underline">{{ $s->name ?: '—' }}</a></td>
+                        @forelse($this->organizations as $o)
+                            @php $p = (array) ($o->qp_payload ?? []); @endphp
+                            <tr wire:key="org-{{ $o->id }}" class="border-b border-border-subtle hover:bg-hover">
                                 <td class="px-3 py-2">
-                                    <span class="inline-flex flex-wrap items-center gap-1">
-                                        @foreach($s->groups as $g)
-                                            <span class="chip chip-neutral text-[10.5px]">{{ $g->name }}<button type="button" wire:click="removeFromGroup({{ $s->id }}, {{ $g->id }})" class="ml-1 text-fg-4 hover:text-red-600" title="Убрать из группы">×</button></span>
-                                        @endforeach
-                                        @php $free = $this->groups->whereNotIn('id', $s->groups->pluck('id')); @endphp
-                                        @if($free->isNotEmpty())
-                                            <select x-data @change="$wire.addToGroup({{ $s->id }}, Number($event.target.value)); $event.target.value = ''"
-                                                    class="h-[22px] px-1 border border-border rounded bg-surface text-[11px] text-fg-3 outline-none">
-                                                <option value="">+ группа</option>
-                                                @foreach($free as $g)<option value="{{ $g->id }}">{{ $g->name }}</option>@endforeach
-                                            </select>
-                                        @endif
-                                    </span>
+                                    <a href="{{ route('suppliers.card', $o->id) }}" wire:navigate class="text-sky-700 hover:underline font-medium">{{ $o->name }}</a>
+                                    @if($p['is_agent'] ?? false)<span class="chip chip-info ml-1">агент</span>@endif
                                 </td>
-                                <td class="px-3 py-2 text-fg-3 whitespace-nowrap">{{ $s->createdBy?->name ?? '—' }}</td>
-                                <td class="px-3 py-2 text-right">
-                                    @if($org)<button type="button" wire:click="detachFromOrganization({{ $s->id }})" class="text-[11.5px] text-fg-3 hover:underline mr-2" title="Вывести адрес из организации «{{ $org->name }}»">из организации</button>@endif
-                                    <a href="{{ route('suppliers.registry-edit', $s->id) }}" wire:navigate class="text-[11.5px] text-sky-700 hover:underline mr-2">профиль</a>
-                                    <button type="button" wire:click="removeSupplier({{ $s->id }})" wire:confirm="Удалить из реестра поставщиков?" class="text-[11.5px] text-red-600 hover:underline">удалить</button>
+                                <td class="px-3 py-2 mono">
+                                    @if($o->onec_code){{ $o->onec_code }}
+                                    @elseif(! empty($o->onec_candidates))<span class="chip chip-attn" title="В 1С несколько карточек — выберите в карточке поставщика">выбрать из {{ count($o->onec_candidates) }}</span>
+                                    @else<span class="text-fg-4" title="Временный ключ до кода 1С">{{ $o->qp_key }}</span>@endif
                                 </td>
+                                <td class="px-3 py-2">
+                                    @if($o->qp_status)<span class="chip {{ $o->qp_status === 'active' ? 'chip-ok' : 'chip-neutral' }}">{{ $statusLabel[$o->qp_status] ?? $o->qp_status }}</span>
+                                    @else<span class="text-fg-4" title="Нет ни одного адреса">—</span>@endif
+                                </td>
+                                <td class="px-3 py-2 text-right mono">{{ $o->contacts_count ?: '—' }}</td>
+                                <td class="px-3 py-2 mono">{{ $p['terms']['currency'] ?? '' }}</td>
+                                <td class="px-3 py-2 text-fg-3">{{ implode(', ', $orgGroups[$o->id] ?? []) }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="7" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' || $groupFilter > 0 ? 'Ничего не найдено.' : 'Реестр пуст. Добавьте email/домен поставщика выше — или пометьте тред кнопкой на заявке (поставщик добавится автоматически).' }}</td></tr>
+                            <tr><td colspan="6" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' || $groupFilter > 0 ? 'Ничего не найдено.' : 'Поставщиков нет. Добавьте адрес поставщика выше.' }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>
-                <div class="px-4 py-3">{{ $this->suppliers->links() }}</div>
+                <div class="px-4 py-3">{{ $this->organizations->links() }}</div>
             </div>
         @endif
     </div>

@@ -24,7 +24,22 @@ class SupplierMatrixBuilder
     ) {
     }
 
-    public function rebuild(Supplier $supplier): bool
+    /**
+     * Матрица поставщика (организации) по описанию ассортимента, без записи: её хранит QuoteParts
+     * (переезд поставщиков, 06.11.2026). Ручные правила сохраняются. null — модель не ответила.
+     *
+     * @param  list<array{brand:string, category:string}>  $rules
+     * @return array{brands:list<string>, categories:list<string>, pairs:list<array>, rules:list<array>}|null
+     */
+    public function compute(string $description, array $rules = []): ?array
+    {
+        $probe = new Supplier(['assortment_description' => $description]);
+        $probe->assortment_matrix = $rules !== [] ? ['rules' => $rules] : null;
+
+        return $this->rebuild($probe, persist: false) ? $probe->assortment_matrix : null;
+    }
+
+    public function rebuild(Supplier $supplier, bool $persist = true): bool
     {
         $existingRules = is_array($supplier->assortment_matrix ?? null)
             ? (array) ($supplier->assortment_matrix['rules'] ?? [])
@@ -37,7 +52,10 @@ class SupplierMatrixBuilder
                 'assortment_matrix' => $existingRules !== [] ? ['brands' => [], 'categories' => [], 'pairs' => [], 'rules' => $existingRules] : null,
                 'matrix_built_at' => now(),
                 'matrix_built_with_model' => null,
-            ])->save();
+            ]);
+            if ($persist) {
+                $supplier->save();
+            }
 
             return true;
         }
@@ -95,7 +113,10 @@ class SupplierMatrixBuilder
             'assortment_matrix' => ['brands' => $brandsOut, 'categories' => $cats, 'pairs' => $pairs, 'rules' => $existingRules],
             'matrix_built_at' => now(),
             'matrix_built_with_model' => $model,
-        ])->save();
+        ]);
+        if ($persist) {
+            $supplier->save();
+        }
 
         return true;
     }

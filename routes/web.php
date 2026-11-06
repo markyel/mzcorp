@@ -362,6 +362,11 @@ Route::middleware('auth')->group(function () {
             return view('suppliers.supplier-edit', ['supplier' => $supplier]);
         })->name('suppliers.registry-edit');
 
+        // Карточка поставщика — организация, копия QuoteParts (переезд поставщиков, 06.11.2026).
+        Route::get('/dashboard/suppliers/card/{org}', function (\App\Models\SupplierOrganization $org) {
+            return view('suppliers.supplier-card', ['org' => $org]);
+        })->name('suppliers.card');
+
         // Экспорт переписки с поставщиком — тот же документ, что по клиентской
         // заявке. Объявлен ДО {inquiry}, иначе сегмент пути съест маршрут.
         Route::get('/dashboard/suppliers/{inquiry}/correspondence/export',

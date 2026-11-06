@@ -78,18 +78,44 @@ class Index extends Component
             return;
         }
 
-        Supplier::create([
-            'email' => $email !== '' ? $email : null,
-            'domain' => $domain !== '' ? $domain : null,
-            'name' => trim($this->newName) !== '' ? trim($this->newName) : null,
+        if ($email !== '' && Supplier::query()->whereRaw('lower(email) = ?', [$email])->exists()) {
+            $this->addError('newEmail', 'Этот адрес уже есть у поставщика — найдите его поиском.');
+
+            return;
+        }
+
+        // Поставщик — организация с временным ключом до кода 1С; адрес — её контакт. С адресом
+        // поставщик сразу заводится в QuoteParts (без писем, запросы через QuoteParts).
+        $org = \App\Models\SupplierOrganization::create([
+            'name' => trim($this->newName) ?: ($domain ?: $email),
             'created_by_user_id' => auth()->id(),
         ]);
+        $org->forceFill(['qp_key' => \App\Models\SupplierOrganization::temporaryKey($org->id)])->save();
+        $row = Supplier::create([
+            'email' => $email !== '' ? $email : null,
+            'domain' => $domain !== '' ? $domain : ($email !== '' ? \Illuminate\Support\Str::after($email, '@') : null),
+            'name' => trim($this->newName) !== '' ? trim($this->newName) : null,
+            'created_by_user_id' => auth()->id(),
+            'supplier_organization_id' => $org->id,
+        ]);
+        $row->forceFill(['source' => 'manual', 'contact_topics' => ['quoting']])->save();
+
+        $message = 'Поставщик добавлен.';
+        if ($email !== '') {
+            try {
+                app(\App\Services\QuoteParts\QuotePartsSupplierService::class)->registerOrganization($org);
+                $message = 'Поставщик добавлен и заведён в QuoteParts.';
+            } catch (\Throwable $e) {
+                $message = 'Поставщик добавлен, в QuoteParts не заведён: '.$e->getMessage();
+            }
+        }
 
         $this->newEmail = '';
         $this->newDomain = '';
         $this->newName = '';
-        unset($this->suppliers);
-        $this->dispatch('toast', message: 'Поставщик добавлен в реестр.', type: 'success');
+        unset($this->suppliers, $this->organizations);
+        $this->dispatch('toast', message: $message, type: 'success');
+        $this->redirectRoute('suppliers.card', ['org' => $org->id], navigate: true);
     }
 
     /* --- Группы поставщиков («Китай», «Европа», «Поручни»…) --- */
@@ -370,6 +396,41 @@ class Index extends Component
             'rest' => max(0, $rows->count() - $limit),
             'via_request' => null,
         ];
+    }
+
+    /**
+     * Реестр — поставщики-организации (копия QuoteParts): код 1С или временный ключ, состояние в
+     * QuoteParts, контакты, группы. Поиск — по названию, коду, ИНН и адресам контактов.
+     */
+    #[Computed]
+    public function organizations()
+    {
+        $q = \App\Models\SupplierOrganization::query()
+            ->withCount(['suppliers as contacts_count' => fn ($s) => $s->whereNotNull('email')]);
+        if ($this->groupFilter > 0) {
+            $q->whereHas('suppliers.groups', fn ($g) => $g->whereKey($this->groupFilter));
+        }
+        $s = trim($this->search);
+        if ($s !== '') {
+            $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
+            $q->where(fn ($w) => $w->where('name', 'ilike', $like)->orWhere('onec_name', 'ilike', $like)
+                ->orWhere('onec_code', 'ilike', $like)->orWhere('qp_key', 'ilike', $like)->orWhere('inn', 'ilike', $like)
+                ->orWhereHas('suppliers', fn ($c) => $c->where('email', 'ilike', $like)->orWhere('domain', 'ilike', $like)));
+        }
+
+        return $q->orderByRaw('lower(name)')->paginate(40);
+    }
+
+    /** @return array<int, list<string>> организация → группы */
+    #[Computed]
+    public function organizationGroups(): array
+    {
+        $ids = collect($this->organizations->items())->pluck('id');
+
+        return \Illuminate\Support\Facades\DB::table('supplier_group_members as m')
+            ->join('suppliers as s', 's.id', '=', 'm.supplier_id')->join('supplier_groups as g', 'g.id', '=', 'm.supplier_group_id')
+            ->whereIn('s.supplier_organization_id', $ids)->select('s.supplier_organization_id as o', 'g.name')->distinct()->get()
+            ->groupBy('o')->map(fn ($r) => $r->pluck('name')->all())->all();
     }
 
     #[Computed]

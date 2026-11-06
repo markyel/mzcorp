@@ -24,6 +24,83 @@ class QuotePartsSupplierService
     public function __construct(private readonly QuotePartsClient $client) {}
 
     /**
+     * Тихо завести поставщика-организацию в QuoteParts (без писем, внесистемный режим) со всеми
+     * его адресами: первый адрес — основной контакт, у остальных — их темы или «Расценка». Адрес,
+     * который QuoteParts знает за другой компанией, пропускается. Копия — сразу (SupplierMirrorService).
+     *
+     * @return array{link: array<string, mixed>, skipped: int}
+     */
+    public function registerOrganization(\App\Models\SupplierOrganization $org, int $paceMicroseconds = 0): array
+    {
+        $contacts = Supplier::query()->where('supplier_organization_id', $org->id)->whereNotNull('email')
+            ->orderByRaw("case when source = 'onec' then 1 else 0 end")->orderByRaw('contact_position nulls last')->orderBy('id')->get();
+        if ($contacts->isEmpty()) {
+            throw new \RuntimeException('у поставщика нет ни одного адреса');
+        }
+        $locale = $contacts->contains('language', 'en') ? 'en' : 'ru';
+        $taken = [];
+
+        // Первый адрес, который QuoteParts примет, — контакт регистрации.
+        $link = null;
+        foreach ($contacts as $first) {
+            usleep($paceMicroseconds);
+            try {
+                $link = $this->client->registerSupplier([
+                    'external_id' => $org->qp_key,
+                    'company_name' => $org->name,
+                    'contact' => ['email' => $first->email, 'name' => $first->contact_person ?: null, 'locale' => $first->language === 'en' ? 'en' : $locale],
+                ]);
+                break;
+            } catch (\RuntimeException $e) {
+                if (! str_contains($e->getMessage(), 'другой компании')) {
+                    throw $e;
+                }
+                $taken[mb_strtolower($first->email)] = true;
+            }
+        }
+        if ($link === null) {
+            throw new \RuntimeException('все адреса QuoteParts знает за другими компаниями');
+        }
+
+        $rows = fn () => $contacts->reject(fn ($s) => isset($taken[mb_strtolower($s->email)]))->values()
+            ->map(fn ($s, $i) => array_filter([
+                'email' => $s->email,
+                'name' => $s->contact_person ?: null,
+                'topics' => $i === 0 ? array_values(array_unique([...((array) ($s->contact_topics ?: ['quoting'])), 'general'])) : ((array) ($s->contact_topics ?: ['quoting'])),
+                'position' => $i + 1,
+                'locale' => $s->language === 'en' ? 'en' : $locale,
+                'phone' => $s->phone ? mb_substr((string) $s->phone, 0, 40) : null,
+            ], fn ($v) => $v !== null))->take(30)->all();
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            usleep($paceMicroseconds);
+            try {
+                $link = $this->client->setContacts($org->qp_key, ['dispatch_mode' => 'primary', 'contacts' => $rows()]);
+                break;
+            } catch (\RuntimeException $e) {
+                if (! preg_match('/Адрес (\S+) уже принадлежит другой компании/u', $e->getMessage(), $m)) {
+                    throw $e;
+                }
+                $taken[mb_strtolower($m[1])] = true;
+            }
+        }
+
+        // Название — чистое (без внутренних пометок 1С), пометки — в примечания: их видим только мы.
+        if (($link['status'] ?? null) !== 'active') {
+            usleep($paceMicroseconds);
+            $link = $this->client->updateSupplier($org->qp_key, array_filter([
+                'company_name' => $org->name,
+                'profile' => $org->notes ? ['notes' => mb_substr((string) $org->notes, 0, 5000)] : null,
+            ]));
+        }
+
+        Supplier::query()->where('supplier_organization_id', $org->id)->update(['quoteparts_offsystem' => ($link['status'] ?? null) !== 'active']);
+        app(SupplierMirrorService::class)->apply($link);
+
+        return ['link' => $link, 'skipped' => count($taken)];
+    }
+
+    /**
      * Режим переписки: адрес поставщика должен быть известен QuoteParts, чтобы отправить ему
      * запрос — без письма-приглашения. Уже заведённый адрес не трогаем.
      */
