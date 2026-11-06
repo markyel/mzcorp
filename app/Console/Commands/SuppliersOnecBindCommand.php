@@ -28,8 +28,8 @@ use Throwable;
 class SuppliersOnecBindCommand extends Command
 {
     protected $signature = 'suppliers:onec-bind
-        {file : JSON {suppliers:[{code,name,full,inn}], contacts:[{counterparty,emails[],name,phone}]}}
-        {--overrides= : JSON {"домен или email": {"code":"00-…","name":"…"}} — коды, поставленные человеком}
+        {file : JSON с поставщиками 1С (suppliers) и их контактами (contacts)}
+        {--overrides= : JSON — коды, поставленные человеком: домен или email → code и name}
         {--drop= : адреса через запятую, которые не поставщики — убрать из реестра}
         {--apply : выполнить}';
 
