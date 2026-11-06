@@ -22,6 +22,7 @@ class NotifyBotClientJob implements ShouldQueue
 
     public function __construct(public readonly int $stateChangeId)
     {
+        $this->onQueue('bot');
     }
 
     public function handle(BotRequestNotifier $notifier): void

@@ -27,6 +27,8 @@ class HandleBotUpdateJob implements ShouldQueue
 
     public function __construct(public readonly string $channel, public readonly array $payload)
     {
+        // Своя очередь: в default клиент ждал ответа бота до минуты за разбором писем (06.11.2026).
+        $this->onQueue('bot');
     }
 
     public function handle(BotConversationService $bot): void
