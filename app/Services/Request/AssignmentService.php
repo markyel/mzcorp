@@ -175,6 +175,7 @@ class AssignmentService
                         JSON_UNESCAPED_UNICODE,
                     ),
                     $byUserId,
+                    clientChose: true,
                 );
             }
 
@@ -243,7 +244,8 @@ class AssignmentService
                 : 'auto_round_robin';
         }
 
-        return $this->commit($request, $manager, $reason, $byUserId);
+        return $this->commit($request, $manager, $reason, $byUserId,
+            clientChose: in_array($sticky['kind'] ?? null, ['direct_mailbox', 'addressed_mailbox'], true));
     }
 
     /**
@@ -251,7 +253,7 @@ class AssignmentService
      * уведомление менеджеру, доставку письма в его ящик и письмо клиенту.
      * Шаг общий для всех режимов раздачи — различается только выбор менеджера.
      */
-    private function commit(Request $request, ?User $manager, string $reason, ?int $byUserId): ?User
+    private function commit(Request $request, ?User $manager, string $reason, ?int $byUserId, bool $clientChose = false): ?User
     {
         if (! $manager) {
             return null;
@@ -260,7 +262,9 @@ class AssignmentService
         // Режим наблюдения (ASSIGNMENT_OBSERVE=true, перезапуск после аварии 05.11.2026): раздача только
         // предлагает — кому и почему записывается в заявку и в лог, заявка остаётся без ответственного,
         // без уведомления, доставки письма и письма клиенту. Сравнивается с тем, кому заявку отдали люди.
-        if (config('services.assignment_observe', false)) {
+        // Письмо в личный ящик менеджера (или лично ему в копии) — не раздача, а выбор клиента: такая
+        // заявка назначается и в наблюдении, иначе менеджер не может с ней работать (MZ2026-00654).
+        if (config('services.assignment_observe', false) && ! $clientChose) {
             DB::table('requests')->where('id', $request->id)->update(['parsing_meta' => DB::raw(
                 "coalesce(parsing_meta::jsonb, '{}'::jsonb) || ".DB::getPdo()->quote(json_encode(['assignment_suggestion' => [
                     'user_id' => $manager->id, 'email' => $manager->email, 'reason' => $reason, 'at' => now()->toIso8601String(),
