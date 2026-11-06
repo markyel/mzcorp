@@ -469,6 +469,17 @@ return [
         'scope' => env('VK_ID_SCOPE', 'wall photos groups'),
     ],
 
+    // Плашка «Закрыт на реконструкцию» поверх интерфейса (App\Http\Middleware\ReconstructionPlaque).
+    // Пропускает администраторов и адреса из списка; обходная ссылка ?mz_pass=<ключ> открывает вход.
+    'reconstruction' => [
+        'enabled' => (bool) env('RECONSTRUCTION_PLAQUE', false),
+        'allow_emails' => array_values(array_filter(array_map(
+            fn ($e) => mb_strtolower(trim($e)),
+            explode(',', (string) env('RECONSTRUCTION_ALLOW_EMAILS', '')),
+        ))),
+        'bypass_key' => (string) env('RECONSTRUCTION_BYPASS_KEY', ''),
+    ],
+
     // Telegram Bot API (боты заявок, медиаплан): прокси, если сервер не достаёт
     // до api.telegram.org напрямую. См. App\Support\TelegramHttp.
     'telegram' => [

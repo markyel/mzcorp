@@ -18,7 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'catalog.import.token' => \App\Http\Middleware\CatalogImportToken::class,
         ]);
         // Отключённый (архивный) сотрудник выходит на первом же запросе.
-        $middleware->web(append: [\App\Http\Middleware\LogoutArchivedUser::class]);
+        $middleware->web(append: [\App\Http\Middleware\LogoutArchivedUser::class, \App\Http\Middleware\ReconstructionPlaque::class]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // Временный сбой Яндекса (NO [UNAVAILABLE], обрыв на входе) задача переживает повтором — WARNING, не ERROR.
