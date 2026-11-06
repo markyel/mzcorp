@@ -73,7 +73,7 @@ class SuppliersOnecBindCommand extends Command
         }
 
         $stats = ['убрано адресов' => 0, 'организаций создано для одиночных' => 0, 'код по email' => 0, 'код по домену' => 0, 'код вручную' => 0,
-            'кандидаты' => 0, 'без кода' => 0, 'новых поставщиков из 1С' => 0, 'контактов из 1С' => 0, 'ключей переведено' => 0, 'ссылок QuoteParts переименовано' => 0];
+            'объединено с поставщиком того же кода' => 0, 'кандидаты' => 0, 'без кода' => 0, 'новых поставщиков из 1С' => 0, 'контактов из 1С' => 0, 'ключей переведено' => 0, 'ссылок QuoteParts переименовано' => 0];
 
         $run = function () use ($in, $overrides, $drop, $apply, $byCode, $emailCodes, $domainCodes, $contactsByCode, &$stats, $qp) {
             // 1. Не поставщики.
@@ -104,7 +104,7 @@ class SuppliersOnecBindCommand extends Command
             }
 
             // 3. Коды 1С существующим организациям.
-            $usedCodes = SupplierOrganization::query()->whereNotNull('onec_code')->pluck('onec_code')->flip()->all();
+            $usedCodes = SupplierOrganization::query()->whereNotNull('onec_code')->pluck('id', 'onec_code')->all();
             // Поставщики: организации; в отчёте (без --apply) одиночные адреса ещё без организаций — каждый сам по себе.
             $units = SupplierOrganization::query()->with('suppliers')->get()
                 ->map(fn ($o) => ['org' => $o, 'name' => $o->name, 'suppliers' => $o->suppliers]);
@@ -139,13 +139,25 @@ class SuppliersOnecBindCommand extends Command
                     $how = $codes ? 'код по домену' : null;
                 }
                 $codes = array_keys($codes);
-                $free = array_values(array_filter($codes, fn ($c) => ! isset($usedCodes[$c])));
-                if (count($free) === 1) {
+                if (count($codes) === 1 && isset($usedCodes[$codes[0]])) {
+                    // Тот же контрагент 1С уже у другой нашей организации (два адреса одной фирмы,
+                    // заведённые порознь) — это один поставщик: адреса переезжают к нему.
+                    $stats['объединено с поставщиком того же кода']++;
+                    $this->line('  объединить: '.$unit['name'].' → '.$codes[0].' '.($byCode[$codes[0]]['name'] ?? ''));
+                    $target = $usedCodes[$codes[0]];
+                    if ($apply && $org !== null && is_int($target) && $target !== $org->id) {
+                        Supplier::query()->where('supplier_organization_id', $org->id)->update(['supplier_organization_id' => $target]);
+                        $org->delete();
+                    }
+
+                    continue;
+                }
+                if (count($codes) === 1) {
                     $stats[$how]++;
-                    $usedCodes[$free[0]] = true;
-                    $name = $manual['name'] ?? ($byCode[$free[0]]['name'] ?? null);
+                    $usedCodes[$codes[0]] = $org?->id ?? true;
+                    $name = $manual['name'] ?? ($byCode[$codes[0]]['name'] ?? null);
                     if ($apply) {
-                        $org->forceFill(['onec_code' => $free[0], 'onec_name' => $name])->save();
+                        $org->forceFill(['onec_code' => $codes[0], 'onec_name' => $name])->save();
                     }
                 } elseif (count($codes) > 1) {
                     $stats['кандидаты']++;
