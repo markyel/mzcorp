@@ -8,6 +8,7 @@ use App\Services\Mail\Routing\Handlers\CitedQuoteLinkHandler;
 use App\Services\Mail\Routing\Handlers\ClosedWonThreadHandler;
 use App\Services\Mail\Routing\Handlers\CreateRequestHandler;
 use App\Services\Mail\Routing\Handlers\CrossMailboxCopyHandler;
+use App\Services\Mail\Routing\Handlers\ForwardedToManagerHandler;
 use App\Services\Mail\Routing\Handlers\LinkedThreadHandler;
 use App\Services\Mail\Routing\Handlers\LinkToRequestHandler;
 use App\Services\Mail\Routing\Handlers\PostSaleOrderHandler;
@@ -44,6 +45,8 @@ final class RoutingPipeline
         LoopForwardHandler::class,
         ProcurementMailboxHandler::class,
         BlocklistHandler::class,
+        // Пересылка из общего ящика в личный менеджера — назначение человеком; цепочку не останавливает.
+        ForwardedToManagerHandler::class,
         CrossMailboxCopyHandler::class,
         SupplierReplyHandler::class,
         // Ответ редакции на наш пресс-релиз — по треду рассылки, не заявка.
