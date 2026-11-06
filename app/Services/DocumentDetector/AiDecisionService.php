@@ -282,7 +282,8 @@ class AiDecisionService
                     RequestStatus::Assigned,
                     $author,
                     [
-                        'event' => 'auto_promote_pending_for_outbound',
+                        // request_state_changes.event — varchar(32).
+                        'event' => 'auto_promote_pending_outbound',
                         'comment' => 'Авто-промоут Pending→Assigned: менеджер прислал ' . $type->label(),
                         'payload' => ['ai_decision_id' => $decision->id, 'detector_type' => $type->value],
                     ],
