@@ -306,8 +306,14 @@ final class LinkedThreadHandler implements InboundRoutingHandler
 
         // Phase 4 (Foundation §7.2): suggestion по intent'у, классифицированному
         // выше. type === null — new_request, не развёрнутый в новую заявку:
-        // перехода статуса нет, suggestion не пишем.
-        if ($intentResult !== null && ($intentResult['type'] ?? null) !== null) {
+        // перехода статуса нет, suggestion не пишем. Заявка уже в целевом
+        // статусе (маршрут по процитированному КП сам перевёл в «ждёт счёт»,
+        // M-2026-19057) — плашка «перевести туда же» лишняя.
+        $alreadyThere = $intentResult !== null
+            && ($intentResult['type'] ?? null) !== null
+            && $intentResult['type']->targetStatus() !== null
+            && $intentResult['type']->targetStatus() === $linkedRequest->fresh()?->status;
+        if ($intentResult !== null && ($intentResult['type'] ?? null) !== null && ! $alreadyThere) {
             try {
                 $this->aiDecisions->recordSuggestion(
                     $intentResult['type'],
