@@ -473,6 +473,9 @@ return [
     // до api.telegram.org напрямую. См. App\Support\TelegramHttp.
     'telegram' => [
         'proxy' => env('TELEGRAM_PROXY', ''),
+        // Адрес вебхука бота заявок, если Telegram не достаёт до нашего домена
+        // (посредник передаёт запрос в /api/bot/telegram). Пусто — свой маршрут.
+        'webhook_url' => env('TELEGRAM_WEBHOOK_URL', ''),
     ],
 
     'max' => [

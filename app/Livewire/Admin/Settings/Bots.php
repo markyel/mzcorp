@@ -101,6 +101,12 @@ class Bots extends Component
 
     private function webhookUrl(MessengerChannel $channel): string
     {
+        // Telegram не достаёт до mzcorp.ru — вебхук через посредника (services.telegram.webhook_url).
+        $relay = trim((string) config('services.telegram.webhook_url', ''));
+        if ($channel === MessengerChannel::Telegram && $relay !== '') {
+            return $relay;
+        }
+
         return route($channel === MessengerChannel::Telegram ? 'api.bot.telegram' : 'api.bot.max');
     }
 
