@@ -90,7 +90,12 @@ class Supplier extends Model
     public function quotepartsKey(): string
     {
         // Постоянный ключ организации (код 1С или «mz:{id}»); прежняя схема — пока ключ не проставлен.
-        $key = $this->supplier_organization_id ? $this->organization?->qp_key : null;
+        $key = null;
+        if ($this->supplier_organization_id) {
+            $key = $this->relationLoaded('organization')
+                ? $this->organization?->qp_key
+                : ($this->exists ? SupplierOrganization::query()->whereKey($this->supplier_organization_id)->value('qp_key') : null);
+        }
 
         return $key ?: ($this->supplier_organization_id ? 'org:'.$this->supplier_organization_id : 'sup:'.$this->id);
     }
