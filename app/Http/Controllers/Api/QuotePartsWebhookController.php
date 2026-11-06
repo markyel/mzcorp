@@ -54,6 +54,13 @@ class QuotePartsWebhookController extends Controller
             return response()->json(['ok' => true], 202);
         }
 
+        // Поставщик сам поменял условия, команду или карточку компании — обновить его копию.
+        if ($event === 'supplier.updated' && is_string($data['supplier'] ?? null)) {
+            \App\Jobs\QuoteParts\SyncQuotePartsSupplierJob::dispatch($data['supplier']);
+
+            return response()->json(['ok' => true], 202);
+        }
+
         // Поставщик отметил позиции «не сможем предложить» или вернул их — копия для «Снабжения».
         if ($event === 'supplier.items_declined') {
             SyncQuotePartsDeclinesJob::dispatch();

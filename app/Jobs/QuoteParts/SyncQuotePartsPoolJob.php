@@ -74,6 +74,12 @@ class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUniqueUntilProcessin
 
             // Ответы приглашённых поставщиков (принял, предложил другие условия, отказался).
             app(QuotePartsSupplierService::class)->refreshStatuses();
+            // Копия поставщиков: всё, что изменилось в QuoteParts с прошлой сверки.
+            try {
+                app(\App\Services\QuoteParts\SupplierMirrorService::class)->sync();
+            } catch (\Throwable $e) {
+                Log::warning('QuoteParts supplier mirror failed', ['error' => $e->getMessage()]);
+            }
 
             // Новые товары, получившие M-артикул: предварительные позиции → постоянные.
             try {
