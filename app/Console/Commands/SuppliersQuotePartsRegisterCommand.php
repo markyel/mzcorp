@@ -137,6 +137,15 @@ class SuppliersQuotePartsRegisterCommand extends Command
             }
         }
 
+        // Название — уже чистое (без внутренних пометок 1С), пометки — в примечания: их видим только мы.
+        if (($link['status'] ?? null) !== 'active') {
+            usleep($pace);
+            $link = $qp->updateSupplier($org->qp_key, array_filter([
+                'company_name' => $org->name,
+                'profile' => $org->notes ? ['notes' => mb_substr((string) $org->notes, 0, 5000)] : null,
+            ]));
+        }
+
         return [$link, count($taken)];
     }
 }
