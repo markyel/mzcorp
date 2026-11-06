@@ -359,6 +359,11 @@ Route::middleware('auth')->group(function () {
         // Карточка поставщика из реестра (Фаза 3.1) — объявлена ДО {inquiry},
         // чтобы статичный сегмент registry не матчился как id запроса.
         Route::get('/dashboard/suppliers/registry/{supplier}', function (Supplier $supplier) {
+            // Адрес поставщика — контакт организации: карточка теперь у поставщика целиком.
+            if ($supplier->supplier_organization_id !== null) {
+                return redirect()->route('suppliers.card', ['org' => $supplier->supplier_organization_id] + request()->query());
+            }
+
             return view('suppliers.supplier-edit', ['supplier' => $supplier]);
         })->name('suppliers.registry-edit');
 

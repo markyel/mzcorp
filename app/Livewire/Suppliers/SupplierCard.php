@@ -239,6 +239,31 @@ class SupplierCard extends Component
         }
     }
 
+    public string $mergeQuery = '';
+
+    /** Присоединить другого поставщика (код 1С, ключ или название) к этому. */
+    public function mergeIn(): void
+    {
+        $q = trim($this->mergeQuery);
+        $found = $q === '' ? collect() : SupplierOrganization::query()->whereKeyNot($this->org->id)
+            ->where(fn ($w) => $w->where('onec_code', $q)->orWhere('qp_key', $q)->orWhere('name', 'ilike', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $q).'%'))
+            ->limit(2)->get();
+        if ($found->count() !== 1) {
+            $this->dispatch('toast', message: $found->isEmpty() ? 'Поставщик не найден.' : 'Подходят несколько поставщиков — уточните код 1С.', type: 'error');
+
+            return;
+        }
+        try {
+            $this->org = app(\App\Services\Supplier\SupplierMergeService::class)->merge($this->org, $found->first());
+            $this->mergeQuery = '';
+            $this->fillFromCopy();
+            unset($this->groupOptions, $this->supplierOwnsCard, $this->termsLocked);
+            $this->dispatch('toast', message: 'Объединено: «'.$found->first()->name.'» теперь часть этого поставщика.', type: 'success');
+        } catch (Throwable $e) {
+            $this->dispatch('toast', message: $e->getMessage(), type: 'error');
+        }
+    }
+
     public function setManualCode(): void
     {
         $this->setCode($this->code);
