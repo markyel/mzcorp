@@ -85,6 +85,11 @@ return [
             'gpt-6-luna' => [0.15, 0.73, 0.15],
             'gpt-6.1-sol' => [2.89, 14.44, 2.89],
             'gpt-5.6-sol' => [5.78, 28.89, 5.78],
+            // Reg.cloud «ИИ-модели» (резерв с 06.11.2026): рублёвые цены за 1 млн токенов по 81,79 ₽/$.
+            'deepseek-v4.1-flash' => [0.73, 1.28, 0.73],
+            'qwen-3.8-27b' => [0.24, 2.57, 0.24],
+            'qwen-3.8-flash-next' => [0.37, 1.10, 0.37],
+            'glm-5.3' => [2.81, 5.39, 2.81],
         ],
         // Резервный шлюз (Beget AI Gateway, OpenAI-совместимый): основной канал недоступен —
         // запрос уходит туда. Пустой ключ — резерва нет. См. App\Services\AI\OpenAIFallbackGateway.
@@ -97,6 +102,9 @@ return [
             'models' => env('OPENAI_FALLBACK_MODELS', '{}'),
             // Эмбеддинги через резерв — только если там та же модель (иначе векторы несовместимы).
             'embeddings' => (bool) env('OPENAI_FALLBACK_EMBEDDINGS', false),
+            // Нижняя граница лимита ответа в резерве: рассуждающие модели Reg.cloud тратят часть лимита
+            // на скрытое рассуждение, при малом лимите ответ пустой (Reg.cloud: безопасный минимум 1500).
+            'min_max_tokens' => (int) env('OPENAI_FALLBACK_MIN_MAX_TOKENS', 1000),
         ],
         'embedding_model' => env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
         'mail_classifier_model' => env('OPENAI_MAIL_CLASSIFIER_MODEL', 'gpt-4o-mini'),

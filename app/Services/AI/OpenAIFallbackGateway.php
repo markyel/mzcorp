@@ -111,7 +111,9 @@ class OpenAIFallbackGateway
         // Лимит ответа — не меньше MIN_MAX_TOKENS: дешёвые модели шлюза (gpt-6-luna) сначала рассуждают
         // и при лимите в 20 токенов возвращали пустой ответ; платим только за потраченное.
         if ($path === '/v1/chat/completions' && ! isset($payload['max_completion_tokens'])) {
-            $payload['max_tokens'] = isset($payload['max_tokens']) ? max((int) $payload['max_tokens'], self::MIN_MAX_TOKENS) : self::DEFAULT_MAX_TOKENS;
+            // Минимум — из настроек: рассуждающим моделям Reg.cloud (deepseek-v4.1-flash) нужно не меньше 1500.
+            $min = max(self::MIN_MAX_TOKENS, (int) config('services.openai.fallback.min_max_tokens', self::MIN_MAX_TOKENS));
+            $payload['max_tokens'] = isset($payload['max_tokens']) ? max((int) $payload['max_tokens'], $min) : max(self::DEFAULT_MAX_TOKENS, $min);
         }
 
         // Раз в час — в лог как ошибка: основной канал лежит, работаем на резерве (за деньги Beget).
