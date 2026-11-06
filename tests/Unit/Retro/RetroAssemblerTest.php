@@ -436,6 +436,42 @@ class RetroAssemblerTest extends TestCase
         $this->assertSame(['запрос поставщику', 'рассылка', 'рассылка'], $reasons);
     }
 
+    public function test_crash_days_letters_without_subject_from_two_clients_stay_two_requests(): void
+    {
+        $info = 'info@myzip.ru';
+        $other = 'other@myzip.ru';
+        $at = fn (string $box, string $folder, string $mid, int $day, array $extra) => RetroIndex::normalize($extra + [
+            'uid' => ++$this->uid, 'folder' => $folder, 'date' => date('r', self::NOW - 86400 * (100 - $day) + $this->uid * 600), 'mid' => "<$mid>",
+        ], $box, 2026, 25000);
+        $assembler = $this->assembler(['crash_date' => date('Y-m-d', self::NOW - 86400 * 10)]);
+        $result = $assembler->assemble([
+            // Два клиента без темы; пересылки Яндекса ссылаются на исходное письмо.
+            $at($info, 'INBOX', 'k@x', 92, ['from' => 'kirill@svt.ru', 'to' => $info, 'subject' => '']),
+            $at($info, 'Sent', 'k-fw@x', 92, ['from' => $info, 'to' => self::MANAGER, 'subject' => 'Fwd:', 'irt' => '<k@x>', 'refs' => '<k@x>']),
+            $at($info, 'INBOX', 'r@x', 92, ['from' => 'reshto@sibocom.com', 'to' => $info, 'subject' => '']),
+            $at($info, 'Sent', 'r-fw@x', 92, ['from' => $info, 'to' => $other, 'subject' => 'Fwd:', 'irt' => '<r@x>', 'refs' => '<r@x>']),
+            // Пересылка без ссылки с общей темой — по теме не связываем.
+            $at($info, 'INBOX', 'z1@x', 93, ['from' => 'a@one.ru', 'to' => $info, 'subject' => 'Запрос КП']),
+            $at($info, 'INBOX', 'z2@x', 93, ['from' => 'b@two.ru', 'to' => $info, 'subject' => 'Запрос КП']),
+            $at($info, 'Sent', 'z-fw@x', 93, ['from' => $info, 'to' => self::MANAGER, 'subject' => 'Fwd: Запрос КП']),
+        ]);
+        $rows = $result['rows'];
+        $crash = $assembler->assembleCrash($rows, [$info]);
+        $byClient = [];
+        foreach ($crash['requests'] as $r) {
+            $byClient[$r['client_email']] = $r['assigned'];
+        }
+
+        $this->assertSame(self::MANAGER, $byClient['kirill@svt.ru']);
+        $this->assertSame($other, $byClient['reshto@sibocom.com']);
+        $this->assertArrayNotHasKey('a@one.ru', $byClient, 'Общая тема без ссылки — пересылка ни к кому не привязана');
+        $this->assertArrayNotHasKey('b@two.ru', $byClient);
+        $this->assertTrue(RetroAssembler::isInformativeSubject('Нужен датчик'));
+        $this->assertFalse(RetroAssembler::isInformativeSubject('Запрос КП'));
+        $this->assertFalse(RetroAssembler::isInformativeSubject(''));
+        $this->assertFalse(RetroAssembler::isInformativeSubject('Date: Mon, 02 Nov 2026 09:12'));
+    }
+
     public function test_idle_requests_close_with_a_reason_for_their_stage_and_keep_the_peak(): void
     {
         $result = $this->assembler(['idle_close_days' => 30])->assemble([

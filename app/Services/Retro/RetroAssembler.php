@@ -246,11 +246,23 @@ class RetroAssembler
                 continue;
             }
             $stats['forwards']++;
+            // Пересылка Яндекса ссылается на исходное письмо (In-Reply-To / References) — по ссылке
+            // и связываем, цепочка уже общая. По теме — только если ссылки нет, тема «говорящая»
+            // и под неё в окне подходит ровно одно письмо: пустая тема или «Запрос КП» склеивали
+            // обращения разных клиентов (MZ2026-00424: два письма без темы — одна заявка).
             $original = null;
-            foreach ($clientLetters[self::bareSubject($row['subject'])] ?? [] as $j) {
-                if ($rows[$j]['ts'] <= $row['ts'] + 600 && $row['ts'] - $rows[$j]['ts'] < 3 * 86400) {
-                    $original = $j;
+            $refs = array_flip(array_filter(array_merge([$row['in_reply_to']], $row['references'])));
+            foreach ($clientLetters as $letters) {
+                foreach ($letters as $j) {
+                    if ($rows[$j]['mid'] !== null && isset($refs[$rows[$j]['mid']])) {
+                        $original = $j;
+                    }
                 }
+            }
+            $subject = self::bareSubject($row['subject']);
+            if ($original === null && self::isInformativeSubject($subject)) {
+                $inWindow = array_values(array_filter($clientLetters[$subject] ?? [], fn ($j) => $rows[$j]['ts'] <= $row['ts'] + 600 && $row['ts'] - $rows[$j]['ts'] < 3 * 86400));
+                $original = count($inWindow) === 1 ? $inWindow[0] : null;
             }
             if ($original === null) {
                 continue;
@@ -287,7 +299,7 @@ class RetroAssembler
                 $anchors[$key][] = ['root' => $root, 'ts' => $first['ts'] ?? 0, 'client' => mb_strtolower($client)];
                 // То же обращение второй раз (переслал себе же, продублировал): тема без Re/Fwd совпадает.
                 $subject = self::bareSubject($first['subject']);
-                if ($subject !== '' && isset($sameLetter[$key][$subject])) {
+                if (self::isInformativeSubject($subject) && isset($sameLetter[$key][$subject])) {
                     $this->union($sameLetter[$key][$subject], $root);
                     $stats['same_letter_joined'] = ($stats['same_letter_joined'] ?? 0) + 1;
                 }
@@ -430,6 +442,19 @@ class RetroAssembler
     public static function bareSubject(string $subject): string
     {
         return mb_strtolower(trim(preg_replace('/^\s*((re|fw|fwd|aw|wg|ответ|отв|пересл)\s*(\[\d+\])?\s*:\s*)+/iu', '', $subject)));
+    }
+
+    /**
+     * Тема, по которой можно связывать письма разных цепочек: не пустая и не общее слово
+     * («Запрос», «Запрос КП», «Заявка»), не обломок заголовков («Date: …», «To: undisclosed…»).
+     */
+    public static function isInformativeSubject(string $bare): bool
+    {
+        $bare = trim($bare);
+
+        return mb_strlen($bare) >= 6
+            && preg_match('/^(запрос(\s+(кп|цены|цен|стоимости|наличия))?|кп|коммерческое предложение|заявка|заказ|request|rfq|price request|без темы|\(без темы\)|no subject)[\s.!:]*$/iu', $bare) !== 1
+            && preg_match('/^(date|to|from|cc|subject|тема|кому|от):/iu', $bare) !== 1;
     }
 
     /** Узел цепочки письма для union (как rootOf, но без поиска корня). */
