@@ -154,32 +154,49 @@ class SuppliersMineFromOutboundCommand extends Command
             return self::SUCCESS;
         }
 
-        // 3) APPLY: регистрируем + описание из номенклатуры + матрица.
-        $done = 0;
+        // 3) APPLY (с 06.11.2026 поставщики живут в QuoteParts): по поставщику-организации — описание
+        // по номенклатуре наших запросов на все его адреса и матрица; то и другое — в QuoteParts, копия
+        // разложит по адресам. Адреса, которых нет у поставщиков, не трогаем — претендентов из всей
+        // истории не плодим.
+        $byOrg = [];
         foreach ($suppliers as $r) {
+            $row = \App\Models\Supplier::query()->whereRaw('lower(email) = ?', [mb_strtolower($r['email'])])->first();
+            if ($row !== null && $row->supplier_organization_id !== null) {
+                $byOrg[(int) $row->supplier_organization_id][] = $r['email'];
+            }
+        }
+        $qp = app(\App\Services\QuoteParts\QuotePartsClient::class);
+        $mirror = app(\App\Services\QuoteParts\SupplierMirrorService::class);
+        $done = 0;
+        foreach ($byOrg as $orgId => $emails) {
             if ($limit > 0 && $done >= $limit) {
                 break;
             }
-            $email = $r['email'];
-            $supplier = $this->registry->registerEmail($email, null, null);
-            if ($supplier === null) {
+            $org = \App\Models\SupplierOrganization::query()->find($orgId);
+            if ($org === null || ! $org->qp_key || $org->qp_status === null) {
                 continue;
             }
-
-            // Не перезатираем уже заполненное описание (ручные правки важнее).
-            if (trim((string) $supplier->assortment_description) === '') {
-                $text = $this->gatherRfqText($email);
-                $desc = $this->summarize($text);
-                if ($desc !== null && $desc !== '') {
-                    $supplier->forceFill(['assortment_description' => $desc])->save();
+            // Описание, уже заполненное человеком, не перезатираем.
+            $description = trim((string) (($org->qp_payload ?? [])['profile']['assortment_description'] ?? ''));
+            try {
+                if ($description === '') {
+                    $text = implode("\n", array_map(fn ($e) => $this->gatherRfqText($e), array_unique($emails)));
+                    $description = (string) $this->summarize(mb_substr($text, 0, 12000));
+                    if ($description === '') {
+                        continue;
+                    }
+                    $mirror->apply($qp->updateSupplier($org->qp_key, ['profile' => ['assortment_description' => mb_substr($description, 0, 5000)]]));
                 }
+                $rules = (array) ((((array) (($org->qp_payload ?? [])['assortment_matrix'] ?? []))['rules']) ?? []);
+                $matrix = $this->matrixBuilder->compute($description, $rules);
+                if ($matrix !== null) {
+                    $mirror->apply($qp->setSupplierMatrix($org->qp_key, $matrix));
+                }
+                $this->line(sprintf('  ✓ %-40s категории: %s', mb_strimwidth($org->name, 0, 40, '…'), implode(', ', array_slice((array) ($matrix['categories'] ?? []), 0, 6)) ?: '—'));
+                $done++;
+            } catch (\Throwable $e) {
+                $this->warn('  '.$org->name.': '.mb_substr($e->getMessage(), 0, 150));
             }
-
-            $this->matrixBuilder->rebuild($supplier->fresh());
-            $supplier->refresh();
-            $cats = is_array($supplier->assortment_matrix) ? ($supplier->assortment_matrix['categories'] ?? []) : [];
-            $this->line(sprintf('  ✓ %-38s категории: %s', $email, implode(', ', array_slice($cats, 0, 6)) ?: '—'));
-            $done++;
         }
 
         $this->newLine();
