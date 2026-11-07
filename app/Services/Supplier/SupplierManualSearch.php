@@ -37,6 +37,7 @@ class SupplierManualSearch
         $matched = Supplier::query()
             ->with('organization:id,name')
             ->whereNotNull('email')
+            ->notArchived()
             ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like)
                 ->orWhereHas('organization', fn ($o) => $o->where('name', 'ilike', $like)))
             ->orderBy('id')

@@ -84,6 +84,7 @@ class QuotePartsPanel extends Component
     {
         return Supplier::query()
             ->where(fn ($q) => $q->whereNotNull('quoteparts_link_id')->orWhereIn('id', $this->extraSupplierIds))
+            ->notArchived()
             ->with('organization:id,name')->orderBy('name')
             ->get(['id', 'name', 'email', 'supplier_organization_id', 'quoteparts_status', 'quoteparts_offsystem', 'quoteparts_link_id'])
             ->sortBy(fn ($s) => [$s->quoteparts_status === 'active' ? 0 : 1, (string) $s->name])
@@ -101,7 +102,7 @@ class QuotePartsPanel extends Component
         }
         $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $term).'%';
 
-        return Supplier::query()->whereNotNull('email')->with('organization:id,name')
+        return Supplier::query()->whereNotNull('email')->notArchived()->with('organization:id,name')
             ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like)
                 ->orWhereHas('organization', fn ($o) => $o->where('name', 'ilike', $like)))
             ->whereNull('quoteparts_link_id')->whereNotIn('id', $this->extraSupplierIds)

@@ -73,6 +73,16 @@ class SupplierMirrorService
                     'qp_synced_at' => now(),
                 ])->save();
 
+                // Архив ведёт QuoteParts (07.11.2026). Старый ответ без поля архива копию не трогает.
+                if (array_key_exists('archived_at', $link)) {
+                    $archivedAt = $link['archived_at'] ? \Illuminate\Support\Carbon::parse($link['archived_at']) : null;
+                    $org->forceFill([
+                        'archived_at' => $archivedAt,
+                        'archived_reason' => $archivedAt ? ($link['archived_reason'] ?? null) : null,
+                        'archived_by_user_id' => $archivedAt ? $org->archived_by_user_id : null,
+                    ])->save();
+                }
+
                 foreach ($this->contacts($link) as $email => $c) {
                     $row = Supplier::query()->where('supplier_organization_id', $org->id)->whereRaw('lower(email) = ?', [$email])->first();
                     if ($row === null) {

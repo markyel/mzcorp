@@ -17,6 +17,7 @@
             <span class="chip chip-attn mono" title="Временный ключ до кода 1С">{{ $org->qp_key }}</span>
         @endif
         <span class="chip {{ $org->qp_status === 'active' ? 'chip-ok' : '' }}">{{ $statusLabel }}</span>
+        @if($org->isArchived())<span class="chip chip-danger" title="Не виден в реестре и не предлагается в запросах цен">в архиве</span>@endif
         @if($p['is_agent'] ?? false)<span class="chip chip-info">агент</span>@endif
         <button type="button" wire:click="toggleAgent" class="btn btn-xs text-fg-3" title="Агент сам ищет поставщиков для нас: в его ценах — реальный поставщик">{{ ($p['is_agent'] ?? false) ? 'не агент' : 'это агент' }}</button>
         @if($org->qp_synced_at)<span class="text-[12px] text-fg-4 ml-auto">сверено с QuoteParts {{ $org->qp_synced_at->format('d.m H:i') }}</span>@endif
@@ -182,5 +183,28 @@
         <span class="text-fg-3">Это же поставщик:</span>
         <input type="text" wire:model="mergeQuery" wire:keydown.enter="mergeIn" placeholder="код 1С или название" class="{{ $in }}" style="max-width:240px">
         <button type="button" wire:click="mergeIn" wire:confirm="Присоединить найденного поставщика к «{{ $org->name }}»? Его адреса и история перейдут сюда." class="btn btn-xs">Объединить сюда</button>
+    </div>
+
+    {{-- Архив: неактуальный поставщик не виден в реестре и не предлагается в запросах цен --}}
+    <div class="ds-card">
+        <div class="ds-card-header"><h3>Архив</h3>
+            <span class="text-[12px] text-fg-3 ml-2">{{ $org->inQuoteParts() ? 'в QuoteParts тоже: новые запросы ему не уходят, в кабинете поставщика нас нет' : 'поставщика нет в QuoteParts — архив только в mzCorp' }}</span>
+        </div>
+        <div class="ds-card-body text-[12.5px] space-y-2">
+            @if($org->isArchived())
+                <div>
+                    В архиве с {{ $org->archived_at->format('d.m.Y H:i') }}@if($org->archivedBy) · {{ $org->archivedBy->name }}@endif
+                    @if($org->archived_reason)<div class="text-fg-3 mt-0.5">Причина: {{ $org->archived_reason }}</div>@endif
+                </div>
+                <button type="button" wire:click="restoreFromArchive" wire:loading.attr="disabled" wire:target="restoreFromArchive" class="btn btn-xs">Вернуть из архива</button>
+            @else
+                <div class="text-fg-3">История запросов и переписка сохранятся, письма от поставщика по-прежнему узнаются. Вернуть можно в любой момент: реестр → фильтр «Архив».</div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <input type="text" wire:model="archiveReason" maxlength="500" placeholder="Причина (необязательно): не работаем, закрылся, дубль…" class="{{ $in }}" style="max-width:420px">
+                    <button type="button" wire:click="archive" wire:loading.attr="disabled" wire:target="archive"
+                            wire:confirm="Убрать «{{ $org->name }}» в архив? Он перестанет предлагаться в запросах цен{{ $org->inQuoteParts() ? ', и QuoteParts перестанет слать ему запросы' : '' }}." class="btn btn-xs btn-danger">В архив</button>
+                </div>
+            @endif
+        </div>
     </div>
 </div>

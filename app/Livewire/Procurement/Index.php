@@ -857,7 +857,7 @@ class Index extends Component
     #[Computed]
     public function supplierGroups(): array
     {
-        return \App\Models\SupplierGroup::query()->with(['suppliers' => fn ($q) => $q->whereNotNull('email')->where('email', '!=', '')])
+        return \App\Models\SupplierGroup::query()->with(['suppliers' => fn ($q) => $q->whereNotNull('email')->where('email', '!=', '')->notArchived()])
             ->orderBy('sort_order')->orderBy('name')->get()
             ->map(function ($g) {
                 $ids = $g->suppliers->pluck('id')->map(fn ($v) => (int) $v)->all();

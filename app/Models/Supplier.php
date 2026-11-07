@@ -66,6 +66,18 @@ class Supplier extends Model
         return $this->belongsTo(SupplierOrganization::class, 'supplier_organization_id');
     }
 
+    /**
+     * Адреса поставщиков не из архива — для подбора, групп и поиска в запросах цен.
+     * Архивируется поставщик (организация) целиком.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<Supplier>  $query
+     */
+    public function scopeNotArchived($query): void
+    {
+        $query->where(fn ($q) => $q->whereNull($this->qualifyColumn('supplier_organization_id'))
+            ->orWhereNotIn($this->qualifyColumn('supplier_organization_id'), SupplierOrganization::query()->select('id')->whereNotNull('archived_at')));
+    }
+
     /** Группы («Китай», «Европа», «Поручни»…) — выбор поставщиков для запроса цены группой. */
     public function groups(): BelongsToMany
     {

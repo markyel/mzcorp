@@ -173,7 +173,8 @@ class Index extends Component
     /** Поставщики, приглашённые в QuoteParts (приглашают из карточки поставщика). */
     private function invitedSuppliersQuery(): \Illuminate\Database\Eloquent\Builder
     {
-        return \App\Models\Supplier::query()->whereNotNull('quoteparts_link_id');
+        // Архивные (07.11.2026) — только в реестре с фильтром «Архив».
+        return \App\Models\Supplier::query()->whereNotNull('quoteparts_link_id')->notArchived();
     }
 
     /** Сколько поставщиков (связей QuoteParts) приглашено — счётчик вкладки, без загрузки списка. */

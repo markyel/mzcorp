@@ -127,6 +127,77 @@ class Index extends Component
         return SupplierGroup::query()->withCount('suppliers')->orderBy('sort_order')->orderBy('name')->get();
     }
 
+    /* --- Архив поставщиков (07.11.2026): неактуальные не видны в реестре и не предлагаются в запросах --- */
+
+    /** Реестр показывает архив вместо действующих поставщиков. */
+    #[Url(as: 'archive', except: false)]
+    public bool $showArchived = false;
+
+    /** @var list<int> отмеченные в реестре поставщики (организации) — для архива разом */
+    public array $archiveSelected = [];
+
+    public string $bulkArchiveReason = '';
+
+    public function setArchiveView(bool $archived): void
+    {
+        $this->showArchived = $archived;
+        $this->archiveSelected = [];
+        $this->resetPage();
+    }
+
+    /** @param  list<int>  $ids  поставщики текущей страницы */
+    public function selectPage(array $ids): void
+    {
+        $ids = array_map('intval', $ids);
+        // Вся страница уже отмечена — снять её, иначе отметить.
+        $this->archiveSelected = array_values(array_diff($ids, $this->archiveSelected) === []
+            ? array_diff($this->archiveSelected, $ids)
+            : array_unique([...$this->archiveSelected, ...$ids]));
+    }
+
+    #[Computed]
+    public function archivedCount(): int
+    {
+        return \App\Models\SupplierOrganization::query()->archived()->count();
+    }
+
+    public function archiveSelectedOrganizations(\App\Services\Supplier\SupplierArchiveService $archive): void
+    {
+        $this->validate(['bulkArchiveReason' => 'nullable|string|max:500'], [], ['bulkArchiveReason' => 'причина']);
+        $result = $archive->archiveMany(array_map('intval', $this->archiveSelected), $this->bulkArchiveReason, auth()->user());
+        $this->afterBulk('В архиве: '.$result['done'].'.', $result['failed']);
+    }
+
+    public function restoreSelectedOrganizations(\App\Services\Supplier\SupplierArchiveService $archive): void
+    {
+        $done = 0;
+        $failed = [];
+        foreach (\App\Models\SupplierOrganization::query()->whereIn('id', array_map('intval', $this->archiveSelected))->archived()->get() as $org) {
+            try {
+                $archive->restore($org, auth()->user());
+                $done++;
+            } catch (\Throwable $e) {
+                $failed[(string) $org->name] = $e->getMessage();
+            }
+        }
+        $this->afterBulk('Возвращено из архива: '.$done.'.', $failed);
+    }
+
+    /** @param  array<string, string>  $failed  название => причина */
+    private function afterBulk(string $message, array $failed): void
+    {
+        $this->archiveSelected = [];
+        $this->bulkArchiveReason = '';
+        unset($this->organizations, $this->archivedCount);
+        if ($failed !== []) {
+            $first = array_key_first($failed);
+            $this->dispatch('toast', type: 'error', message: $message.' Не удалось: '.count($failed).' — «'.$first.'»: '.mb_substr($failed[$first], 0, 200));
+
+            return;
+        }
+        $this->dispatch('toast', type: 'success', message: $message);
+    }
+
     public function setGroupFilter(int $groupId): void
     {
         $this->groupFilter = $this->groupFilter === $groupId ? 0 : $groupId;
@@ -406,7 +477,9 @@ class Index extends Component
     public function organizations()
     {
         $q = \App\Models\SupplierOrganization::query()
-            ->withCount(['suppliers as contacts_count' => fn ($s) => $s->whereNotNull('email')]);
+            ->withCount(['suppliers as contacts_count' => fn ($s) => $s->whereNotNull('email')])
+            // Архивные — только во вкладке «Архив».
+            ->when($this->showArchived, fn ($w) => $w->archived()->with('archivedBy:id,name'), fn ($w) => $w->notArchived());
         if ($this->groupFilter > 0) {
             $q->whereHas('suppliers.groups', fn ($g) => $g->whereKey($this->groupFilter));
         }

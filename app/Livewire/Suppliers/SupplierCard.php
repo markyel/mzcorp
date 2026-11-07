@@ -319,6 +319,31 @@ class SupplierCard extends Component
         unset($this->groupOptions);
     }
 
+    public string $archiveReason = '';
+
+    /** В архив: не виден в реестре, не предлагается в запросах цен; в QuoteParts — тоже (если связь там есть). */
+    public function archive(\App\Services\Supplier\SupplierArchiveService $archive): void
+    {
+        $this->validate(['archiveReason' => 'nullable|string|max:500'], [], ['archiveReason' => 'причина']);
+        try {
+            $this->org = $archive->archive($this->org, $this->archiveReason, auth()->user());
+            $this->archiveReason = '';
+            $this->dispatch('toast', message: '«'.$this->org->name.'» в архиве.', type: 'success');
+        } catch (Throwable $e) {
+            $this->dispatch('toast', message: $e->getMessage(), type: 'error');
+        }
+    }
+
+    public function restoreFromArchive(\App\Services\Supplier\SupplierArchiveService $archive): void
+    {
+        try {
+            $this->org = $archive->restore($this->org, auth()->user());
+            $this->dispatch('toast', message: '«'.$this->org->name.'» снова в работе.', type: 'success');
+        } catch (Throwable $e) {
+            $this->dispatch('toast', message: $e->getMessage(), type: 'error');
+        }
+    }
+
     /** Правка в QuoteParts → ответ в копию. */
     private function push(callable $call, string $done): bool
     {

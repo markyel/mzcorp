@@ -51,6 +51,7 @@ class SupplierMatchService
 
         return Supplier::query()
             ->whereNotNull('assortment_matrix')
+            ->notArchived() // архивный поставщик не предлагается (07.11.2026)
             ->get()
             ->filter(fn (Supplier $s) => $this->matches($s, $brand, $categoryTerms, false))
             ->pipe(fn (Collection $c) => self::representatives($c));
@@ -71,6 +72,7 @@ class SupplierMatchService
 
         return Supplier::query()
             ->whereNotNull('assortment_matrix')
+            ->notArchived() // архивный поставщик не предлагается (07.11.2026)
             ->get()
             ->filter(fn (Supplier $s) => $this->matches($s, $brand, $categoryTerms, $brandCanonical))
             ->pipe(fn (Collection $c) => self::representatives($c));

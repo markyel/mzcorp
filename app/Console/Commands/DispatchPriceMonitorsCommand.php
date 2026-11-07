@@ -58,6 +58,10 @@ class DispatchPriceMonitorsCommand extends Command
         foreach ($groups as $key => $group) {
             [$userId, $supplierCsv] = explode('|', (string) $key, 2);
             $supplierIds = array_values(array_filter(array_map('intval', explode(',', $supplierCsv))));
+            // Поставщик ушёл в архив после включения мониторинга — ему больше не пишем (QuoteParts и не примет).
+            if ($supplierIds !== []) {
+                $supplierIds = \App\Models\Supplier::query()->whereIn('id', $supplierIds)->notArchived()->pluck('id')->map(fn ($v) => (int) $v)->values()->all();
+            }
             $user = $userId !== '' ? User::find((int) $userId) : null;
 
             // Позиция могла быть выключена в каталоге после включения мониторинга.

@@ -212,11 +212,36 @@
             @php
                 $statusLabel = ['active' => 'в кабинете', 'mail' => 'через QuoteParts', 'invited' => 'приглашён', 'terms_discussed' => 'обсуждает условия', 'declined' => 'отказался'];
                 $orgGroups = $this->organizationGroups;
+                $pageIds = $this->organizations->pluck('id')->map(fn ($v) => (int) $v)->all();
+                $picked = count($archiveSelected);
             @endphp
+            {{-- Архив: действующие / архивные; отмеченных — в архив или обратно разом. --}}
+            <div class="px-4 pb-2 flex flex-wrap items-center gap-2 text-[12.5px]">
+                <button type="button" wire:click="setArchiveView(false)" class="btn btn-xs {{ $showArchived ? '' : 'btn-primary' }}">Действующие</button>
+                <button type="button" wire:click="setArchiveView(true)" class="btn btn-xs {{ $showArchived ? 'btn-primary' : '' }}"
+                        title="Поставщики в архиве не видны в реестре и не предлагаются в запросах цен">Архив · {{ $this->archivedCount }}</button>
+                @if($picked > 0)
+                    <span class="text-fg-3 ml-2">отмечено: {{ $picked }}</span>
+                    @if($showArchived)
+                        <button type="button" wire:click="restoreSelectedOrganizations" wire:loading.attr="disabled" wire:target="restoreSelectedOrganizations" class="btn btn-xs">Вернуть из архива</button>
+                    @else
+                        <input type="text" wire:model="bulkArchiveReason" maxlength="500" placeholder="Причина (необязательно)"
+                               class="h-[26px] px-2 border border-border rounded-md bg-surface text-[12.5px] outline-none focus:border-sky-500" style="width:240px">
+                        <button type="button" wire:click="archiveSelectedOrganizations" wire:loading.attr="disabled" wire:target="archiveSelectedOrganizations"
+                                wire:confirm="Убрать в архив отмеченных поставщиков: {{ $picked }}? Они перестанут предлагаться в запросах цен, QuoteParts перестанет слать им запросы." class="btn btn-xs btn-danger">В архив</button>
+                    @endif
+                    <button type="button" wire:click="$set('archiveSelected', [])" class="btn btn-xs text-fg-3">Снять отметки</button>
+                @endif
+            </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-[12.5px]">
                     <thead class="text-fg-3 text-[12px] border-y border-border">
                         <tr>
+                            <th class="px-3 py-2" style="width:28px">
+                                @if($pageIds !== [])
+                                    <input type="checkbox" wire:click="selectPage(@js($pageIds))" @checked(array_diff($pageIds, $archiveSelected) === []) title="Отметить всех на странице">
+                                @endif
+                            </th>
                             <th class="text-left px-3 py-2">Поставщик</th>
                             <th class="text-left px-3 py-2">Код 1С</th>
                             <th class="text-left px-3 py-2">QuoteParts</th>
@@ -229,9 +254,13 @@
                         @forelse($this->organizations as $o)
                             @php $p = (array) ($o->qp_payload ?? []); @endphp
                             <tr wire:key="org-{{ $o->id }}" class="border-b border-border-subtle hover:bg-hover">
+                                <td class="px-3 py-2"><input type="checkbox" wire:model.live="archiveSelected" value="{{ $o->id }}"></td>
                                 <td class="px-3 py-2">
                                     <a href="{{ route('suppliers.card', $o->id) }}" wire:navigate class="text-sky-700 hover:underline font-medium">{{ $o->name }}</a>
                                     @if($p['is_agent'] ?? false)<span class="chip chip-info ml-1">агент</span>@endif
+                                    @if($o->isArchived())
+                                        <div class="text-[11.5px] text-fg-4 mt-0.5">в архиве с {{ $o->archived_at->format('d.m.Y') }}{{ $o->archivedBy ? ' · '.$o->archivedBy->name : '' }}{{ $o->archived_reason ? ' · '.$o->archived_reason : '' }}</div>
+                                    @endif
                                 </td>
                                 <td class="px-3 py-2 mono">
                                     @if($o->onec_code){{ $o->onec_code }}
@@ -247,7 +276,7 @@
                                 <td class="px-3 py-2 text-fg-3">{{ implode(', ', $orgGroups[$o->id] ?? []) }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="6" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' || $groupFilter > 0 ? 'Ничего не найдено.' : 'Поставщиков нет. Добавьте адрес поставщика выше.' }}</td></tr>
+                            <tr><td colspan="7" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ $showArchived ? 'В архиве никого нет.' : (trim($search) !== '' || $groupFilter > 0 ? 'Ничего не найдено.' : 'Поставщиков нет. Добавьте адрес поставщика выше.') }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>
