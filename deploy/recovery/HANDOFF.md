@@ -91,7 +91,7 @@ php vendor/bin/phpunit tests/Unit/Retro tests/Unit/QuoteParts tests/Unit/Supplie
 - Код `/var/www/quoteparts`, пользователь `quoteparts`. **Запущен 06.11:** воркер `quoteparts-worker` (2 процесса), cron `quoteparts` → `schedule:run`. Чтение `orders@myzip.ru` и `myzip@quoteparts.net` каждую минуту (позиции выставлены на 06.11), фото — каждые 30 мин.
 - **Напоминания поставщикам и закрытие по сроку выключены:** `QP_RFQ_TICK=false` (включить по слову заказчика, затем `config:cache`).
 - Временный ретранслятор ответов `/opt/orders-relay` **удалён из cron** 06.11 (файлы остались).
-- **Остаётся обход:** `/etc/hosts` `127.0.0.1 quoteparts.ru` и `QUOTEPARTS_URL=http://quoteparts.ru` в `.env` mzCorp — пока DNS `quoteparts.ru` у Beget (панель недоступна). Вернуть `https` после переноса DNS.
+- **quoteparts.ru (07.11):** A-записи `@` и `www` в DNS Beget смотрят на этот сервер, сертификат Let's Encrypt (certbot webroot, после продления хук `renewal-hooks/deploy/reload-nginx.sh` перечитывает nginx), http → https, www → без www. Обход в `/etc/hosts` снят, `QUOTEPARTS_URL=https://quoteparts.ru`. Копии до правки: `/root/*.bak-2026-11-07`. Сам домен по-прежнему зарегистрирован у Beget (NS Beget, оплачен до 14.10.2027).
 - API QuoteParts для поставщиков: `GET /supplier-links` (всё, `updated_since`), `PATCH /supplier-links/{key}` (профиль, условия, карточка, ключ), `PUT …/matrix`, `PUT …/contacts` (с телефоном).
 
 ## Ждём от заказчика
