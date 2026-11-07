@@ -333,7 +333,10 @@
                         @forelse($this->invitedGroups as $gi => $g)
                             <tr wire:key="qps-{{ $gi }}" class="border-b border-border-subtle hover:bg-hover align-top">
                                 <td class="px-3 py-2">
-                                    <div class="font-medium text-fg-1">{{ $g['name'] }}</div>
+                                    <div class="font-medium">
+                                        <a href="{{ $g['edit_url'] }}" wire:navigate class="text-fg-1 hover:text-sky-700 hover:underline" title="Открыть карточку поставщика для редактирования">{{ $g['name'] }}</a>
+                                        <a href="{{ $g['edit_url'] }}" wire:navigate class="ml-1 text-[11px] font-normal text-sky-700 hover:underline">✎ редактировать</a>
+                                    </div>
                                     @foreach($g['suppliers'] as $s)
                                         <div class="text-[11.5px] mt-0.5">
                                             <a href="{{ route('suppliers.registry-edit', $s) }}" class="text-sky-700 hover:underline">{{ $s->email }}</a>

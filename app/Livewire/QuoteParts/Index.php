@@ -180,7 +180,7 @@ class Index extends Component
      * Приглашённые поставщики группами: одна связь QuoteParts (организация) — одна строка со
      * всеми её адресами. Статус и комментарий у связи общие.
      *
-     * @return \Illuminate\Support\Collection<int, array{name:string, status:?string, comment:?string, invited_at:mixed, suppliers:\Illuminate\Support\Collection}>
+     * @return \Illuminate\Support\Collection<int, array{name:string, edit_url:string, status:?string, comment:?string, invited_at:mixed, suppliers:\Illuminate\Support\Collection}>
      */
     #[Computed]
     public function invitedGroups()
@@ -195,6 +195,10 @@ class Index extends Component
 
                 return [
                     'name' => (string) ($orgs[$first->supplier_organization_id] ?? null ?: $first->name ?: $first->email),
+                    // Куда вести на редактирование: карточка организации, без неё — карточка адреса.
+                    'edit_url' => ($orgId = $rows->pluck('supplier_organization_id')->filter()->first())
+                        ? route('suppliers.card', $orgId)
+                        : route('suppliers.registry-edit', $first),
                     'status' => $rows->first()->quoteparts_status,
                     'comment' => $rows->pluck('quoteparts_comment')->filter()->first(),
                     'invited_at' => $rows->min('quoteparts_invited_at'),
