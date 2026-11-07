@@ -207,15 +207,7 @@
                     <label class="block text-[11.5px] text-fg-3 mb-1">Добавить поставщика вручную</label>
                     <input type="search" wire:model.live.debounce.300ms="supplierSearch" placeholder="Поиск: название / email / домен"
                            class="h-[30px] w-full max-w-[420px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
-                    @if($this->searchResults->isNotEmpty())
-                        <div class="mt-1 border border-border rounded-md max-w-[420px] divide-y divide-border-subtle">
-                            @foreach($this->searchResults as $s)
-                                <button type="button" wire:click="addSupplier({{ $s->id }})" class="w-full text-left px-3 py-1.5 hover:bg-hover text-[12.5px]">
-                                    {{ $s->name ?: ($s->organization?->name ?: $s->email) }} <span class="text-fg-4 mono text-[11px]">{{ $s->email }}</span>
-                                </button>
-                            @endforeach
-                        </div>
-                    @endif
+                    @include('partials.supplier-manual-search-results', ['results' => $this->searchResults])
                 </div>
             @endif
         </div>

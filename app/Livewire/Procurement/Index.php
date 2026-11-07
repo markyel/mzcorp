@@ -1002,22 +1002,17 @@ class Index extends Component
         return \App\Services\Supplier\SupplierOrganizationService::withOrganizations($out);
     }
 
+    /**
+     * Поиск поставщиков для ручного добавления: одна строка на поставщика, по клику — его
+     * представитель; конкретный адрес — опцией (SupplierManualSearch).
+     *
+     * @return list<array<string, mixed>>
+     */
     #[Computed]
-    public function searchResults()
+    public function searchResults(): array
     {
-        $s = trim($this->supplierSearch);
-        if (mb_strlen($s) < 2) {
-            return collect();
-        }
-        $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
-        $existing = collect($this->supplierOptions())->pluck('id')->all();
-
-        return Supplier::query()
-            ->with('organization:id,name')
-            ->where(fn ($q) => $q->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('domain', 'ilike', $like)
-                ->orWhereHas('organization', fn ($o) => $o->where('name', 'ilike', $like)))
-            ->whereNotIn('id', $existing ?: [0])
-            ->orderBy('name')->limit(8)->get(['id', 'name', 'email', 'supplier_organization_id']);
+        return app(\App\Services\Supplier\SupplierManualSearch::class)
+            ->search($this->supplierSearch, collect($this->supplierOptions())->pluck('id')->map(fn ($v) => (int) $v)->all());
     }
 
     public function addSupplier(int $supplierId): void
