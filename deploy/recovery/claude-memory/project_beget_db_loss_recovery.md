@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: <скрыто>
-  modified: 2026-11-04T22:52:46.058Z
+  modified: 2026-11-07T13:59:56.838Z
 ---
 
 02.11.2026 у Beget пропали VPS <IP>, облачные базы и DNS; 03.11 заказчик сообщил, что базы MyLift и QuoteParts потеряны безвозвратно, своих копий не было. Судьба VPS (файлы, `.env`) на 04.11 неизвестна: SSH по-прежнему не отвечает. Работа идёт по `deploy/recovery/PLAN.md` (коммит 21fc1785), скрипты копии — `deploy/backup/`.
@@ -22,4 +22,4 @@ metadata:
 
 **Why:** сведения о проде в [[prod-deploy]] и других заметках описывают состояние до сбоя; новый сервер планируется на Reg.ru.
 
-**How to apply:** перед любой работой с продом сверяться с PLAN.md и отмечать там сделанное. На этом компьютере `deploy/backup/pull-backup.sh` без правок не работает: в `~/.ssh/config` нет алиаса `mzcorp` (есть `mzcorp-prod`), а путь по умолчанию `C:\Users\Boag` не существует (домашняя папка — `boag7`). Локальный `scripts/prod-backup.sh` рассчитан на живую базу и перекрыт `deploy/backup/`.
+**How to apply:** перед любой работой с продом сверяться с PLAN.md и отмечать там сделанное. С 07.11 на этом компьютере есть алиас `ssh mzcorp` на новый сервер по ключу (см. [[new-server-access]]); `mzcorp-prod` — старый Beget, не отвечает. Путь по умолчанию в `deploy/backup/pull-backup.sh` — `C:\Users\Boag`, здесь домашняя папка `boag7`: передавать путь явно. Локальный `scripts/prod-backup.sh` рассчитан на живую базу и перекрыт `deploy/backup/`.

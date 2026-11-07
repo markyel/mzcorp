@@ -4,7 +4,7 @@ description: "Перед просьбой ввести пароль/ключ ч�
 metadata:
   node_type: memory
   type: feedback
-  originSessionId: c87a27b2-8e4a-405b-a74b-e84fde0264d7
+  originSessionId: <скрыто>
   modified: 2026-11-05T16:01:18.418Z
 ---
 

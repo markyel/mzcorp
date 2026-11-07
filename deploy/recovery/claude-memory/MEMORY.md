@@ -1,6 +1,7 @@
 - [Отвечать по-русски](feedback_answer_in_russian.md) — весь текст пользователю на русском; коммиты на английском
 - [⚠ Потеря баз Beget](project_beget_db_loss_recovery.md) — 02.11.2026 базы потеряны; восстановление по deploy/recovery/PLAN.md, новый сервер Reg.ru
 - [SSH-пароль остаётся](feedback_ssh_password_stays.md) — вход по паролю на новом сервере не отключать, нужен с других компьютеров
+- [Новый прод: доступ и выкладка](reference_new_server_access.md) — ssh mzcorp по ключу; выкладка mzCorp (www-data, route:cache) и QuoteParts (quoteparts, config:cache); только по «да»
 - [Prod deploy](reference_prod_deploy.md) — (до сбоя) ssh root@<IP>; pull от www-data + view/config clear + queue:restart + fpm reload; БД только на проде
 - [Prod outage: root-owned log](reference_prod_outage_root_log_owner.md) — root-tinker создал лог под root → воркеры встали; всё на проде от www-data
 - [419 при ответе поставщику](reference_session_419_fix.md) — computed `messages()` в Livewire = TypeError→419; не называть методы messages/rules/validationAttributes
@@ -83,3 +84,5 @@
 - [Telegram заблокирован с Reg.ru — обход через mzhk](telegram-blocked-route-via-mzhk.md) — исходящие tg-tunnel SOCKS, вебхук через quoteparts.net/relay, очередь bot
 - [Поставщики переезжают в QuoteParts — решения](suppliers-move-to-quoteparts-decisions.md) — источник QP, правка в mzCorp через API, ключ = код 1С, матрица и телефон в QP, претенденты вручную
 - [Ввод секретов через ssh cat >](secret-entry-check-terminal-free.md) — проверять, что прошлая команда ввода завершилась; PowerShell: Ctrl+Z, Enter
+- [Архив и ручной поиск поставщиков](reference_supplier_archive_search.md) — поиск = поставщик→представитель; архив в QuoteParts + копия, Supplier::notArchived()
+- [Переключатель режима](reference_ops_mode_switch.md) — deploy/ops/mode.sh наблюдение↔полный; на 07.11 не переключали, после оплат 1С

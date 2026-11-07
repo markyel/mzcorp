@@ -4,7 +4,7 @@ description: "Решения заказчика 06.11.2026 о переводе �
 metadata:
   node_type: memory
   type: project
-  originSessionId: c87a27b2-8e4a-405b-a74b-e84fde0264d7
+  originSessionId: <скрыто>
   modified: 2026-11-06T17:48:29.448Z
 ---
 
