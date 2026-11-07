@@ -19,6 +19,8 @@ use Throwable;
  */
 class Index extends Component
 {
+    use \Livewire\WithPagination;
+
     public const PER_PAGE = 50;
 
     #[Url(except: 'candidates')]
@@ -48,11 +50,13 @@ class Index extends Component
     {
         $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'questions', 'support', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
         $this->perPage = self::PER_PAGE;
+        $this->resetPage('sp');
     }
 
     public function updatedSearch(): void
     {
         $this->perPage = self::PER_PAGE;
+        $this->resetPage('sp');
     }
 
     public function loadMore(): void
@@ -167,29 +171,57 @@ class Index extends Component
     }
 
     /** Поставщики, приглашённые в QuoteParts (приглашают из карточки поставщика). */
-    #[Computed]
-    public function invitedSuppliers()
+    private function invitedSuppliersQuery(): \Illuminate\Database\Eloquent\Builder
     {
-        return \App\Models\Supplier::query()->whereNotNull('quoteparts_link_id')
-            ->orderByRaw("case quoteparts_status when 'terms_discussed' then 0 when 'invited' then 1 when 'active' then 2 else 3 end")
-            ->orderByDesc('quoteparts_invited_at')
-            ->get(['id', 'name', 'email', 'contact_person', 'language', 'supplier_organization_id', 'quoteparts_link_id', 'quoteparts_status', 'quoteparts_invited_at', 'quoteparts_comment']);
+        return \App\Models\Supplier::query()->whereNotNull('quoteparts_link_id');
+    }
+
+    /** Сколько поставщиков (связей QuoteParts) приглашено — счётчик вкладки, без загрузки списка. */
+    #[Computed]
+    public function invitedGroupsCount(): int
+    {
+        return $this->invitedSuppliersQuery()->distinct()->count('quoteparts_link_id');
     }
 
     /**
      * Приглашённые поставщики группами: одна связь QuoteParts (организация) — одна строка со
-     * всеми её адресами. Статус и комментарий у связи общие.
+     * всеми её адресами. Статус и комментарий у связи общие. Поиск (по названию организации,
+     * имени, адресу, контакту) и страницы — в базе: поставщиков сотни, адресов тысячи.
      *
-     * @return \Illuminate\Support\Collection<int, array{name:string, edit_url:string, status:?string, comment:?string, invited_at:mixed, suppliers:\Illuminate\Support\Collection}>
+     * @return \Illuminate\Pagination\LengthAwarePaginator<int, array{name:string, edit_url:string, status:?string, comment:?string, invited_at:mixed, suppliers:\Illuminate\Support\Collection}>
      */
     #[Computed]
     public function invitedGroups()
     {
-        $orgs = \App\Models\SupplierOrganization::query()
-            ->whereIn('id', $this->invitedSuppliers->pluck('supplier_organization_id')->filter()->unique())->pluck('name', 'id');
+        $search = trim($this->search);
+        $like = '%'.addcslashes($search, '%_\\').'%';
 
-        return $this->invitedSuppliers
-            ->groupBy(fn ($s) => $s->quoteparts_link_id ?: 'sup-'.$s->id)
+        $page = $this->invitedSuppliersQuery()
+            ->when($search !== '', fn ($q) => $q->whereIn('quoteparts_link_id', $this->invitedSuppliersQuery()
+                ->select('quoteparts_link_id')
+                ->where(fn ($w) => $w->where('name', 'ilike', $like)->orWhere('email', 'ilike', $like)->orWhere('contact_person', 'ilike', $like)
+                    ->orWhereIn('supplier_organization_id', \App\Models\SupplierOrganization::query()->select('id')->where('name', 'ilike', $like)))))
+            ->selectRaw('quoteparts_link_id')
+            ->groupBy('quoteparts_link_id')
+            // Сначала ждущие решения: обсуждение условий, затем приглашённые, затем активные; внутри — свежие.
+            ->orderByRaw("min(case quoteparts_status when 'terms_discussed' then 0 when 'invited' then 1 when 'active' then 2 else 3 end)")
+            ->orderByRaw('max(quoteparts_invited_at) desc nulls last')
+            ->orderBy('quoteparts_link_id')
+            ->paginate(self::PER_PAGE, pageName: 'sp');
+
+        $linkIds = $page->getCollection()->pluck('quoteparts_link_id')->all();
+        $rowsByLink = $this->invitedSuppliersQuery()->whereIn('quoteparts_link_id', $linkIds)
+            ->orderByRaw("case quoteparts_status when 'terms_discussed' then 0 when 'invited' then 1 when 'active' then 2 else 3 end")
+            ->orderByDesc('quoteparts_invited_at')
+            ->get(['id', 'name', 'email', 'contact_person', 'language', 'supplier_organization_id', 'quoteparts_link_id', 'quoteparts_status', 'quoteparts_invited_at', 'quoteparts_comment'])
+            ->groupBy('quoteparts_link_id');
+
+        $orgs = \App\Models\SupplierOrganization::query()
+            ->whereIn('id', $rowsByLink->flatten()->pluck('supplier_organization_id')->filter()->unique())->pluck('name', 'id');
+
+        return $page->setCollection(collect($linkIds)
+            ->map(fn ($id) => $rowsByLink->get($id))
+            ->filter()
             ->map(function ($rows) use ($orgs) {
                 $first = $rows->sortBy('quoteparts_invited_at')->first();
 
@@ -205,7 +237,7 @@ class Index extends Component
                     'suppliers' => $rows->sortBy('quoteparts_invited_at')->values(),
                 ];
             })
-            ->values();
+            ->values());
     }
 
     /**
@@ -235,7 +267,7 @@ class Index extends Component
         } catch (Throwable) {
             $n = 0;
         }
-        unset($this->invitedSuppliers);
+        unset($this->invitedGroups, $this->invitedGroupsCount);
         $this->dispatch('toast', type: 'success', message: 'Статусы поставщиков обновлены'.($n ? ': '.$n : '').'.');
     }
 

@@ -5,7 +5,7 @@
         $tabs = [
             'candidates' => ['К актуализации', count($this->candidates), null, null],
             'pool' => ['В QuoteParts', array_sum($counts), ($counts['error'] ?? 0) > 0 ? 'ошибка '.$counts['error'] : (($counts['paused'] ?? 0) > 0 ? 'пауза '.$counts['paused'] : null), ($counts['error'] ?? 0) > 0 ? 'red' : 'attn'],
-            'suppliers' => ['Поставщики', $this->invitedGroups->count(), null, null],
+            'suppliers' => ['Поставщики', $this->invitedGroupsCount, null, null],
             'offers' => ['Актуализация цен', $this->freshOffersCount, null, null],
             'questions' => ['Вопросы поставщиков', null, $this->openQuestionsCount > 0 ? $this->openQuestionsCount : null, 'red'],
             'support' => ['Поддержка', null, $this->supportWaitingCount ?: null, 'red'],
@@ -100,9 +100,9 @@
     @endunless
 
     {{-- Общий поиск раздела: на вкладках, где он что-то ищет (у «Актуализации цен» и «Групп товаров» — свой). --}}
-    @if(in_array($tab, ['candidates', 'pool', 'questions'], true))
+    @if(in_array($tab, ['candidates', 'pool', 'questions', 'suppliers'], true))
         <input type="search" wire:model.live.debounce.300ms="search"
-               placeholder="{{ $tab === 'questions' ? 'Поиск: артикул, позиция, поставщик, заявка, QP-…' : 'Поиск: артикул / наименование / бренд' }}"
+               placeholder="{{ match ($tab) { 'questions' => 'Поиск: артикул, позиция, поставщик, заявка, QP-…', 'suppliers' => 'Поиск: поставщик, e-mail, контакт', default => 'Поиск: артикул / наименование / бренд' } }}"
                class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
     @endif
 
@@ -331,7 +331,7 @@
                     <tbody>
                         {{-- Один поставщик (связь QuoteParts, организация) — одна строка, все его адреса вместе. --}}
                         @forelse($this->invitedGroups as $gi => $g)
-                            <tr wire:key="qps-{{ $gi }}" class="border-b border-border-subtle hover:bg-hover align-top">
+                            <tr wire:key="qps-{{ $this->invitedGroups->currentPage() }}-{{ $gi }}" class="border-b border-border-subtle hover:bg-hover align-top">
                                 <td class="px-3 py-2">
                                     <div class="font-medium">
                                         <a href="{{ $g['edit_url'] }}" wire:navigate class="text-fg-1 hover:text-sky-700 hover:underline" title="Открыть карточку поставщика для редактирования">{{ $g['name'] }}</a>
@@ -364,11 +364,14 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr><td colspan="3" class="px-3 py-10 text-center text-fg-3 text-[13px]">Пока никого не пригласили.</td></tr>
+                            <tr><td colspan="3" class="px-3 py-10 text-center text-fg-3 text-[13px]">{{ trim($search) !== '' ? 'Никого не нашли.' : 'Пока никого не пригласили.' }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>
             </div>
+            @if($this->invitedGroups->hasPages())
+                <div class="px-4 py-3 border-t border-border-subtle">{{ $this->invitedGroups->links() }}</div>
+            @endif
         </div>
     @endif
 
