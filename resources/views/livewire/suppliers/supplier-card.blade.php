@@ -130,7 +130,10 @@
                 </tr></thead>
                 <tbody>
                 @foreach($contacts as $i => $c)
-                    <tr class="border-t border-border" wire:key="c-{{ $c['email'] }}">
+                    {{-- Ключ — позиция и адрес: поля привязаны к номеру строки, и после ↑/↓ строка рисуется
+                         заново со значениями нового номера (по одному адресу браузер переносил строку
+                         вместе со старыми значениями в полях — имена и телефоны «уезжали»). --}}
+                    <tr class="border-t border-border" wire:key="c-{{ $i }}-{{ $c['email'] }}">
                         <td class="py-1 pr-2 mono text-[12px]">{{ $c['email'] }}</td>
                         <td class="pr-2"><input type="text" wire:model="contacts.{{ $i }}.name" class="{{ $in }}"></td>
                         <td class="pr-2"><input type="text" wire:model="contacts.{{ $i }}.phone" class="{{ $in }}" style="max-width:150px"></td>
