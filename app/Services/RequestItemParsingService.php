@@ -797,7 +797,18 @@ PROMPT;
     public function parseItemsFromInboundMessage(\App\Models\EmailMessage $message): array
     {
         // EmailMessage->attachments() — HasMany, см. App\Models\EmailMessage.
-        $attachments = $message->attachments;
+        // Вложенное письмо и архив раскрыты: фото и документы внутри — обычные
+        // вложения, текст пересланного письма — к телу (кейс MZ2026-00205).
+        $nested = ['attachments' => $message->attachments, 'text' => ''];
+        try {
+            $nested = app(\App\Services\Mail\NestedAttachmentUnpacker::class)->expand($message);
+        } catch (\Throwable $e) {
+            Log::warning('parseItemsFromInboundMessage: nested attachments unpack failed', [
+                'email_message_id' => $message->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+        $attachments = $nested['attachments'];
 
         // Выбор источника тела письма:
         //   - Обычно body_plain содержит plain-text alternative и его
@@ -834,6 +845,9 @@ PROMPT;
         // вылавливал фантомные позиции из forward'нутых блоков и подписей
         // (см. parser-corpus.txt, кейсы #349, #357).
         $cleanedBody = $this->cleaner->cleanInboundReferenceText($rawBody);
+        if ($nested['text'] !== '') {
+            $cleanedBody = trim($cleanedBody."\n\n".$nested['text']);
+        }
 
         // Шаг 0: вытащить URL'ы из тела (cleaned plain + raw html) и
         // синхронно сходить за их выжимками. Cache в `inbound_url_fetches`

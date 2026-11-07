@@ -113,4 +113,8 @@ return [
         'name' => env('MAIL_FROM_NAME', 'Example'),
     ],
 
+    // Вложенное письмо (.eml) и архив (.zip) раскрываются в вложения письма перед
+    // разбором позиций (App\Services\Mail\NestedAttachmentUnpacker).
+    'unpack_nested_attachments' => (bool) env('MAIL_UNPACK_NESTED_ATTACHMENTS', true),
+
 ];
