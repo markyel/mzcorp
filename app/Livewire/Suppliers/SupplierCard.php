@@ -175,7 +175,7 @@ class SupplierCard extends Component
         }
         $other = Supplier::query()->whereRaw('lower(email) = ?', [$email])->where('supplier_organization_id', '!=', $this->org->id)->with('organization')->first();
         if ($other !== null) {
-            $this->addError('newEmail', 'Адрес числится у поставщика «'.($other->organization?->name ?? $other->email).'».');
+            $this->addError('newEmail', 'Адрес числится у поставщика «'.($other->organization?->name ?? $other->email).'». Если это тот же поставщик — объедините их внизу карточки («Это же поставщик»: введите адрес).');
 
             return;
         }
@@ -211,6 +211,11 @@ class SupplierCard extends Component
             return;
         }
         $keep = $rows->pluck('email')->map(fn ($e) => mb_strtolower($e))->all();
+        if (! $this->org->inQuoteParts()) {
+            $this->registerWithContacts($rows, $keep);
+
+            return;
+        }
         $ok = $this->push(fn (QuotePartsClient $qp) => $qp->setContacts($this->org->qp_key, [
             'contacts' => $rows->take(30)->map(fn ($c, $i) => array_filter([
                 'email' => $c['email'],
@@ -226,6 +231,39 @@ class SupplierCard extends Component
                 ->whereNotIn(\Illuminate\Support\Facades\DB::raw('lower(email)'), $keep)->delete();
             $this->fillFromCopy();
         }
+    }
+
+    /**
+     * Поставщика ещё нет в QuoteParts (пришёл из реестра 1С без адресов): адреса из карточки
+     * становятся его контактами, и он заводится в QuoteParts — дальше правка идёт как обычно.
+     *
+     * @param  \Illuminate\Support\Collection<int, array{email:string, name:string, phone:string, topics:list<string>}>  $rows
+     * @param  list<string>  $keep
+     */
+    private function registerWithContacts(\Illuminate\Support\Collection $rows, array $keep): void
+    {
+        if ((string) $this->org->qp_key === '') {
+            $this->org->forceFill(['qp_key' => SupplierOrganization::temporaryKey($this->org->id)])->save();
+        }
+        Supplier::query()->where('supplier_organization_id', $this->org->id)->whereNotNull('email')
+            ->whereNotIn(\Illuminate\Support\Facades\DB::raw('lower(email)'), $keep)->delete();
+        foreach ($rows->take(30)->values() as $i => $c) {
+            $email = mb_strtolower(trim($c['email']));
+            $row = Supplier::query()->where('supplier_organization_id', $this->org->id)->whereRaw('lower(email) = ?', [$email])->first()
+                ?? new Supplier(['email' => $email, 'domain' => \Illuminate\Support\Str::after($email, '@'), 'supplier_organization_id' => $this->org->id, 'created_by_user_id' => auth()->id()]);
+            $row->fill(['contact_person' => trim($c['name']) ?: null, 'phone' => trim($c['phone']) ?: null]);
+            $row->forceFill(['source' => $row->source ?? 'manual', 'contact_topics' => array_values($c['topics']), 'contact_position' => $i + 1])->save();
+        }
+
+        try {
+            app(\App\Services\QuoteParts\QuotePartsSupplierService::class)->registerOrganization($this->org);
+            $this->dispatch('toast', message: 'Контакты сохранены, поставщик заведён в QuoteParts.', type: 'success');
+        } catch (Throwable $e) {
+            $this->dispatch('toast', message: 'Контакты сохранены, но в QuoteParts поставщик не заведён: '.$e->getMessage(), type: 'error');
+        }
+        $this->org->refresh();
+        unset($this->supplierOwnsCard, $this->termsLocked, $this->groupOptions);
+        $this->fillFromCopy();
     }
 
     public function setCode(string $code): void
@@ -246,7 +284,8 @@ class SupplierCard extends Component
     {
         $q = trim($this->mergeQuery);
         $found = $q === '' ? collect() : SupplierOrganization::query()->whereKeyNot($this->org->id)
-            ->where(fn ($w) => $w->where('onec_code', $q)->orWhere('qp_key', $q)->orWhere('name', 'ilike', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $q).'%'))
+            ->where(fn ($w) => $w->where('onec_code', $q)->orWhere('qp_key', $q)->orWhere('name', 'ilike', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $q).'%')
+                ->orWhereIn('id', Supplier::query()->select('supplier_organization_id')->whereRaw('lower(email) = ?', [mb_strtolower($q)])))
             ->limit(2)->get();
         if ($found->count() !== 1) {
             $this->dispatch('toast', message: $found->isEmpty() ? 'Поставщик не найден.' : 'Подходят несколько поставщиков — уточните код 1С.', type: 'error');
@@ -347,6 +386,11 @@ class SupplierCard extends Component
     /** Правка в QuoteParts → ответ в копию. */
     private function push(callable $call, string $done): bool
     {
+        if (! $this->org->inQuoteParts()) {
+            $this->dispatch('toast', message: 'Поставщика ещё нет в QuoteParts: добавьте адрес в «Контактах» и сохраните их — он заведётся там, и тогда профиль и условия можно будет править.', type: 'error');
+
+            return false;
+        }
         try {
             $link = $call(app(QuotePartsClient::class));
             app(SupplierMirrorService::class)->apply((array) $link);

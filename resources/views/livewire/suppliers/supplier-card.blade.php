@@ -184,7 +184,7 @@
     {{-- Объединение: тот же поставщик заведён дважды (два адреса порознь, дубль из 1С) --}}
     <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
         <span class="text-fg-3">Это же поставщик:</span>
-        <input type="text" wire:model="mergeQuery" wire:keydown.enter="mergeIn" placeholder="код 1С или название" class="{{ $in }}" style="max-width:240px">
+        <input type="text" wire:model="mergeQuery" wire:keydown.enter="mergeIn" placeholder="код 1С, название или e-mail" class="{{ $in }}" style="max-width:240px">
         <button type="button" wire:click="mergeIn" wire:confirm="Присоединить найденного поставщика к «{{ $org->name }}»? Его адреса и история перейдут сюда." class="btn btn-xs">Объединить сюда</button>
     </div>
 
