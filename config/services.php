@@ -568,6 +568,7 @@ return [
         'system_notifications' => (bool) env('MAIL_SYSTEM_NOTIFICATIONS', true),
         'system_notifications_by_person' => [
             \App\Mail\ManagerAnnouncementMail::class,
+            \App\Mail\AccessLinkMail::class,
             \App\Mail\SupportTicketCreatedMail::class,
             \App\Mail\SupportTicketResolvedMail::class,
             \App\Mail\BotVerificationCodeMail::class,

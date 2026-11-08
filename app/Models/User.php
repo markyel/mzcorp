@@ -26,6 +26,21 @@ class User extends Authenticatable
     }
 
     /**
+     * «Забыли пароль?»: стандартное уведомление уходит через Laravel Mail, а на проде
+     * MAIL_MAILER=log — письмо не доходило. Шлём через общий ящик, как остальные служебные.
+     */
+    public function sendPasswordResetNotification($token): void
+    {
+        app(\App\Services\Mail\SystemNotificationMailer::class)->sendMailable($this->email, new \App\Mail\AccessLinkMail(
+            (string) $this->name,
+            (string) $this->email,
+            route('password.reset', ['token' => $token, 'email' => $this->email]),
+            max(1, intdiv((int) config('auth.passwords.users.expire', 60), 60)),
+            welcome: false,
+        ));
+    }
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var list<string>
