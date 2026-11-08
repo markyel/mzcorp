@@ -36,10 +36,14 @@ class Pool extends Component
     #[Url(as: 'q')]
     public string $search = '';
 
-    #[Url(as: 'scope')]
+    // Явный except у фильтров: без него Livewire сравнивает с ЗНАЧЕНИЕМ ПОСЛЕ mount и не пишет в
+    // адрес восстановленное из сессии. Адрес «?onec=missing» без sort уходил в referrer, «← К
+    // списку» открывал его, фильтр в URL отключал восстановление из сессии — сортировка слетала
+    // на «По вниманию» (жалоба 08.11.2026). Теперь всё отличное от умолчания всегда в адресе.
+    #[Url(as: 'scope', except: 'mine')]
     public string $scope = 'mine'; // mine | all
 
-    #[Url(as: 'status')]
+    #[Url(as: 'status', except: '')]
     public string $status = ''; // '' = все доступные роли, либо конкретный enum-value
 
     /**
@@ -58,7 +62,7 @@ class Pool extends Component
      *   all    — всё (кроме pending для менеджера)
      * По умолчанию `active` — оператор не хочет видеть закрытые в основном пуле.
      */
-    #[Url(as: 'bucket')]
+    #[Url(as: 'bucket', except: 'active')]
     public string $bucket = 'active';
 
     /**
@@ -103,7 +107,7 @@ class Pool extends Component
      * Дропдаун выбора доступен ВСЕМ ролям (вкл. менеджера); default — attention.
      * У менеджера scope остаётся «мои», меняется только порядок.
      */
-    #[Url(as: 'sort')]
+    #[Url(as: 'sort', except: 'attention')]
     public string $sort = 'attention';
 
     /**
