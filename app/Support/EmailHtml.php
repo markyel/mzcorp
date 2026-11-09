@@ -25,4 +25,24 @@ final class EmailHtml
             $html,
         ) ?? $html;
     }
+
+    /**
+     * `src=`/`href=` со ссылкой на вложение письма `cid:…` — в кавычках И без: Lotus Notes
+     * пишет `<img src=cid:_4_165D…>` (ДМА, MZ2026-00483, 09.11.2026), а шаблон «только в
+     * кавычках» такую картинку пропускал — в CRM битая иконка, хотя вложение есть.
+     */
+    public const CID_ATTR_PATTERN = '/(src|href)\s*=\s*(?:(["\'])cid:([^"\']+)\2|cid:([^\s"\'>]+))/i';
+
+    /**
+     * Разбор совпадения CID_ATTR_PATTERN.
+     *
+     * @param  array<int, string>  $m
+     * @return array{0: string, 1: string, 2: string} [атрибут, кавычка, cid]
+     */
+    public static function cidParts(array $m): array
+    {
+        $quoted = ($m[2] ?? '') !== '';
+
+        return [$m[1], $quoted ? $m[2] : '"', $quoted ? $m[3] : ($m[4] ?? '')];
+    }
 }

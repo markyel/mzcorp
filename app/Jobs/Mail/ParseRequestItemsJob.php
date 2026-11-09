@@ -41,7 +41,11 @@ class ParseRequestItemsJob implements ShouldQueue, ShouldBeUnique
     use SerializesModels;
 
     public int $tries = 2;
-    public int $timeout = 180;
+    // Длинное ТЗ разбирается частями (RequestItemParsingService::parseFileTextInChunks):
+    // 190 строк xlsx + тот же перечень в docx — ~14 вызовов модели, несколько минут.
+    // Очередь database должна держать задачу дольше (DB_QUEUE_RETRY_AFTER > timeout),
+    // иначе через retry_after её возьмёт второй воркер.
+    public int $timeout = 900;
 
     /**
      * @param int  $emailMessageId

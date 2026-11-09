@@ -104,12 +104,67 @@ class RequestItemParsingService
 
             // Fallback: если эталонный текст у нас уже есть — используем его напрямую
             if ($referenceText !== null && mb_strlen(trim($referenceText)) >= 10) {
-                return $this->parseItemsWithGPT($referenceText);
+                return $this->parseFileTextInChunks($referenceText, $file->getClientOriginalName());
             }
         }
 
         $text = $this->extractTextFromFile($file);
-        return $this->parseItemsWithGPT($text);
+        return $this->parseFileTextInChunks($text, $file->getClientOriginalName());
+    }
+
+    /** Строк таблицы на один вызов модели и потолок символов части. */
+    private const FILE_CHUNK_LINES = 30;
+
+    private const FILE_CHUNK_CHARS = 18000;
+
+    /**
+     * Текст файла (таблица/ТЗ) — частями по FILE_CHUNK_LINES строк с первой строкой (шапкой)
+     * в каждой части. Одним вызовом длинный перечень модель обрывает: ТЗ ДМА на 190 строк
+     * (MZ2026-00483, 09.11.2026) давало 60 позиций из xlsx и 56 из docx. Короткий текст —
+     * одним вызовом, как раньше.
+     *
+     * @return array<array{name: string, brand: ?string, article: ?string, qty: float, unit: string, note: ?string}>
+     */
+    private function parseFileTextInChunks(string $text, string $fileName = ''): array
+    {
+        $lines = array_values(array_filter(explode("\n", $text), fn ($l) => trim($l) !== ''));
+        if (count($lines) <= self::FILE_CHUNK_LINES + 1 && mb_strlen($text) <= self::FILE_CHUNK_CHARS) {
+            return $this->parseItemsWithGPT($text);
+        }
+
+        $header = array_shift($lines);
+        $chunks = [];
+        $current = [];
+        $length = 0;
+        foreach ($lines as $line) {
+            if ($current !== [] && (count($current) >= self::FILE_CHUNK_LINES || $length + mb_strlen($line) > self::FILE_CHUNK_CHARS)) {
+                $chunks[] = $current;
+                $current = [];
+                $length = 0;
+            }
+            $current[] = $line;
+            $length += mb_strlen($line) + 1;
+        }
+        if ($current !== []) {
+            $chunks[] = $current;
+        }
+
+        $items = [];
+        $total = count($chunks);
+        foreach ($chunks as $i => $chunk) {
+            $part = "(Фрагмент ".($i + 1)." из {$total} длинного документа; первая строка — начало документа/шапка таблицы, "
+                ."извлеки позиции только из строк этого фрагмента)\n".$header."\n".implode("\n", $chunk);
+            $items = array_merge($items, $this->parseItemsWithGPT($part));
+        }
+
+        Log::info('parseItemsFromFile: parsed in chunks', [
+            'file' => $fileName,
+            'lines' => count($lines) + 1,
+            'chunks' => $total,
+            'items' => count($items),
+        ]);
+
+        return $items;
     }
 
     /**
@@ -3351,14 +3406,20 @@ PROMPT;
 
         foreach ($spreadsheet->getAllSheets() as $sheet) {
             $highestRow = $sheet->getHighestRow();
-            $highestColumn = $sheet->getHighestColumn();
+            // По номеру колонки: сравнение строк 'B' <= 'AA' ложно — таблицы шире Z обрывались на A.
+            $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($sheet->getHighestColumn());
 
             for ($row = 1; $row <= $highestRow; $row++) {
                 $rowData = [];
-                for ($col = 'A'; $col <= $highestColumn; $col++) {
-                    $cellValue = $sheet->getCell($col . $row)->getValue();
+                for ($col = 1; $col <= $highestColumnIndex; $col++) {
+                    $cellValue = $sheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col) . $row)->getValue();
+                    if ($cellValue instanceof \PhpOffice\PhpSpreadsheet\RichText\RichText) {
+                        $cellValue = $cellValue->getPlainText();
+                    }
                     if ($cellValue !== null && $cellValue !== '') {
-                        $rowData[] = $cellValue;
+                        // Перенос внутри ячейки (характеристики построчно) рвал строку таблицы
+                        // на несколько — количество уезжало к соседней позиции. Одна строка = одна позиция.
+                        $rowData[] = trim(preg_replace('/\s*\R\s*/u', '; ', (string) $cellValue) ?? (string) $cellValue);
                     }
                 }
                 if (!empty($rowData)) {

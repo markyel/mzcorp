@@ -308,14 +308,15 @@ class Index extends Component
         $messageId = $email->id;
 
         return \App\Support\EmailHtml::hideLocalImages(preg_replace_callback(
-            '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
+            \App\Support\EmailHtml::CID_ATTR_PATTERN,
             function ($m) use ($messageId) {
+                [$attr, $q, $cid] = \App\Support\EmailHtml::cidParts($m);
                 $url = route('attachments.inline', [
                     'emailMessage' => $messageId,
-                    'contentId' => rawurlencode($m[3]),
+                    'contentId' => rawurlencode($cid),
                 ]);
 
-                return $m[1] . '=' . $m[2] . $url . $m[2];
+                return $attr . '=' . $q . $url . $q;
             },
             $email->body_html
         ) ?? $email->body_html);

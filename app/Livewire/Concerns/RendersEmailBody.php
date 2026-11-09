@@ -31,24 +31,25 @@ trait RendersEmailBody
         $known = static::knownContentIds($email);
 
         $html = preg_replace_callback(
-            '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
+            \App\Support\EmailHtml::CID_ATTR_PATTERN,
             function ($m) use ($messageId, $known) {
+                [$attr, $q, $cid] = \App\Support\EmailHtml::cidParts($m);
                 // Цитата в ответе сохраняет <img src="cid:…">, а сами картинки
                 // почтовые клиенты в ответ НЕ перевкладывают. Ссылаться на
                 // такой cid нельзя: каждый рендер письма давал 404 в консоли и
                 // иконку битой картинки. Подставляем прозрачный пиксель.
-                if (! isset($known[static::normalizeContentId($m[3])])) {
-                    return $m[1] === 'href'
-                        ? 'href='.$m[2].'#'.$m[2].' data-cid-missing="1"'
-                        : 'src='.$m[2].self::MISSING_CID_PIXEL.$m[2].' data-cid-missing="1"';
+                if (! isset($known[static::normalizeContentId($cid)])) {
+                    return strtolower($attr) === 'href'
+                        ? 'href='.$q.'#'.$q.' data-cid-missing="1"'
+                        : 'src='.$q.self::MISSING_CID_PIXEL.$q.' data-cid-missing="1"';
                 }
 
                 $url = route('attachments.inline', [
                     'emailMessage' => $messageId,
-                    'contentId' => rawurlencode($m[3]),
+                    'contentId' => rawurlencode($cid),
                 ]);
 
-                return $m[1].'='.$m[2].$url.$m[2];
+                return $attr.'='.$q.$url.$q;
             },
             $email->body_html
         ) ?? $email->body_html;

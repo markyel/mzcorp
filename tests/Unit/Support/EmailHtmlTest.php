@@ -28,4 +28,18 @@ class EmailHtmlTest extends TestCase
 
         $this->assertSame($html, EmailHtml::hideLocalImages($html));
     }
+
+    public function test_cid_is_found_with_and_without_quotes(): void
+    {
+        // Lotus Notes (ДМА, MZ2026-00483) пишет src без кавычек; alt с «cid:» не трогаем.
+        $html = '<img src=cid:_4_165D9E40 alt=cid:image003.png@01D4 style="b"><img src="cid:a@b"><a href=\'cid:x\'>l</a>';
+
+        $out = preg_replace_callback(EmailHtml::CID_ATTR_PATTERN, function (array $m) {
+            [$attr, $q, $cid] = EmailHtml::cidParts($m);
+
+            return $attr.'='.$q.'<'.$cid.'>'.$q;
+        }, $html);
+
+        $this->assertSame('<img src="<_4_165D9E40>" alt=cid:image003.png@01D4 style="b"><img src="<a@b>"><a href=\'<x>\'>l</a>', $out);
+    }
 }

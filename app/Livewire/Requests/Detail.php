@@ -1229,20 +1229,21 @@ class Detail extends Component
         $missingPixel = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
         $html = preg_replace_callback(
-            '/(src|href)\s*=\s*(["\'])cid:([^"\']+)\2/i',
+            \App\Support\EmailHtml::CID_ATTR_PATTERN,
             function ($m) use ($messageId, $known, $missingPixel) {
-                if (! isset($known[RendersEmailBody::normalizeContentId($m[3])])) {
-                    return $m[1] === 'href'
-                        ? 'href='.$m[2].'#'.$m[2].' data-cid-missing="1"'
-                        : 'src='.$m[2].$missingPixel.$m[2].' data-cid-missing="1"';
+                [$attr, $q, $cid] = \App\Support\EmailHtml::cidParts($m);
+                if (! isset($known[RendersEmailBody::normalizeContentId($cid)])) {
+                    return strtolower($attr) === 'href'
+                        ? 'href='.$q.'#'.$q.' data-cid-missing="1"'
+                        : 'src='.$q.$missingPixel.$q.' data-cid-missing="1"';
                 }
 
                 $url = route('attachments.inline', [
                     'emailMessage' => $messageId,
-                    'contentId' => rawurlencode($m[3]),
+                    'contentId' => rawurlencode($cid),
                 ]);
 
-                return $m[1].'='.$m[2].$url.$m[2];
+                return $attr.'='.$q.$url.$q;
             },
             $email->body_html
         ) ?? $email->body_html;
