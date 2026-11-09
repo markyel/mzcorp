@@ -49,7 +49,7 @@
 - [Changelog](reference_changelog_updates.md) — /dashboard/updates, бейдж непрочитанного, admin-CRUD
 - [User avatars](reference_user_avatars.md) — 3 варианта аватарки; eager-select assignedUser с avatar-колонками
 - [Personal inbox delivery](reference_personal_inbox_delivery.md) — APPEND оригинала в личный ящик + 30-мин backfill; «в CRM есть, в почте нет»
-- [Item parsing pipeline](reference_item_parsing_pipeline.md) — unified-vs-split разбор позиций; relevance-гейт вложений; кейс 4011
+- [Item parsing pipeline](reference_item_parsing_pipeline.md) — unified-vs-split разбор; relevance-гейт; длинные ТЗ частями по 30 строк, повтор ТЗ в 2 файлах, консолидатор ≤40 (09.11)
 - [Vision downscale](reference_vision_image_downscale.md) — фото >1.5 МБ → 2048px JPEG (гард 413)
 - [Duplicate badge numeric](reference_duplicate_badge_numeric_token.md) — «⚠ дубль» не флагает позиции с разными числовыми токенами
 - [Clients section](reference_clients_section.md) — /dashboard/clients: organizations + contacts; requests.organization_id
@@ -87,3 +87,4 @@
 - [Архив и ручной поиск поставщиков](reference_supplier_archive_search.md) — поиск = поставщик→представитель; архив в QuoteParts + копия, Supplier::notArchived()
 - [Переключатель режима](reference_ops_mode_switch.md) — deploy/ops/mode.sh наблюдение↔полный; на 07.11 не переключали, после оплат 1С
 - [Доступ сотрудникам](reference_staff_access_link.md) — users:send-access (ссылка «Задать пароль» 24 ч); Mail:: на проде = log, служебное только через SystemNotificationMailer
+- [Queue retry_after](reference_queue_retry_after.md) — DB_QUEUE_RETRY_AFTER=1900 с 09.11; при 90 долгие задачи шли дважды; держать > max $timeout
