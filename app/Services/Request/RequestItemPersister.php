@@ -192,20 +192,29 @@ class RequestItemPersister
                 unset($mfEntry);
             }
 
+            // Колонки varchar: модель бывает многословна (MZ2026-00706 — 20+ вариантов артикула
+            // через запятую, 300+ символов) → insert падал и заявка оставалась без позиций.
+            // Артикул режем по целым артикулам, полный список — в примечание.
+            [$article, $articleOverflow] = $this->fitArticle($item['article'] ?? null);
+            $note = $item['note'] ?? null;
+            if ($articleOverflow !== null) {
+                $note = trim(($note ? $note."\n" : '').'Артикулы (все): '.$articleOverflow);
+            }
+
             $createdItem = RequestItem::create([
                 'request_id' => $existing->id,
                 'position' => $maxPosition,
-                'parsed_name' => $item['name'],
-                'parsed_brand' => $this->sanitizeParsedBrand($item['brand'] ?? null),
-                'parsed_article' => $item['article'] ?? null,
+                'parsed_name' => $this->fit($item['name'], 255),
+                'parsed_brand' => $this->fit($this->sanitizeParsedBrand($item['brand'] ?? null), 255),
+                'parsed_article' => $article,
                 'parsed_qty' => $qtyToStore,
-                'parsed_unit' => $item['unit'] ?? 'шт.',
+                'parsed_unit' => $this->fit($item['unit'] ?? 'шт.', 32),
                 // Мерные позиции: вторая размерность (длина/масса/объём
                 // на 1 единицу qty) — структурированно от ParseItemsPrompt v6.
                 'parsed_length' => $item['length'] ?? null,
-                'parsed_length_unit' => $item['length_unit'] ?? null,
-                'category' => $item['category'] ?? null,
-                'supplier_note' => $item['note'] ?? null,
+                'parsed_length_unit' => $this->fit($item['length_unit'] ?? null, 16),
+                'category' => $this->fit($item['category'] ?? null, 64),
+                'supplier_note' => $note,
                 'data_source' => 'inbound_message',
                 'image_attachment_id' => $item['email_attachment_id'] ?? null,
                 'status' => 'parsed',
@@ -557,6 +566,35 @@ class RequestItemPersister
     private function sanitizeParsedBrand(?string $brand): ?string
     {
         return \App\Support\HouseBrand::filter($brand);
+    }
+
+    /** Строка в размер varchar-колонки (null/пусто — как есть). */
+    private function fit(?string $value, int $max): ?string
+    {
+        return $value === null ? null : mb_substr($value, 0, $max);
+    }
+
+    /**
+     * Артикул в 255 символов по целым артикулам (разделители `,` `;`).
+     *
+     * @return array{0: ?string, 1: ?string} [что влезло, полный список — если не влез]
+     */
+    private function fitArticle(?string $article, int $max = 255): array
+    {
+        $article = $article === null ? null : trim($article);
+        if ($article === null || $article === '' || mb_strlen($article) <= $max) {
+            return [$article === '' ? null : $article, null];
+        }
+        $kept = '';
+        foreach (preg_split('/\s*[,;]\s*/u', $article, -1, PREG_SPLIT_NO_EMPTY) as $part) {
+            $next = $kept === '' ? $part : $kept.', '.$part;
+            if (mb_strlen($next) > $max) {
+                break;
+            }
+            $kept = $next;
+        }
+
+        return [$kept !== '' ? $kept : mb_substr($article, 0, $max), $article];
     }
 
     private function normalizeArticleKey(string $article): string
