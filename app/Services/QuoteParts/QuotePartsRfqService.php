@@ -60,7 +60,7 @@ class QuotePartsRfqService
         // Любой поставщик из справочника (решение 15.10): кто ещё не в QuoteParts — заводится
         // в режиме переписки, без письма-приглашения. Поставщик в QuoteParts — организация:
         // несколько её адресов дают одного получателя; письмо — на отмеченные адреса (addresses).
-        $rows = Supplier::query()->with('organization:id,name')->whereIn('id', $supplierIds)->whereNotNull('email')->get();
+        $rows = Supplier::query()->with('organization:id,name,qp_key')->whereIn('id', $supplierIds)->whereNotNull('email')->get();
         if (($catalog->isEmpty() && $draftQuantities === []) || $rows->isEmpty()) {
             throw new RuntimeException('Нужны позиции и хотя бы один поставщик с адресом.');
         }

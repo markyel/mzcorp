@@ -102,10 +102,15 @@ class Supplier extends Model
     public function quotepartsKey(): string
     {
         // Постоянный ключ организации (код 1С или «mz:{id}»); прежняя схема — пока ключ не проставлен.
+        // Загруженной организации верим, только если в ней есть qp_key: связь, загруженная как
+        // organization:id,name (QuotePartsRfqService и ещё десяток мест), давала «org:9» вместо
+        // «00-000523», и QuoteParts отвечал «Поставщик org:9 не приглашён» (06.11–09.11.2026:
+        // принявшим приглашение запрос не уходил вовсе).
         $key = null;
         if ($this->supplier_organization_id) {
-            $key = $this->relationLoaded('organization')
-                ? $this->organization?->qp_key
+            $org = $this->relationLoaded('organization') ? $this->organization : null;
+            $key = $org !== null && array_key_exists('qp_key', $org->getAttributes())
+                ? $org->qp_key
                 : ($this->exists ? SupplierOrganization::query()->whereKey($this->supplier_organization_id)->value('qp_key') : null);
         }
 
