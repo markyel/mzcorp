@@ -18,7 +18,7 @@ class HeavyQueueTest extends TestCase
     {
         $retryAfter = (int) config('queue.connections.database-heavy.retry_after');
         $jobs = [
-            new ResolveKbJob(1),
+            new ResolveKbJob(1, 186),
             new EmbedCatalogChangesJob,
             new ImportSupplierPricesJob(1),
             new MakeMediaCoverJob(1),
@@ -31,6 +31,15 @@ class HeavyQueueTest extends TestCase
             $this->assertSame('heavy', $job->queue, $job::class);
             $this->assertLessThan($retryAfter, $job->timeout, $job::class);
         }
+    }
+
+    public function test_small_request_kb_pass_stays_on_the_common_queue(): void
+    {
+        $job = new ResolveKbJob(1, 3);
+
+        $this->assertNull($job->connection);
+        $this->assertSame(600, $job->timeout);
+        $this->assertLessThan(900, $job->timeout); // меньше retry_after общей очереди (960)
     }
 
     public function test_heavy_connection_reads_the_same_jobs_table(): void

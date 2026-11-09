@@ -19,6 +19,9 @@ return [
     'heavy' => [
         'connection' => 'database-heavy',
         'queue' => 'heavy',
+        // Анализ заявки по базе знаний — в heavy только с этого числа позиций (~5 с на позицию);
+        // меньшие идут в общей очереди, чтобы не ждать за большими.
+        'kb_items_threshold' => (int) env('KB_HEAVY_ITEMS_THRESHOLD', 40),
     ],
 
     /*

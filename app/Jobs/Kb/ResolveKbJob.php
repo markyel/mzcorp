@@ -4,6 +4,7 @@ namespace App\Jobs\Kb;
 
 use App\Jobs\Concerns\OnHeavyQueue;
 use App\Models\Request as RequestModel;
+use App\Models\RequestItem;
 use App\Services\Kb\PhotoSlotClassifierService;
 use App\Services\Kb\QualityAssessmentService;
 use App\Services\Kb\RequestContextAnalysisService;
@@ -36,11 +37,13 @@ use Throwable;
  * ShouldBeUnique на время задачи — защита от дублей если RequestItemPersister
  * случайно дёрнет дважды.
  *
- * Очередь heavy (OnHeavyQueue), 30 минут: ТЗ на 186 позиций (ДМА, 09.11.2026) не
- * укладывалось в 5 минут, и каждая попытка начинала заново и снова обрывалась. Теперь
- * повтор продолжает с места обрыва: оценённые в этом прогоне позиции и анализ контекста
- * помнятся в кэше (progressKey) и пропускаются. Первая попытка список очищает —
- * после переразбора заявка оценивается целиком.
+ * Большая заявка (от queue.heavy.kb_items_threshold позиций) — в очередь heavy на 30 минут:
+ * ТЗ на 186 позиций (ДМА, 09.11.2026) не укладывалось в 5 минут, и каждая попытка
+ * начинала заново и снова обрывалась. Обычная — в общей очереди на 10 минут: в heavy
+ * она ждала бы, пока воркеры заняты большими (09.11: заявки в одну позицию стояли по
+ * 5+ минут за ДМА). Повтор продолжает с места обрыва: оценённые в этом прогоне позиции
+ * и анализ контекста помнятся в кэше (progressKey) и пропускаются. Первая попытка
+ * список очищает — после переразбора заявка оценивается целиком.
  *
  * Стоимость: ~$0.05–0.10 на Request (1 context + N items × refinement).
  */
@@ -48,7 +51,8 @@ class ResolveKbJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, OnHeavyQueue, Queueable, SerializesModels;
 
-    public int $timeout = 1800;
+    /** Общая очередь — меньше её retry_after (960); большая заявка получает 1800 в heavy. */
+    public int $timeout = 600;
 
     public int $tries = 3;
 
@@ -57,9 +61,14 @@ class ResolveKbJob implements ShouldQueue, ShouldBeUnique
     /** Сколько помнить сделанное в прогоне: дольше всех попыток с паузами между ними. */
     private const PROGRESS_TTL_SECONDS = 4 * 3600;
 
-    public function __construct(public readonly int $requestId)
+    /** @param  int|null  $itemCount  позиций в заявке; не передан — считается по базе */
+    public function __construct(public readonly int $requestId, ?int $itemCount = null)
     {
-        $this->onHeavyQueue();
+        $itemCount ??= RequestItem::query()->where('request_id', $requestId)->count();
+        if ($itemCount >= (int) config('queue.heavy.kb_items_threshold', 40)) {
+            $this->onHeavyQueue();
+            $this->timeout = 1800;
+        }
     }
 
     public static function progressKey(int $requestId): string
