@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Kb;
 
+use App\Jobs\Concerns\OnHeavyQueue;
 use App\Models\Request as RequestModel;
 use App\Services\Kb\PhotoSlotClassifierService;
 use App\Services\Kb\QualityAssessmentService;
@@ -12,6 +13,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -31,23 +33,38 @@ use Throwable;
  * RequestContext в статус `failed`. AssignmentService продолжает работать на
  * сырых parsed_*-полях.
  *
- * ShouldBeUnique на 5 мин — защита от дублей если RequestItemPersister
+ * ShouldBeUnique на время задачи — защита от дублей если RequestItemPersister
  * случайно дёрнет дважды.
+ *
+ * Очередь heavy (OnHeavyQueue), 30 минут: ТЗ на 186 позиций (ДМА, 09.11.2026) не
+ * укладывалось в 5 минут, и каждая попытка начинала заново и снова обрывалась. Теперь
+ * повтор продолжает с места обрыва: оценённые в этом прогоне позиции и анализ контекста
+ * помнятся в кэше (progressKey) и пропускаются. Первая попытка список очищает —
+ * после переразбора заявка оценивается целиком.
  *
  * Стоимость: ~$0.05–0.10 на Request (1 context + N items × refinement).
  */
 class ResolveKbJob implements ShouldQueue, ShouldBeUnique
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, OnHeavyQueue, Queueable, SerializesModels;
 
-    public int $timeout = 300; // 5 минут на всю заявку — обычно хватает с большим запасом
+    public int $timeout = 1800;
 
     public int $tries = 3;
 
-    public int $uniqueFor = 300;
+    public int $uniqueFor = 1800;
+
+    /** Сколько помнить сделанное в прогоне: дольше всех попыток с паузами между ними. */
+    private const PROGRESS_TTL_SECONDS = 4 * 3600;
 
     public function __construct(public readonly int $requestId)
     {
+        $this->onHeavyQueue();
+    }
+
+    public static function progressKey(int $requestId): string
+    {
+        return 'kb-resolve:progress:'.$requestId;
     }
 
     public function uniqueId(): string
@@ -76,22 +93,39 @@ class ResolveKbJob implements ShouldQueue, ShouldBeUnique
             return;
         }
 
+        // Первая попытка — прогон с нуля; повтор (оборвали по таймауту) продолжает
+        // с места обрыва, а не начинает заново.
+        $key = self::progressKey($this->requestId);
+        if ($this->attempts() <= 1) {
+            Cache::forget($key);
+        }
+        $progress = (array) Cache::get($key, []);
+        $progress += ['context' => false, 'items' => []];
+        $done = array_flip(array_map('intval', (array) $progress['items']));
+
         // Phase 1: RequestContext (LLM-анализ email body на equipment_units).
-        try {
-            $contextAnalyzer->analyze($this->requestId);
-        } catch (Throwable $e) {
-            // Не валим job — context остаётся со status=failed, items
-            // обработаются без context (brand resolver обойдётся без OEM
-            // подсказок, unit matcher вернёт null).
-            Log::warning('ResolveKbJob: context analysis failed (non-fatal)', [
-                'request_id' => $this->requestId,
-                'error' => $e->getMessage(),
-            ]);
+        if (! $progress['context']) {
+            try {
+                $contextAnalyzer->analyze($this->requestId);
+            } catch (Throwable $e) {
+                // Не валим job — context остаётся со status=failed, items
+                // обработаются без context (brand resolver обойдётся без OEM
+                // подсказок, unit matcher вернёт null).
+                Log::warning('ResolveKbJob: context analysis failed (non-fatal)', [
+                    'request_id' => $this->requestId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+            $progress['context'] = true;
+            Cache::put($key, $progress, self::PROGRESS_TTL_SECONDS);
         }
 
         // Phase 2: per-item assessment. Идемпотентно — assessItem перезаписывает
         // status и payload каждый раз.
         foreach ($request->items as $item) {
+            if (isset($done[$item->id])) {
+                continue;
+            }
             try {
                 $assessor->assessItem($item->id);
             } catch (Throwable $e) {
@@ -104,6 +138,8 @@ class ResolveKbJob implements ShouldQueue, ShouldBeUnique
                     'error' => $e->getMessage(),
                 ]);
             }
+            $progress['items'][] = $item->id;
+            Cache::put($key, $progress, self::PROGRESS_TTL_SECONDS);
         }
 
         // Phase 3 (2026-05-21, v2 photo-centric): Photo classifier —
@@ -121,9 +157,13 @@ class ResolveKbJob implements ShouldQueue, ShouldBeUnique
             ]);
         }
 
+        Cache::forget($key);
+
         Log::info('ResolveKbJob: done', [
             'request_id' => $this->requestId,
             'items' => $request->items->count(),
+            'resumed_after' => count($done),
+            'attempt' => $this->attempts(),
         ]);
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Kb;
 
+use App\Jobs\Concerns\OnHeavyQueue;
 use App\Services\Kb\ArticleInsightService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -19,6 +20,7 @@ class AnalyzeArticleCodesJob implements ShouldQueue
 {
     use Dispatchable;
     use InteractsWithQueue;
+    use OnHeavyQueue;
     use Queueable;
     use SerializesModels;
 
@@ -31,6 +33,7 @@ class AnalyzeArticleCodesJob implements ShouldQueue
      */
     public function __construct(public array $items)
     {
+        $this->onHeavyQueue();
     }
 
     public function handle(ArticleInsightService $insights): void

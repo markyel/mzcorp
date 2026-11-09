@@ -15,6 +15,12 @@ return [
 
     'default' => env('QUEUE_CONNECTION', 'database'),
 
+    // Куда уходят долгие фоновые задачи (App\Jobs\Concerns\OnHeavyQueue).
+    'heavy' => [
+        'connection' => 'database-heavy',
+        'queue' => 'heavy',
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Queue Connections
@@ -40,6 +46,20 @@ return [
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            'after_commit' => false,
+        ],
+
+        // Долгие фоновые задачи (анализ заявки по базе знаний, эмбеддинги каталога, импорт цен,
+        // обложки, синхронизация с QuoteParts): та же таблица jobs, своя очередь «heavy» и свой
+        // retry_after — больше самого долгого $timeout здесь (1800). Общей очереди он тогда не
+        // нужен большим, и короткая задача, оборванная с воркером, повторяется быстро.
+        // Воркер — mzcorp-heavy-worker (deploy/supervisor/mzcorp-worker.conf).
+        'database-heavy' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'heavy',
+            'retry_after' => (int) env('DB_HEAVY_QUEUE_RETRY_AFTER', 1900),
             'after_commit' => false,
         ],
 

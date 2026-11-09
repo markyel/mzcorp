@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Marketing;
 
+use App\Jobs\Concerns\OnHeavyQueue;
 use App\Models\MediaPublication;
 use App\Services\Marketing\MediaCoverService;
 use Illuminate\Bus\Queueable;
@@ -18,7 +19,7 @@ use Illuminate\Support\Facades\Cache;
  */
 class MakeMediaCoverJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, OnHeavyQueue, Queueable, SerializesModels;
 
     public int $tries = 2;
 
@@ -29,6 +30,7 @@ class MakeMediaCoverJob implements ShouldQueue
 
     public function __construct(public readonly int $publicationId)
     {
+        $this->onHeavyQueue();
     }
 
     public static function queueFor(MediaPublication $pub): void

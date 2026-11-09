@@ -2,6 +2,7 @@
 
 namespace App\Jobs\QuoteParts;
 
+use App\Jobs\Concerns\OnHeavyQueue;
 use App\Services\QuoteParts\QuotePartsClient;
 use App\Services\QuoteParts\QuotePartsPoolService;
 use App\Services\QuoteParts\QuotePartsSupplierService;
@@ -22,13 +23,18 @@ use Illuminate\Support\Facades\Log;
  */
 class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUniqueUntilProcessing
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, OnHeavyQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
 
     public int $timeout = 600;
 
     public int $uniqueFor = 900;
+
+    public function __construct()
+    {
+        $this->onHeavyQueue();
+    }
 
     /** Сколько секунд передавать за прогон (таймаут задачи — 600). */
     public const SYNC_BUDGET_SECONDS = 420;

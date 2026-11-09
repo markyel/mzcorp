@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Catalog;
 
+use App\Jobs\Concerns\OnHeavyQueue;
 use App\Models\SupplierPriceImport;
 use App\Services\Catalog\CatalogSupplierPriceImportService;
 use Illuminate\Bus\Queueable;
@@ -23,13 +24,16 @@ use Throwable;
  */
 class ImportSupplierPricesJob implements ShouldQueue
 {
-    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+    use Dispatchable, InteractsWithQueue, OnHeavyQueue, Queueable, SerializesModels;
 
     public int $tries = 1;
 
     public int $timeout = 900;
 
-    public function __construct(public int $importId, public bool $apply = false) {}
+    public function __construct(public int $importId, public bool $apply = false)
+    {
+        $this->onHeavyQueue();
+    }
 
     public function handle(CatalogSupplierPriceImportService $service): void
     {

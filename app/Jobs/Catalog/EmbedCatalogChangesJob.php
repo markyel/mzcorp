@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Catalog;
 
+use App\Jobs\Concerns\OnHeavyQueue;
 use App\Services\Catalog\CatalogEmbeddingService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -31,11 +32,17 @@ class EmbedCatalogChangesJob implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable;
     use InteractsWithQueue;
+    use OnHeavyQueue;
     use Queueable;
     use SerializesModels;
 
     public int $tries = 1;
     public int $timeout = 1800; // 30 минут, на случай первой full-sync
+
+    public function __construct()
+    {
+        $this->onHeavyQueue();
+    }
 
     public function uniqueId(): string
     {
