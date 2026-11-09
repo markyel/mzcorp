@@ -22,8 +22,8 @@ class SupplierManualSearch
     private const SCAN = 200;
 
     /**
-     * @param  list<int>  $excludeIds  адреса, уже стоящие в списке запроса
-     * @return list<array{key:string, name:string, representative_id:int, email:string, addresses:int, org_id:?int, emails:list<array{id:int, email:string}>}>
+     * @param  list<int>  $excludeIds  адреса, уже стоящие в списке запроса (in_request в ответе)
+     * @return list<array{key:string, name:string, representative_id:int, email:string, addresses:int, org_id:?int, in_request:bool, emails:list<array{id:int, email:string, in_request:bool}>}>
      */
     public function search(string $query, array $excludeIds = []): array
     {
@@ -58,7 +58,7 @@ class SupplierManualSearch
      * @param  Collection<int, Supplier>  $matched  адреса, совпавшие с запросом (с загруженной organization)
      * @param  Collection<int, Supplier>  $orgAddresses  все адреса организаций из $matched
      * @param  list<int>  $excludeIds
-     * @return list<array{key:string, name:string, representative_id:int, email:string, addresses:int, org_id:?int, emails:list<array{id:int, email:string}>}>
+     * @return list<array{key:string, name:string, representative_id:int, email:string, addresses:int, org_id:?int, in_request:bool, emails:list<array{id:int, email:string, in_request:bool}>}>
      */
     public static function group(Collection $matched, Collection $orgAddresses, string $query, array $excludeIds = []): array
     {
@@ -72,20 +72,23 @@ class SupplierManualSearch
             $orgId = $first->supplier_organization_id ? (int) $first->supplier_organization_id : null;
             $all = $orgId !== null ? ($byOrg->get($orgId) ?? $rows) : $rows;
 
-            // Поставщик уже в запросе (любым адресом) — остальные адреса добавляют кнопкой «все адреса».
-            if ($all->contains(fn (Supplier $s) => in_array((int) $s->id, $exclude, true))) {
-                continue;
-            }
+            // Поставщик уже в запросе (любым адресом) — всё равно показываем, с пометкой: раньше он
+            // пропадал из поиска, и искавший конкретный адрес (nes@is-com.ru, заявка 19476, 09.11.2026)
+            // не находил его, потому что в списке уже стоял gao@ той же организации.
+            $inRequest = $all->contains(fn (Supplier $s) => in_array((int) $s->id, $exclude, true));
             $rep = SupplierMatchService::representatives($all)->first();
             if ($rep === null) {
                 continue;
             }
 
-            // Конкретный адрес предлагаем, только если человек искал по e-mail и это не представитель.
+            // Конкретный адрес предлагаем, если человек искал по e-mail. Представителя не повторяем —
+            // его добавляет строка поставщика; но если поставщик уже в запросе, строка его только
+            // отмечает, и нужный адрес показываем отдельно, даже если это представитель.
             $emails = $orgId === null ? [] : $rows
-                ->filter(fn (Supplier $s) => (int) $s->id !== (int) $rep->id && $needle !== '' && str_contains(mb_strtolower((string) $s->email), $needle))
+                ->filter(fn (Supplier $s) => ($inRequest || (int) $s->id !== (int) $rep->id)
+                    && $needle !== '' && str_contains(mb_strtolower((string) $s->email), $needle))
                 ->sortBy('email')
-                ->map(fn (Supplier $s) => ['id' => (int) $s->id, 'email' => (string) $s->email])
+                ->map(fn (Supplier $s) => ['id' => (int) $s->id, 'email' => (string) $s->email, 'in_request' => in_array((int) $s->id, $exclude, true)])
                 ->values()->all();
 
             $out[] = [
@@ -95,6 +98,7 @@ class SupplierManualSearch
                 'email' => (string) $rep->email,
                 'addresses' => $all->count(),
                 'org_id' => $orgId,
+                'in_request' => $inRequest,
                 'emails' => $emails,
             ];
         }

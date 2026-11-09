@@ -39,7 +39,7 @@ class SupplierManualSearchTest extends TestCase
         $this->assertSame(12, $out[0]['representative_id']);
         $this->assertSame(3, $out[0]['addresses']);
         // «yua» совпал с адресом yuanqi.lift@ — его можно выбрать отдельно; представитель в опциях не повторяется.
-        $this->assertSame([['id' => 13, 'email' => 'yuanqi.lift@eastelevator.cn']], $out[0]['emails']);
+        $this->assertSame([['id' => 13, 'email' => 'yuanqi.lift@eastelevator.cn', 'in_request' => false]], $out[0]['emails']);
     }
 
     public function test_search_by_name_offers_no_specific_addresses(): void
@@ -61,17 +61,37 @@ class SupplierManualSearchTest extends TestCase
         $out = SupplierManualSearch::group(collect($matched), collect($all), 'logistics@');
 
         $this->assertSame(4, $out[0]['representative_id']);
-        $this->assertSame([['id' => 5, 'email' => 'logistics@acme.cn']], $out[0]['emails']);
+        $this->assertSame([['id' => 5, 'email' => 'logistics@acme.cn', 'in_request' => false]], $out[0]['emails']);
     }
 
-    public function test_supplier_already_in_the_request_is_not_offered_again(): void
+    /** Поставщик уже в запросе — не пропадает из поиска, а помечен (раньше его было не найти). */
+    public function test_supplier_already_in_the_request_stays_found_and_marked(): void
     {
         $rows = [$this->row(1, 7, 'a@zagro.ch', ['quoting'], 1), $this->row(2, 7, 'b@zagro.ch', [], 2), $this->row(3, null, 'solo@x.ru')];
 
         $out = SupplierManualSearch::group(collect($rows), collect(array_slice($rows, 0, 2)), 'zagro', excludeIds: [2]);
 
-        $this->assertSame(['s3'], array_column($out, 'key'));
-        $this->assertSame(3, $out[0]['representative_id']);
-        $this->assertSame([], $out[0]['emails']);
+        $this->assertSame(['o7', 's3'], array_column($out, 'key'));
+        $this->assertTrue($out[0]['in_request']);
+        $this->assertFalse($out[1]['in_request']);
+    }
+
+    /**
+     * Заявка 19476: в списке gao@is-com.ru, ищут nes@is-com.ru той же организации — адрес
+     * предложен отдельной строкой, даже если это представитель; уже стоящий в списке помечен.
+     */
+    public function test_address_of_a_supplier_already_in_the_request_is_offered_by_email(): void
+    {
+        $all = [
+            $this->row(21, 40, 'gao@is-com.ru', [], 2, 'ООО НТП "Индустриальные Системы"'),
+            $this->row(22, 40, 'nes@is-com.ru', ['quoting'], 1, 'ООО НТП "Индустриальные Системы"'),
+        ];
+
+        $out = SupplierManualSearch::group(collect([$all[1]]), collect($all), 'nes@is-com.ru', excludeIds: [21]);
+        $this->assertTrue($out[0]['in_request']);
+        $this->assertSame([['id' => 22, 'email' => 'nes@is-com.ru', 'in_request' => false]], $out[0]['emails']);
+
+        $out = SupplierManualSearch::group(collect([$all[1]]), collect($all), 'nes@is-com.ru', excludeIds: [21, 22]);
+        $this->assertSame([['id' => 22, 'email' => 'nes@is-com.ru', 'in_request' => true]], $out[0]['emails']);
     }
 }
