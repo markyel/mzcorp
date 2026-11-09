@@ -16,7 +16,7 @@
 - [Cited-quote invoice routing](reference_cited_quote_invoice_routing.md) — цитата нашего КП/счёта → заявка КП; только ЯВНЫЕ ссылки (с 07.10); правка роутера → mail:detector-replay
 - [Overdue split](reference_overdue_split.md) — «Просрочено» = наш долг (SlaBreach) vs «🤫 Клиент молчит» (isWaitingOnClient)
 - [Сессия 2026-07 + хвосты](project_session_2026_07.md) — коммиты июльской сессии + 5 открытых тем
-- [OpenAI proxy](reference_openai_proxy.md) — OpenAI через Cloudflare Worker (base_url без /v1 + X-Proxy-Key); AI встал → proxy_key/Worker/баланс
+- [OpenAI proxy](reference_openai_proxy.md) — с 09.11 прокси ai2.lazylift.ru (ai3:8443 лёг) + X-Proxy-Key; резерв OPENAI_FALLBACK_* в обоих проектах
 - [Archived seed accounts](reference_archived_seed_accounts.md) — архивные seed-юзеры держат ~1100 заявок → «Все» ≠ сумме менеджеров; фильтр active
 - [Dealer sticky](project_dealer_sticky_fast_turnover.md) — автопометка дилера по потоку заявок (30 дн, порог 8)
 - [Correspondence export](reference_correspondence_export.md) — экспорт переписки PDF/ZIP; грабли dompdf (кириллица, alt картинок)
@@ -86,3 +86,4 @@
 - [Ввод секретов через ssh cat >](secret-entry-check-terminal-free.md) — проверять, что прошлая команда ввода завершилась; PowerShell: Ctrl+Z, Enter
 - [Архив и ручной поиск поставщиков](reference_supplier_archive_search.md) — поиск = поставщик→представитель; архив в QuoteParts + копия, Supplier::notArchived()
 - [Переключатель режима](reference_ops_mode_switch.md) — deploy/ops/mode.sh наблюдение↔полный; на 07.11 не переключали, после оплат 1С
+- [Доступ сотрудникам](reference_staff_access_link.md) — users:send-access (ссылка «Задать пароль» 24 ч); Mail:: на проде = log, служебное только через SystemNotificationMailer
