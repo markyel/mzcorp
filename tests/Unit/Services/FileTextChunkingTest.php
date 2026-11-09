@@ -63,6 +63,40 @@ class FileTextChunkingTest extends TestCase
         $this->assertCount(1, $items);
     }
 
+    public function test_same_list_in_two_files_keeps_the_fuller_one_and_long_lists_skip_the_llm_merge(): void
+    {
+        $fake = new class extends OpenAIChatService
+        {
+            public int $calls = 0;
+
+            public function chat(array $messages, string $model = 'gpt-4o', array $options = []): array
+            {
+                $this->calls++;
+
+                return ['content' => json_encode(['items' => []]), 'usage' => [], 'raw' => []];
+            }
+        };
+        $svc = new RequestItemParsingService($fake);
+
+        $items = [];
+        for ($i = 1; $i <= 50; $i++) {
+            $items[] = ['name' => "Позиция {$i}", 'article' => "ART-{$i}", 'qty' => 1, 'unit' => 'шт.', '__source' => 'xlsx_attachment_2'];
+        }
+        for ($i = 1; $i <= 45; $i++) {
+            $items[] = ['name' => "Позиция {$i} (из docx)", 'article' => "ART {$i}", 'qty' => 1, 'unit' => 'шт.', '__source' => 'docx_attachment_1'];
+        }
+        $items[] = ['name' => 'Ролик', 'article' => 'R-1', 'qty' => 2, 'unit' => 'шт.', '__source' => 'pdf_attachment_3'];
+
+        $m = new \ReflectionMethod($svc, 'consolidateSplitItems');
+        $out = $m->invoke($svc, $items, 'ТЗ', '', null);
+
+        $this->assertCount(51, $out); // 50 из xlsx + отдельный pdf; docx-повтор отброшен
+        $this->assertSame(0, $fake->calls); // > 40 позиций — без LLM-консолидатора
+        foreach ($out as $it) {
+            $this->assertEquals((float) ($it['article'] === 'R-1' ? 2 : 1), (float) ($it['__qty_summed'] ?? $it['qty'])); // количество не удвоено
+        }
+    }
+
     private function chunked(RequestItemParsingService $svc, string $text): array
     {
         $m = new \ReflectionMethod($svc, 'parseFileTextInChunks');

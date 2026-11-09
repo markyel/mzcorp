@@ -1599,6 +1599,58 @@ PROMPT;
         }
     }
 
+    private const CONSOLIDATION_MAX_ITEMS = 40;
+
+    /**
+     * Один и тот же перечень в двух файлах (ДМА, MZ2026-00483: ТЗ в xlsx и в docx, 190 строк):
+     * без этого позиции задваивались, а слитые по артикулу — суммировали количество (1+1=2).
+     * Если позиции меньшего файла на ≥60% совпадают с большим (по артикулу, иначе по имени),
+     * меньший файл отбрасывается целиком. Разные файлы с разными позициями не трогаются.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function dropRepeatedDocumentLists(array $items): array
+    {
+        $groups = [];
+        foreach ($items as $it) {
+            $src = (string) ($it['__source'] ?? '');
+            if (preg_match('/^(pdf|docx?|xlsx?)_attachment_\d+$/', $src) === 1) {
+                $groups[$src][] = $it;
+            }
+        }
+        if (count($groups) < 2) {
+            return $items;
+        }
+        uasort($groups, fn ($a, $b) => count($b) <=> count($a));
+
+        $keyOf = function (array $it): string {
+            $k = $this->normalizeArticle($it['article'] ?? null);
+
+            return $k !== '' ? 'a:'.$k : 'n:'.mb_strtolower((string) preg_replace('/\W+/u', '', (string) ($it['name'] ?? '')));
+        };
+        $kept = [];
+        $drop = [];
+        foreach ($groups as $src => $list) {
+            $keys = array_unique(array_map($keyOf, $list));
+            foreach ($kept as $keptKeys) {
+                $overlap = count(array_intersect($keys, $keptKeys));
+                if ($keys !== [] && $overlap / count($keys) >= 0.6) {
+                    $drop[$src] = ['items' => count($list), 'overlap' => $overlap];
+
+                    continue 2;
+                }
+            }
+            $kept[$src] = $keys;
+        }
+        if ($drop === []) {
+            return $items;
+        }
+        Log::info('parseItems: same list in several attachments — kept the fullest', ['kept' => array_keys($kept), 'dropped' => $drop]);
+
+        return array_values(array_filter($items, fn ($it) => ! isset($drop[(string) ($it['__source'] ?? '')])));
+    }
+
     /**
      * Часть B: финальная консолидация позиций split-пути одним LLM-агентом.
      *
@@ -1617,6 +1669,7 @@ PROMPT;
      */
     private function consolidateSplitItems(array $items, string $subject, string $body, ?string $linkedUrlsText): array
     {
+        $items = $this->dropRepeatedDocumentLists($items);
         $deduped = $this->dedupeWithinList($items);
 
         if (! config('services.openai.consolidation_enabled', true)) {
@@ -1629,6 +1682,13 @@ PROMPT;
             $sources[$it['__source'] ?? 'unknown'] = true;
         }
         if (count($deduped) < 2 || count($sources) < 2) {
+            return $deduped;
+        }
+        // Длинный перечень одним вызовом модель обрывает (ДМА: 360 кандидатов → 167 позиций).
+        // Консолидатор нужен для «фото + текст про одну позицию» — короткие заявки.
+        if (count($deduped) > self::CONSOLIDATION_MAX_ITEMS) {
+            Log::info('consolidateSplitItems: too many items for one LLM pass — dedupe only', ['items' => count($deduped)]);
+
             return $deduped;
         }
 
