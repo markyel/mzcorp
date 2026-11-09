@@ -97,6 +97,30 @@ class FileTextChunkingTest extends TestCase
         }
     }
 
+    public function test_rows_of_one_file_with_the_same_article_but_other_numbers_stay_apart(): void
+    {
+        $svc = new RequestItemParsingService(new OpenAIChatService());
+        $src = 'xlsx_attachment_1';
+        $items = [
+            ['name' => 'Предохранитель D02 (желтый), 25 А, 400 В', 'article' => 'D02', 'qty' => 5, '__source' => $src],
+            ['name' => 'Предохранитель D02 (белый), 35 А, 400 В', 'article' => 'D02', 'qty' => 5, '__source' => $src],
+            ['name' => 'Ролик RT100 башмака', 'article' => '60730002069L', 'qty' => 12, '__source' => $src],
+            ['name' => 'Ролик RT100 башмака', 'article' => '60730002069L', 'qty' => 12, '__source' => $src],
+            // Разные источники — правило прежнее: склеиваются по артикулу.
+            ['name' => 'Плата VQC 1', 'article' => 'OA85', 'qty' => 1, '__source' => 'vision_photo'],
+            ['name' => 'Плата VQC 2', 'article' => 'OA85', 'qty' => 1, '__source' => 'email_body'],
+        ];
+
+        $out = (new \ReflectionMethod($svc, 'dedupeWithinList'))->invoke($svc, $items);
+        $names = array_column($out, 'name');
+
+        $this->assertContains('Предохранитель D02 (желтый), 25 А, 400 В', $names);
+        $this->assertContains('Предохранитель D02 (белый), 35 А, 400 В', $names);
+        $this->assertCount(4, $out);
+        $roller = array_values(array_filter($out, fn ($i) => $i['article'] === '60730002069L'))[0];
+        $this->assertEquals(24, $roller['__qty_summed']);
+    }
+
     private function chunked(RequestItemParsingService $svc, string $text): array
     {
         $m = new \ReflectionMethod($svc, 'parseFileTextInChunks');

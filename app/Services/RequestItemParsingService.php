@@ -2273,6 +2273,20 @@ PROMPT;
      *  - `__qty_summed`: итоговая сумма qty (если было слияние). Persister
      *    берёт её приоритетно вместо item['qty'].
      */
+    /**
+     * Числа в названии (со знаком), отсортированные — дискриминатор «тот же ли товар».
+     *
+     * @return list<string>
+     */
+    private static function nameNumbers(string $name): array
+    {
+        preg_match_all('/-?\d+/u', $name, $m);
+        $tokens = $m[0] ?? [];
+        sort($tokens, SORT_STRING);
+
+        return $tokens;
+    }
+
     private function dedupeWithinList(array $items): array
     {
         $seenIndex = []; // key => index в $result
@@ -2287,6 +2301,18 @@ PROMPT;
             }
             $invoiceIndex = (int) ($item['invoice_index'] ?? 1);
             $key = $base . '|inv=' . $invoiceIndex;
+            // Две строки ОДНОГО файла с общим «артикулом», но разными числами в названии —
+            // разные товары: «Предохранитель D02 (жёлтый) 25 А» и «… (белый) 35 А» (ДМА,
+            // MZ2026-00483) слипались в одну позицию на 10 шт. Как у бейджа «⚠ дубль»
+            // (RequestItemPersister::numericTokens). Между разными источниками (фото + текст
+            // про одну деталь) правило прежнее.
+            if (isset($seenIndex[$key])) {
+                $winner = $result[$seenIndex[$key]];
+                if (($winner['__source'] ?? null) === ($item['__source'] ?? null)
+                    && self::nameNumbers((string) ($winner['name'] ?? '')) !== self::nameNumbers((string) ($item['name'] ?? ''))) {
+                    $key .= '|num='.implode(',', self::nameNumbers((string) ($item['name'] ?? '')));
+                }
+            }
             $thisQty = (float) ($item['qty'] ?? 0);
 
             $droppedEntry = [
