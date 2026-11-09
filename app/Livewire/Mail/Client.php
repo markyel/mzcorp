@@ -1594,6 +1594,7 @@ class Client extends Component
             $anchorMid = mb_strtolower(trim((string) $anchor->message_id));
 
             return EmailMessage::query()
+                ->withoutRawSource()
                 ->visibleTo($user)
                 ->with('relatedRequest:id,internal_code,status,onec_number')
                 ->where('related_request_id', $anchor->related_request_id)
@@ -1689,6 +1690,7 @@ class Client extends Component
     private function findAccessible(int $id): ?EmailMessage
     {
         return EmailMessage::withHistory()
+            ->withoutRawSource()
             ->whereIn('mailbox_id', app(MailboxAccessService::class)->mailboxIdsFor($this->user()))
             ->whereKey($id)
             ->first();

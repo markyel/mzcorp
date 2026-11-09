@@ -138,6 +138,24 @@ class EmailMessage extends Model
         ];
     }
 
+    /** @var list<string>|null */
+    private static ?array $columnsWithoutRaw = null;
+
+    /**
+     * Все колонки, кроме raw_source (исходник письма с вложениями в base64 — до десятков МБ).
+     * Для показа переписки он не нужен, а `select *` по треду с таким письмом съедал лимит
+     * памяти PHP: «Почта» Агрызкова падала на письме 28 МБ (заявка 19332, 09.11.2026).
+     */
+    public function scopeWithoutRawSource(Builder $query): Builder
+    {
+        self::$columnsWithoutRaw ??= array_values(array_diff(
+            \Illuminate\Support\Facades\Schema::getColumnListing($this->getTable()),
+            ['raw_source'],
+        ));
+
+        return $query->select(array_map(fn (string $c) => $this->qualifyColumn($c), self::$columnsWithoutRaw));
+    }
+
     /* ---------------- Phase 1.9 — drafts scopes ---------------- */
 
     /**

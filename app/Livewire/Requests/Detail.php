@@ -201,6 +201,7 @@ class Detail extends Component
         // (редкие письма без Date header) уходят в конец.
         // Phase 1.9: visibleTo фильтрует чужие черновики (свои показываются).
         $thread = EmailMessage::query()
+            ->withoutRawSource()
             ->where(function ($q) {
                 $q->where('related_request_id', $this->request->id);
                 // Заявка-наследник заведена по письму родителя: письмо осталось

@@ -99,6 +99,7 @@ class SharedMailService
         // Почтовый клиент показывает в треде и письма из истории ящика — но
         // только из ящика самого письма: чужие архивы в тред не подмешиваем.
         $thread = ($withHistory ? EmailMessage::withHistory() : EmailMessage::query())
+            ->withoutRawSource()
             ->when($withHistory, fn (Builder $q) => $q->where(fn (Builder $w) => $w
                 ->where('is_history', false)->orWhere('mailbox_id', $original->mailbox_id)))
             ->where('is_draft', false)
