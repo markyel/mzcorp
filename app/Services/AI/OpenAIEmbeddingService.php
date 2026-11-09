@@ -50,7 +50,6 @@ class OpenAIEmbeddingService
             return ['embeddings' => [], 'usage' => [], 'raw' => []];
         }
 
-        $baseUrl = config('services.openai.base_url');
         $apiKey = config('services.openai.api_key');
         $proxyKey = config('services.openai.proxy_key');
         $model = $model ?: config('services.openai.embedding_model', 'text-embedding-3-small');
@@ -72,12 +71,14 @@ class OpenAIEmbeddingService
             'input' => $inputs,
         ];
 
-        $url = rtrim((string) $baseUrl, '/') . '/v1/embeddings';
+        // Резервный шлюз — только если там та же модель эмбеддингов (векторы другой модели
+        // несовместимы с уже сохранёнными в pgvector): включается OPENAI_FALLBACK_EMBEDDINGS.
+        $fallback = app(OpenAIFallbackGateway::class);
+        $hasReserve = $fallback->enabled() && config('services.openai.fallback.embeddings');
 
-        $response = null;
-        $connectError = null;
-        try {
-            $response = Http::withHeaders($headers)
+        // Прокси по очереди: не ответил сам прокси — следующий (OpenAIProxyPool).
+        [$response, $connectError] = app(OpenAIProxyPool::class)->request(
+            fn (string $baseUrl) => Http::withHeaders($headers)
                 ->timeout(60)
                 ->connectTimeout(15)
                 ->retry(3, function (int $attempt, $exception) {
@@ -98,15 +99,11 @@ class OpenAIEmbeddingService
 
                     return false;
                 }, throw: false)
-                ->post($url, $payload);
-        } catch (\Illuminate\Http\Client\ConnectionException $e) {
-            $connectError = $e;
-        }
+                ->post($baseUrl . '/v1/embeddings', $payload),
+            $hasReserve,
+        );
 
-        // Резервный шлюз — только если там та же модель эмбеддингов (векторы другой модели
-        // несовместимы с уже сохранёнными в pgvector): включается OPENAI_FALLBACK_EMBEDDINGS.
-        $fallback = app(OpenAIFallbackGateway::class);
-        if (($response === null || ! $response->successful()) && $fallback->enabled() && config('services.openai.fallback.embeddings')
+        if (($response === null || ! $response->successful()) && $hasReserve
             && OpenAIFallbackGateway::shouldFallback($response, $connectError)) {
             $why = $response !== null ? $response->status().' '.mb_substr($response->body(), 0, 200) : (string) $connectError?->getMessage();
             $response = $fallback->post('/v1/embeddings', $payload, $why, 60);

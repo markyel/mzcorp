@@ -124,7 +124,8 @@ class OpenAIImageService
 
     private function url(string $op): string
     {
-        return rtrim((string) config('services.openai.base_url'), '/').'/v1/images/'.$op;
+        // Первый живой прокси (OpenAIProxyPool): картинку не повторяем — она долгая и платная.
+        return app(OpenAIProxyPool::class)->current().'/v1/images/'.$op;
     }
 
     private function model(): string

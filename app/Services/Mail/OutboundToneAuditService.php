@@ -325,7 +325,7 @@ class OutboundToneAuditService
         }
 
         return $req->withHeaders($headers)->timeout(120)
-            ->post(rtrim((string) config('services.openai.base_url'), '/').'/v1/chat/completions', [
+            ->post(app(\App\Services\AI\OpenAIProxyPool::class)->current().'/v1/chat/completions', [
                 'model' => $model,
                 'messages' => $this->messages($system, $batch),
             ] + $this->options());

@@ -71,6 +71,10 @@ return [
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com'),
+        // Прокси по приоритету через запятую, ключ прокси общий; пусто — только base_url.
+        // Отказавший прокси пропускается proxy_cooldown_minutes минут. См. App\Services\AI\OpenAIProxyPool.
+        'base_urls' => env('OPENAI_BASE_URLS', ''),
+        'proxy_cooldown_minutes' => (int) env('OPENAI_PROXY_COOLDOWN_MINUTES', 10),
         'proxy_key' => env('OPENAI_PROXY_KEY', ''),
         // Цены для учёта расхода (ai:usage), $ за 1 млн токенов: [вход, выход, кэшированный вход].
         // Модели шлюза Beget — его рублёвые цены, переведённые по ~81 ₽/$ (21.10.2026).

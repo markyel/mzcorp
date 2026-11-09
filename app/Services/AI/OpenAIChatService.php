@@ -28,7 +28,6 @@ class OpenAIChatService
      */
     public function chat(array $messages, string $model = 'gpt-4o', array $options = []): array
     {
-        $baseUrl = config('services.openai.base_url');
         $apiKey = config('services.openai.api_key');
         $proxyKey = config('services.openai.proxy_key');
 
@@ -51,10 +50,10 @@ class OpenAIChatService
         ], $options);
 
         try {
-            $response = null;
-            $connectError = null;
-            try {
-                $response = Http::withHeaders($headers)
+            $fallback = app(OpenAIFallbackGateway::class);
+            // Прокси по очереди: не ответил сам прокси — следующий (OpenAIProxyPool).
+            [$response, $connectError] = app(OpenAIProxyPool::class)->request(
+                fn (string $baseUrl) => Http::withHeaders($headers)
                     ->timeout(120)
                     ->retry(3, function (int $attempt, $exception) {
                         // Уважаем Retry-After / x-ratelimit-reset (кап 10с), иначе
@@ -74,13 +73,11 @@ class OpenAIChatService
 
                         return false;
                     }, throw: false)
-                    ->post(rtrim((string) $baseUrl, '/') . '/v1/chat/completions', $payload);
-            } catch (\Illuminate\Http\Client\ConnectionException $e) {
-                $connectError = $e;
-            }
+                    ->post($baseUrl . '/v1/chat/completions', $payload),
+                $fallback->enabled(),
+            );
 
             // Основной канал недоступен (нет денег, ключ, перегрузка, нет связи) — резервный шлюз.
-            $fallback = app(OpenAIFallbackGateway::class);
             if (($response === null || ! $response->successful()) && $fallback->enabled()
                 && OpenAIFallbackGateway::shouldFallback($response, $connectError)) {
                 $why = $response !== null ? $response->status().' '.mb_substr($response->body(), 0, 200) : (string) $connectError?->getMessage();

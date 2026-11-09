@@ -147,6 +147,14 @@ Schedule::command('quotes:reparse-failed --apply')
     ->onOneServer()
     ->runInBackground();
 
+// Прокси к OpenAI: отказавший пропускается, оживший возвращается в работу
+// (OPENAI_BASE_URLS, см. App\Services\AI\OpenAIProxyPool).
+Schedule::command('ai:proxies --probe')
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Self-healing: подобрать письма, у которых категоризатор упал
 // (OpenAI 503/timeout / invalid JSON). Без этого письмо застревает
 // без category и не превращается в Request — кейс 25.05.2026 #3681.
