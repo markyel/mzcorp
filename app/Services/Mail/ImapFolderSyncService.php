@@ -709,16 +709,50 @@ class ImapFolderSyncService
             $map = self::parseCopyUidMap((array) $resp->validatedData());
             foreach ($chunk as $uid) {
                 $newUid = $map[$uid] ?? null;
-                EmailMessage::withHistory()
+                $moved = EmailMessage::withHistory()
                     ->where('mailbox_id', $mailbox->id)
                     ->where('folder', $fromPath)
-                    ->where('imap_uid', $uid)
-                    ->update([
+                    ->where('imap_uid', $uid);
+                try {
+                    (clone $moved)->update([
                         'folder' => $toPath,
                         'imap_uid' => $newUid, // null → pull подберёт по Message-ID
                         'mailbox_folder_id' => $mailboxFolderId,
                     ]);
+                } catch (\Illuminate\Database\QueryException $e) {
+                    if (($e->errorInfo[0] ?? null) !== '23505') {
+                        throw $e;
+                    }
+                    $this->settleMovedOntoTwin($moved, $mailbox, $toPath, $mailboxFolderId);
+                }
             }
+        }
+    }
+
+    /**
+     * Письмо переехало на сервере, а в целевой папке у нас уже есть запись с тем же Message-ID
+     * (unique mailbox+folder+message_id): её подтянула история ящика или там уже лежала копия.
+     * Ничего не удаляем: пользовательская папка ставится этой записи, у исходной снимается UID
+     * (в исходной папке письма больше нет — «Почта» такие прячет, привязка к заявке остаётся).
+     * Кейс Агрызкова: «Входящие» → «Входящие (локально)», PushImapFolderOpJob падал на 23505.
+     */
+    private function settleMovedOntoTwin(\Illuminate\Database\Eloquent\Builder $moved, Mailbox $mailbox, string $toPath, ?int $mailboxFolderId): void
+    {
+        foreach ((clone $moved)->get(['id', 'message_id']) as $row) {
+            $twin = EmailMessage::withHistory()
+                ->where('mailbox_id', $mailbox->id)
+                ->where('folder', $toPath)
+                ->where('message_id', $row->message_id)
+                ->where('is_draft', false)
+                ->whereKeyNot($row->id)
+                ->first(['id']);
+            if ($twin !== null && $mailboxFolderId !== null) {
+                EmailMessage::withHistory()->whereKey($twin->id)->update(['mailbox_folder_id' => $mailboxFolderId]);
+            }
+            EmailMessage::withHistory()->whereKey($row->id)->update(['imap_uid' => null]);
+            Log::info('IMAP move: target folder already has this message — kept it, source row unlinked from server', [
+                'mailbox_id' => $mailbox->id, 'email_message_id' => $row->id, 'twin_id' => $twin?->id, 'to' => $toPath,
+            ]);
         }
     }
 
