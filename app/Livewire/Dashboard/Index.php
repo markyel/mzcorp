@@ -859,6 +859,8 @@ class Index extends Component
 
         $rows = AiDecision::query()
             ->where('created_at', '>=', now()->subDays(30))
+            // Закрытые как устаревшие (ai-decisions:close-stale) — не оценка детектора.
+            ->whereNull('payload->'.AiDecision::PAYLOAD_CLOSED_AS)
             ->groupBy('detector_type', 'status')
             ->selectRaw('detector_type, status, COUNT(*) as c')
             ->get();

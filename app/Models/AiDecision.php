@@ -50,6 +50,15 @@ class AiDecision extends Model
     public const PAYLOAD_AWAITING_PARSE_UNTIL = 'awaiting_document_parse_until';
 
     /**
+     * Ключ payload у закрытой (dismissed) подсказки: почему закрыта не человеком.
+     * CLOSED_AS_STALE — заявка уже пришла в целевой статус, ушла дальше или закрыта
+     * (ai-decisions:close-stale). Такие не считаются ошибкой детектора в «AI quality».
+     */
+    public const PAYLOAD_CLOSED_AS = 'closed_as';
+
+    public const CLOSED_AS_STALE = 'stale';
+
+    /**
      * Suggestion ещё ждёт разбора документа (плашку не показываем — иначе
      * менеджер подтверждает вручную за 2–10 с, пока парсер работает, и
      * «автоматика не работает»). Кейс M-2026-14815.
