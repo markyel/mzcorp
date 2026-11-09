@@ -1070,7 +1070,8 @@ class Client extends Component
         unset($this->threads, $this->openThread, $this->openAnchor, $this->autoQuotes);
         $this->notice = "Письмо привязано к заявке {$request->internal_code}"
             .($result['linked'] > 1 ? " (писем: {$result['linked']})" : '')
-            .($result['documents'] > 0 ? '. КП или счёт во вложении разбирается — статус и позиции обновятся через минуту.' : '.');
+            .($result['documents'] > 0 ? '. КП или счёт во вложении разбирается — статус и позиции обновятся через минуту.' : '.')
+            .($result['client'] ? " Клиентом заявки стал {$result['client']}." : '');
     }
 
     public function toggleFlag(int $id): void

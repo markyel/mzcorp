@@ -125,7 +125,7 @@ class MailToRequestLinker
      * Привязать письмо и его ещё не привязанную переписку к заявке.
      *
      * @param  Collection<int, EmailMessage>  $thread  переписка письма, как её видит почтовик
-     * @return array{linked: int, documents: int}
+     * @return array{linked: int, documents: int, client: ?string}
      *
      * @throws \DomainException  привязать нельзя (причина — текстом для человека)
      */
@@ -154,6 +154,8 @@ class MailToRequestLinker
                 ->get())->unique('id');
         }
 
+        $this->settleHistory($letters);
+
         $stamp = [
             'type' => self::ARTIFACT,
             'request_id' => $request->id,
@@ -168,6 +170,9 @@ class MailToRequestLinker
             }
         });
 
+        // До распознавания исходящих: их гард сверяет получателя с клиентом заявки.
+        $client = $this->adoptClient($request, $letters);
+
         // Исходящее — штатное распознавание документа, по одному на письмо (копии делят
         // вложения оригинала). Сам сервис проверяет, что письмо адресовано клиенту заявки.
         $documents = 0;
@@ -176,8 +181,8 @@ class MailToRequestLinker
             ->sortByDesc(fn (EmailMessage $m) => $m->attachments()->count())
             ->unique(fn (EmailMessage $m) => ($mid = trim((string) $m->message_id)) !== '' ? mb_strtolower($mid) : 'row-'.$m->id);
         foreach ($outbound as $m) {
-            if ($m->is_history && ! app(MailHistoryMirrorService::class)->fetchBody($m)) {
-                continue; // письма на сервере уже нет — разбирать нечего
+            if ($m->is_history) {
+                continue; // текст с сервера не загрузился (письма там уже нет) — разбирать нечего
             }
             $this->outbound->run($m->fresh(['attachments']), $request);
             $documents++;
@@ -189,10 +194,78 @@ class MailToRequestLinker
             'internal_code' => $request->internal_code,
             'linked_ids' => $letters->pluck('id')->values()->all(),
             'outbound_detected' => $documents,
+            'client_adopted' => $client,
             'by_user_id' => $user->id,
         ]);
 
-        return ['linked' => $letters->count(), 'documents' => $documents];
+        return ['linked' => $letters->count(), 'documents' => $documents, 'client' => $client];
+    }
+
+    /**
+     * Письма из истории ящика становятся живой перепиской, как у «Это заявка!»: текст и
+     * вложения — с сервера, флаг истории снимаем. Иначе карточка заявки их не видит
+     * (M-2026-21657, 09.11.2026: письмо клиента привязали, а в заявке его нет).
+     * Письма на сервере уже нет — оставляем как есть, привязка всё равно ставится.
+     *
+     * @param  Collection<int, EmailMessage>  $letters
+     */
+    public function settleHistory(Collection $letters): void
+    {
+        $mirror = app(MailHistoryMirrorService::class);
+        foreach ($letters as $m) {
+            if ($m->is_history && (! $m->needsBodyFetch() || $mirror->fetchBody($m))) {
+                $m->forceFill(['is_history' => false])->save();
+            }
+        }
+    }
+
+    /**
+     * Заявка без клиента (восстановлена по нашему запросу поставщику, M-2026-21657):
+     * клиентом становится отправитель самого раннего привязанного входящего письма с
+     * внешнего адреса, а это письмо — исходным письмом заявки, если исходным стоит не
+     * письмо клиента. Организация — штатно по адресу, если ещё не задана. Клиент уже
+     * есть — не трогаем.
+     *
+     * @param  Collection<int, EmailMessage>  $letters
+     * @return string|null  адрес нового клиента
+     */
+    public function adoptClient(Request $request, Collection $letters): ?string
+    {
+        if (trim((string) $request->client_email) !== '') {
+            return null;
+        }
+        $internal = app(InternalSenderDetector::class);
+        $first = $letters
+            ->filter(fn (EmailMessage $m) => $m->direction === MailDirection::Inbound
+                && trim((string) $m->from_email) !== '' && $internal->detect($m) === null)
+            ->sortBy(fn (EmailMessage $m) => $m->sent_at)
+            ->first();
+        if ($first === null) {
+            return null;
+        }
+
+        $email = mb_strtolower(trim((string) $first->from_email));
+        $attrs = ['client_email' => $email];
+        if (trim((string) $request->client_name) === '' && trim((string) $first->from_name) !== '') {
+            $attrs['client_name'] = trim((string) $first->from_name);
+        }
+        $source = $request->email_message_id
+            ? EmailMessage::withHistory()->withoutRawSource()->find($request->email_message_id, ['id', 'direction'])
+            : null;
+        if ($source === null || $source->direction !== MailDirection::Inbound) {
+            $attrs['email_message_id'] = $first->id;
+        }
+        $request->forceFill($attrs)->save();
+        app(\App\Services\Clients\RequestOrganizationResolver::class)->attach($request);
+
+        Log::info('MailToRequestLinker: request got its client from a linked letter', [
+            'request_id' => $request->id,
+            'client_email' => $email,
+            'source_email_message_id' => $attrs['email_message_id'] ?? $request->email_message_id,
+            'was_source' => $source?->id,
+        ]);
+
+        return $email;
     }
 
     /**
