@@ -1534,7 +1534,18 @@ class Client extends Component
             $w->where('email_messages.subject', 'ilike', $like)
                 ->orWhere('email_messages.from_email', 'ilike', $like)
                 ->orWhere('email_messages.from_name', 'ilike', $like)
-                ->orWhere('email_messages.body_plain', 'ilike', $like);
+                ->orWhere('email_messages.body_plain', 'ilike', $like)
+                // Получатели: без них не находилось своё отправленное по адресу клиента
+                // (lift-m1zip@mail.ru, 09.11.2026). Выражения совпадают с trgm-индексами
+                // email_messages_to_recip_trgm / _cc_recip_trgm — как в Mail\Index.
+                ->orWhereRaw('email_messages.to_recipients::text ilike ?', [$like])
+                ->orWhereRaw('email_messages.cc_recipients::text ilike ?', [$like])
+                // Имя вложения — некоррелированный semi-join (как в Mail\Index), не orWhereHas.
+                ->orWhereIn('email_messages.id', function ($sub) use ($like) {
+                    $sub->select('email_message_id')
+                        ->from('email_attachments')
+                        ->where('filename', 'ilike', $like);
+                });
         });
     }
 
