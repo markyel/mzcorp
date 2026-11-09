@@ -342,6 +342,20 @@ body.mail-resizing iframe{pointer-events:none}
 .mailapp .chead .dec.skipped b,.mailapp .chead .dec.none b{color:var(--fg-3)}
 .mailapp .chead .reqlink .spacer{flex:1}
 .mailapp .chead .reqlink a{color:var(--violet-700);font-weight:600;text-decoration:none;border-bottom:1px dashed currentColor}
+/* Панель «Привязать к заявке»: подсказки + поиск, строка — кнопка привязки. */
+.mailapp .chead .linkpick{margin-top:10px;max-width:640px;padding:10px 12px;background:var(--bg-surface);border:1px solid var(--violet-600);border-radius:var(--r-md);font-size:12.5px}
+.mailapp .chead .linkpick .lp-head{display:flex;align-items:center;gap:8px}
+.mailapp .chead .linkpick .spacer{flex:1}
+.mailapp .chead .linkpick .lp-x{border:none;background:none;color:var(--fg-3);cursor:pointer;font-size:16px;line-height:1;padding:0 2px}
+.mailapp .chead .linkpick .lp-hint{color:var(--fg-3);font-size:11.5px;margin:4px 0 8px}
+.mailapp .chead .linkpick .lp-search{width:100%;padding:6px 9px;border:1px solid var(--border-strong);border-radius:6px;font:inherit;background:var(--bg-app);color:var(--fg-1);margin-bottom:6px}
+.mailapp .chead .linkpick .lp-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;width:100%;text-align:left;padding:6px 8px;border:none;border-top:1px solid var(--border-subtle);background:none;cursor:pointer;font:inherit;color:var(--fg-1)}
+.mailapp .chead .linkpick .lp-row:hover{background:var(--violet-50)}
+.mailapp .chead .linkpick .code{font-family:var(--font-mono);font-weight:600;color:var(--violet-700)}
+.mailapp .chead .linkpick .onec{font-family:var(--font-mono);font-weight:600;color:var(--emerald-700)}
+.mailapp .chead .linkpick .lp-client{color:var(--fg-3);font-family:var(--font-mono);font-size:11.5px}
+.mailapp .chead .linkpick .lp-why{margin-left:auto;color:var(--fg-3);font-size:11px;font-style:italic}
+.mailapp .chead .linkpick .lp-empty{color:var(--fg-3);font-size:11.5px;padding:4px 2px}
 /* Полоса «ещё письма в переписке»: открыто ровно выбранное письмо, соседние —
    свёрнутым списком, клик по строке открывает её. */
 .mailapp .tstrip{display:flex;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border-subtle);background:var(--bg-app)}
@@ -965,6 +979,12 @@ body.mail-resizing iframe{pointer-events:none}
                         <span class="spacer"></span>
                         <button type="button" class="linkbtn" wire:click="filterByRequest({{ $hintReq->id }})"
                                 title="Показать все письма этой заявки">Все письма заявки</button>
+                        @if($this->canLinkToRequest)
+                            <button type="button" class="linkbtn" wire:click="linkToRequest({{ $hintReq->id }})"
+                                    wire:loading.attr="disabled" wire:target="linkToRequest"
+                                    wire:confirm="Привязать письмо и его переписку к заявке {{ $hintReq->internal_code }}?"
+                                    title="Поставить письмо в заявку: оно появится в её переписке">Привязать</button>
+                        @endif
                         <a href="{{ route('requests.show', $hintReq->id) }}" wire:navigate>Открыть заявку →</a>
                     </div>
                 @elseif($anchor->direction?->value === 'inbound'
@@ -978,12 +998,64 @@ body.mail-resizing iframe{pointer-events:none}
                     <div class="reqlink promote">
                         <span>Заявки по письму нет</span>
                         <span class="spacer"></span>
+                        @if($this->canLinkToRequest && ! $linkOpen)
+                            <button type="button" class="btn btn-sm" wire:click="openLinkPicker"
+                                    title="Письмо относится к уже существующей заявке — поставить его туда">Привязать к заявке</button>
+                        @endif
                         <button type="button" class="btn btn-sm btn-primary"
                                 wire:click="promoteToRequest({{ $anchor->id }})"
                                 wire:loading.attr="disabled" wire:target="promoteToRequest"
                                 wire:confirm="Создать заявку из этого письма? Запустится разбор позиций и назначение менеджера.">
                             Это заявка!
                         </button>
+                    </div>
+                @elseif($this->canLinkToRequest && ! $linkOpen)
+                    {{-- Письмо без заявки, «Это заявка!» не к месту (наше исходящее): КП/счёт из 1С
+                         менеджер шлёт клиенту новым письмом, не ответом в треде, — заявке оно не
+                         достаётся. Поставить его туда руками (MailToRequestLinker). --}}
+                    <div class="reqlink promote">
+                        <span>Письмо не в заявке</span>
+                        <span class="spacer"></span>
+                        <button type="button" class="btn btn-sm" wire:click="openLinkPicker"
+                                title="Поставить письмо в существующую заявку: КП или счёт во вложении разберётся">Привязать к заявке</button>
+                    </div>
+                @endif
+
+                @if($linkOpen && $this->canLinkToRequest)
+                    @php
+                        $linkRows = collect($this->linkCandidates)
+                            ->concat($this->linkResults->map(fn ($r) => ['request' => $r, 'why' => null]))
+                            ->unique(fn ($row) => $row['request']->id)
+                            ->values();
+                    @endphp
+                    <div class="linkpick">
+                        <div class="lp-head">
+                            <b>Привязать к заявке</b>
+                            <span class="spacer"></span>
+                            <button type="button" class="lp-x" wire:click="closeLinkPicker" title="Закрыть">×</button>
+                        </div>
+                        <div class="lp-hint">Письмо и его переписка встанут в заявку. КП или счёт клиенту во вложении разберётся, статус сменится по распознанному документу.</div>
+                        <input type="text" class="lp-search" wire:model.live.debounce.300ms="linkSearch"
+                               placeholder="Номер заявки, номер 1С или адрес клиента" autocomplete="off">
+                        @foreach($linkRows as $row)
+                            @php
+                                $lr = $row['request'];
+                                $lrStatus = $lr->status instanceof \App\Enums\RequestStatus ? $lr->status : \App\Enums\RequestStatus::tryFrom((string) $lr->status);
+                            @endphp
+                            <button type="button" class="lp-row" wire:key="lp-{{ $lr->id }}"
+                                    wire:click="linkToRequest({{ $lr->id }})"
+                                    wire:loading.attr="disabled" wire:target="linkToRequest"
+                                    wire:confirm="Привязать письмо и его переписку к заявке {{ $lr->internal_code }}?">
+                                <span class="code">{{ $lr->internal_code }}</span>
+                                @if($lr->onec_number)<span class="onec">1С: {{ $lr->onec_number }}</span>@endif
+                                <span class="chip {{ $lrStatus?->chipClass() ?? 'chip-neutral' }}">{{ $lrStatus?->label() ?? $lr->status }}</span>
+                                <span class="lp-client">{{ $lr->client_email }}</span>
+                                @if($row['why'])<span class="lp-why">{{ $row['why'] }}</span>@endif
+                            </button>
+                        @endforeach
+                        @if($linkRows->isEmpty())
+                            <div class="lp-empty">{{ mb_strlen(trim($linkSearch)) >= 2 ? 'Среди доступных вам заявок ничего не нашлось.' : 'Подходящих заявок не нашлось — найдите заявку поиском.' }}</div>
+                        @endif
                     </div>
                 @endif
 

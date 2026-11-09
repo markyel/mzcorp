@@ -24,6 +24,7 @@ use App\Services\Mail\MailboxAccessService;
 use App\Services\Mail\MailboxFolderService;
 use App\Services\Mail\MailHistoryMirrorService;
 use App\Services\Mail\MailReadService;
+use App\Services\Mail\MailToRequestLinker;
 use App\Services\Mail\MailUnreadCounter;
 use App\Services\Mail\MessageLabelService;
 use App\Services\Mail\OutgoingSendRetryService;
@@ -103,6 +104,12 @@ class Client extends Component
      * событие 'toast' в проекте никто не слушает — рендерера нет.
      */
     public ?string $notice = null;
+
+    /** Открыта ли под шапкой письма панель «Привязать к заявке» (MailToRequestLinker). */
+    public bool $linkOpen = false;
+
+    /** Поиск заявки в панели привязки: номер, номер 1С, адрес клиента. */
+    public string $linkSearch = '';
 
     /**
      * Где искать при непустом поиске: 'all' — по всем папкам ящика (по умолчанию),
@@ -396,6 +403,7 @@ class Client extends Component
         }
 
         $this->openId = $id;
+        $this->closeLinkPicker();
         unset($this->openThread, $this->openAnchor);
 
         // Прочитанным помечаем ТОЛЬКО открытое письмо, как в обычном почтовике.
@@ -980,6 +988,89 @@ class Client extends Component
 
         unset($this->threads, $this->openThread, $this->openAnchor, $this->autoQuotes);
         $this->notice = "Создана заявка {$request->internal_code}. Идёт разбор позиций и назначение менеджера.";
+    }
+
+    /**
+     * Можно ли привязать открытое письмо к существующей заявке: тот же круг людей, что
+     * у «Это заявка!», письмо без заявки и не переписка с поставщиком.
+     */
+    #[Computed]
+    public function canLinkToRequest(): bool
+    {
+        $anchor = $this->openAnchor;
+
+        return $anchor !== null && $this->canPromote
+            && app(MailToRequestLinker::class)->refusal($anchor) === null;
+    }
+
+    /** Подсказки заявок для открытого письма: номер в теме/файле, тот же клиент. @return list<array{request: Request, why: string}> */
+    #[Computed]
+    public function linkCandidates(): array
+    {
+        if (! $this->linkOpen || ! $this->canLinkToRequest) {
+            return [];
+        }
+
+        return app(MailToRequestLinker::class)->candidates($this->openAnchor, $this->user());
+    }
+
+    /** @return Collection<int, Request> */
+    #[Computed]
+    public function linkResults(): Collection
+    {
+        if (! $this->linkOpen) {
+            return collect();
+        }
+
+        return app(MailToRequestLinker::class)->search($this->linkSearch, $this->user());
+    }
+
+    public function openLinkPicker(): void
+    {
+        $this->linkOpen = $this->canLinkToRequest;
+        $this->linkSearch = '';
+    }
+
+    public function closeLinkPicker(): void
+    {
+        $this->linkOpen = false;
+        $this->linkSearch = '';
+    }
+
+    /** «Привязать к заявке»: письмо и его не привязанная переписка встают в заявку, КП/счёт разбираются. */
+    public function linkToRequest(int $requestId): void
+    {
+        $anchor = $this->openAnchor;
+        $user = $this->user();
+        $request = Request::find($requestId);
+        if ($anchor === null || $user === null || $request === null || ! $this->canPromote) {
+            $this->notice = 'Письмо или заявка не найдены.';
+
+            return;
+        }
+
+        try {
+            $result = app(MailToRequestLinker::class)->link($anchor, $this->openThread, $request, $user);
+        } catch (\DomainException $e) {
+            $this->notice = $e->getMessage();
+
+            return;
+        } catch (\Throwable $e) {
+            Log::error('Mail\Client: не удалось привязать письмо к заявке', [
+                'email_message_id' => $anchor->id,
+                'request_id' => $requestId,
+                'error' => $e->getMessage(),
+            ]);
+            $this->notice = 'Не удалось привязать письмо — подробности в логе.';
+
+            return;
+        }
+
+        $this->closeLinkPicker();
+        unset($this->threads, $this->openThread, $this->openAnchor, $this->autoQuotes);
+        $this->notice = "Письмо привязано к заявке {$request->internal_code}"
+            .($result['linked'] > 1 ? " (писем: {$result['linked']})" : '')
+            .($result['documents'] > 0 ? '. КП или счёт во вложении разбирается — статус и позиции обновятся через минуту.' : '.');
     }
 
     public function toggleFlag(int $id): void
