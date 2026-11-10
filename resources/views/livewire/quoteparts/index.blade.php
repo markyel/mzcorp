@@ -385,8 +385,14 @@
                 <button type="button" wire:click="remove" wire:confirm="Убрать отмеченные позиции из QuoteParts? История там сохранится." class="btn btn-sm">
                     Убрать из QuoteParts: {{ $pickedPool }}
                 </button>
+                <span class="text-fg-4">отмеченным на паузе:</span>
+                @foreach(\App\Livewire\QuoteParts\Index::PAUSE_DECISIONS as $dKey => [$dLabel, $dHint])
+                    <button type="button" class="btn btn-sm" title="{{ $dHint }}" wire:click="decidePaused('{{ $dKey }}')"
+                            wire:loading.attr="disabled" wire:target="decidePaused"
+                            wire:confirm="{{ $dLabel }} — для всех отмеченных позиций на паузе? {{ $dHint }}">{{ $dLabel }}</button>
+                @endforeach
             @endif
-            <span class="text-fg-4">Изменения карточки досылаются автоматически каждый час. Существенные (другой бренд или артикул, другие размеры, другой смысл наименования) ставят позицию на паузу — решение принимается в QuoteParts.</span>
+            <span class="text-fg-4">Изменения карточки досылаются автоматически каждый час. Существенные (другой бренд или артикул, другие размеры, другой смысл наименования) ставят позицию на паузу: решите кнопками у позиции — «Тот же товар», «Другой товар» или «Снять с работы».</span>
         </div>
 
         <div class="ds-card">
@@ -413,6 +419,17 @@
                                         <ul class="mt-1 text-[11.5px] text-amber-800 list-disc pl-4">
                                             @foreach($row->pause_reasons as $reason)<li>{{ $reason }}</li>@endforeach
                                         </ul>
+                                    @endif
+                                    @if($row->status === 'paused')
+                                        {{-- Решение по изменению карточки — здесь же, без похода в QuoteParts. --}}
+                                        <div class="mt-1.5 flex flex-wrap gap-1.5">
+                                            @foreach(\App\Livewire\QuoteParts\Index::PAUSE_DECISIONS as $dKey => [$dLabel, $dHint])
+                                                <button type="button" class="btn btn-xs" title="{{ $dHint }}"
+                                                        wire:click="decidePaused('{{ $dKey }}', {{ $row->id }})"
+                                                        wire:loading.attr="disabled" wire:target="decidePaused"
+                                                        wire:confirm="{{ $row->sku }}: {{ $dLabel }}? {{ $dHint }}">{{ $dLabel }}</button>
+                                            @endforeach
+                                        </div>
                                     @endif
                                     @if($row->status === 'error' && $row->last_error)
                                         <div class="mt-1 text-[11.5px] text-red-700">{{ \Illuminate\Support\Str::limit($row->last_error, 200) }}</div>

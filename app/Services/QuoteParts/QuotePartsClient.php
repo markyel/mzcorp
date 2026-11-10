@@ -88,6 +88,24 @@ class QuotePartsClient
     }
 
     /**
+     * Решение по позициям на паузе (существенно изменилась карточка): same_product — тот же товар,
+     * new_product — другой товар (версия растёт), retire — снять с работы.
+     *
+     * @param  list<array{code:string, decision:string}>  $items
+     * @return list<array{code:string, status?:string, version?:int, error?:string}>
+     */
+    public function decideItems(array $items, ?string $by = null): array
+    {
+        $response = $this->http()->post('/api/v1/items/decide', array_filter(['items' => $items, 'by' => $by]));
+
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts items/decide: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 500));
+        }
+
+        return $response->json('items', []);
+    }
+
+    /**
      * @param  list<string>  $codes
      * @return list<array{code:string, status:string, version:int, reasons:list<string>}>
      */

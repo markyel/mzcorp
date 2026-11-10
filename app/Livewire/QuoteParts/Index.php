@@ -506,6 +506,69 @@ class Index extends Component
         $this->dispatch('toast', type: 'success', message: 'Убрано из QuoteParts: '.$n.'. История там сохраняется.');
     }
 
+    /**
+     * Решение по позициям на паузе (существенно изменилась карточка) прямо из пула, без похода в
+     * QuoteParts (10.11.2026). Тот же товар — в работу, цены поставщиков в силе; другой товар — в
+     * работу с новой версией, прежние цены в историю; снять с работы — в архив QuoteParts.
+     */
+    public const PAUSE_DECISIONS = [
+        'same_product' => ['Тот же товар', 'Описание уточнили, товар прежний. Позиция вернётся в работу, полученные цены останутся в силе.'],
+        'new_product' => ['Другой товар', 'Под кодом теперь другой товар. Позиция вернётся в работу, прежние цены уйдут в историю, запрашиваем заново.'],
+        'retire' => ['Снять с работы', 'Позиция уйдёт в архив QuoteParts, запросы по ней не отправляются.'],
+    ];
+
+    /** @param  int|null  $rowId  одна строка пула; null — все отмеченные, что на паузе */
+    public function decidePaused(string $decision, ?int $rowId = null): void
+    {
+        if (! isset(self::PAUSE_DECISIONS[$decision])) {
+            return;
+        }
+        $ids = $rowId !== null ? [$rowId] : array_map('intval', array_keys(array_filter($this->selectedPool)));
+        $rows = QuotePartsPoolItem::query()->whereIn('id', $ids)->where('status', QuotePartsPoolItem::STATUS_PAUSED)->get();
+        if ($rows->isEmpty()) {
+            $this->dispatch('toast', type: 'error', message: 'Среди отмеченных нет позиций на паузе.');
+
+            return;
+        }
+
+        try {
+            $result = collect(app(\App\Services\QuoteParts\QuotePartsClient::class)->decideItems(
+                $rows->map(fn ($r) => ['code' => $r->sku, 'decision' => $decision])->values()->all(),
+                auth()->user()?->name,
+            ))->keyBy('code');
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: 'QuoteParts не ответил: '.mb_substr($e->getMessage(), 0, 200));
+
+            return;
+        }
+
+        $done = 0;
+        $errors = [];
+        foreach ($rows as $row) {
+            $r = $result->get($row->sku);
+            if (isset($r['status'])) {
+                $row->forceFill([
+                    'status' => $r['status'],
+                    'remote_version' => $r['version'] ?? $row->remote_version,
+                    'pause_reasons' => $r['status'] === QuotePartsPoolItem::STATUS_PAUSED ? $row->pause_reasons : null,
+                ])->save();
+            }
+            if (isset($r['error'])) {
+                $errors[] = $row->sku.': '.$r['error'];
+            } elseif ($r !== null) {
+                $done++;
+            }
+        }
+        \Illuminate\Support\Facades\Log::info('QuoteParts paused items decided', [
+            'decision' => $decision, 'skus' => $rows->pluck('sku')->all(), 'done' => $done, 'errors' => $errors, 'user_id' => auth()->id(),
+        ]);
+
+        $this->selectedPool = [];
+        unset($this->poolByCatalogId, $this->poolItems, $this->poolCounts);
+        $this->dispatch('toast', type: $errors === [] ? 'success' : 'error',
+            message: self::PAUSE_DECISIONS[$decision][0].' — позиций: '.$done.($errors !== [] ? '. Не прошло: '.implode('; ', $errors) : '.'));
+    }
+
     public function refreshStatuses(QuotePartsPoolService $pool): void
     {
         SyncQuotePartsPoolJob::dispatch();
