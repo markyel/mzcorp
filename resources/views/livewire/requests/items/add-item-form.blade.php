@@ -18,6 +18,27 @@
                 <span class="text-[11px] text-fg-3">источник: ручной ввод</span>
             </div>
 
+            {{-- Быстро по M-артикулу: поля ниже заполняются из каталога (кроме количества),
+                 при сохранении позиция привязывается к этой позиции каталога. --}}
+            <div>
+                <label class="block text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1">Заполнить по M-артикулу</label>
+                <div class="flex items-center gap-2">
+                    <input type="text"
+                           wire:model="sku"
+                           wire:keydown.enter.prevent="fillFromSku"
+                           placeholder="M06374"
+                           style="width: 160px"
+                           class="h-[34px] px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-[var(--sky-500)] mono" />
+                    <button type="button" class="btn" wire:click="fillFromSku" wire:loading.attr="disabled" wire:target="fillFromSku">
+                        Заполнить
+                    </button>
+                    @if($catalogItemId)
+                        <span class="text-[12px] text-fg-3">заполнено из каталога — позиция будет привязана к <span class="mono">{{ $sku }}</span></span>
+                    @endif
+                </div>
+                @error('sku') <div class="text-red-700 text-[12px] mt-1">{{ $message }}</div> @enderror
+            </div>
+
             <div>
                 <label class="block text-[11px] uppercase tracking-wider text-fg-3 font-semibold mb-1">
                     Название <span class="text-red-700">*</span>
