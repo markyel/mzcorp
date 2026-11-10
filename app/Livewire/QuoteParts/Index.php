@@ -569,6 +569,21 @@ class Index extends Component
             message: self::PAUSE_DECISIONS[$decision][0].' — позиций: '.$done.($errors !== [] ? '. Не прошло: '.implode('; ', $errors) : '.'));
     }
 
+    /**
+     * «Просмотрено»: изменения карточки позиции в работе увидели — убрать пометку. С 10.11.2026
+     * существенные изменения не ставят позицию на паузу, а копятся пометкой до просмотра.
+     */
+    public function dismissChange(int $rowId): void
+    {
+        $row = QuotePartsPoolItem::query()->whereKey($rowId)->where('status', '!=', QuotePartsPoolItem::STATUS_PAUSED)->first();
+        if ($row === null) {
+            return;
+        }
+        \Illuminate\Support\Facades\Log::info('QuoteParts pool change seen', ['sku' => $row->sku, 'reasons' => $row->pause_reasons, 'user_id' => auth()->id()]);
+        $row->forceFill(['pause_reasons' => null])->save();
+        unset($this->poolItems);
+    }
+
     public function refreshStatuses(QuotePartsPoolService $pool): void
     {
         SyncQuotePartsPoolJob::dispatch();

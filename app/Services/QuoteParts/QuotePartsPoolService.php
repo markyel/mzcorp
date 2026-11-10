@@ -168,7 +168,8 @@ class QuotePartsPoolService
                     $row->forceFill([
                         'status' => $s['status'],
                         'remote_version' => $s['version'] ?? $row->remote_version,
-                        'pause_reasons' => $s['status'] === QuotePartsPoolItem::STATUS_PAUSED ? ($s['reasons'] ?? []) : null,
+                        // Причины изменения карточки храним и после снятия паузы: с 10.11.2026 они отслеживаются, но не стопорят.
+                        'pause_reasons' => ($s['reasons'] ?? []) ?: $row->pause_reasons,
                     ])->save();
                     $updated++;
                 }
@@ -290,9 +291,11 @@ class QuotePartsPoolService
                 'status' => $result['status'],
                 'remote_version' => $result['version'] ?? null,
                 'payload_hash' => $hashes[$result['code']],
-                'pause_reasons' => $result['status'] === QuotePartsPoolItem::STATUS_PAUSED
-                    ? array_values(array_unique(array_merge((array) $row->pause_reasons, (array) ($result['reasons'] ?? []))))
-                    : null,
+                // Существенные изменения карточки копятся, пока их не отметят «Просмотрено» (Index::dismissChange):
+                // с 10.11.2026 QuoteParts их отслеживает, но позицию на паузу не ставит.
+                'pause_reasons' => ($result['reasons'] ?? []) !== []
+                    ? array_values(array_unique(array_merge((array) $row->pause_reasons, (array) $result['reasons'])))
+                    : $row->pause_reasons,
                 'synced_at' => now(),
                 'last_error' => null,
             ])->save();

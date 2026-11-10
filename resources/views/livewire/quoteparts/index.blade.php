@@ -392,7 +392,7 @@
                             wire:confirm="{{ $dLabel }} — для всех отмеченных позиций на паузе? {{ $dHint }}">{{ $dLabel }}</button>
                 @endforeach
             @endif
-            <span class="text-fg-4">Изменения карточки досылаются автоматически каждый час. Существенные (другой бренд или артикул, другие размеры, другой смысл наименования) ставят позицию на паузу: решите кнопками у позиции — «Тот же товар», «Другой товар» или «Снять с работы».</span>
+            <span class="text-fg-4">Изменения карточки досылаются автоматически каждый час. Существенные (другой бренд или артикул, другие размеры, другой смысл наименования) отмечаются у позиции, но цены не блокируют — поставщики продолжают отвечать.</span>
         </div>
 
         <div class="ds-card">
@@ -417,6 +417,15 @@
                                     <span class="inline-block max-w-[420px] truncate align-bottom">{{ $row->catalogItem?->name }}</span>
                                     @if($row->status === 'paused' && $row->pause_reasons)
                                         <ul class="mt-1 text-[11.5px] text-amber-800 list-disc pl-4">
+                                            @foreach($row->pause_reasons as $reason)<li>{{ $reason }}</li>@endforeach
+                                        </ul>
+                                    @elseif($row->pause_reasons)
+                                        {{-- С 10.11.2026 существенные изменения отслеживаются, но цены не стопорят. --}}
+                                        <div class="mt-1 text-[11.5px] text-fg-3">
+                                            карточка изменилась — цены не блокирует:
+                                            <button type="button" class="btn btn-xs ml-1" wire:click="dismissChange({{ $row->id }})" title="Изменения увидели — убрать пометку">Просмотрено</button>
+                                        </div>
+                                        <ul class="mt-0.5 text-[11.5px] text-fg-3 list-disc pl-4">
                                             @foreach($row->pause_reasons as $reason)<li>{{ $reason }}</li>@endforeach
                                         </ul>
                                     @endif
