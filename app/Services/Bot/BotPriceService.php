@@ -44,6 +44,22 @@ class BotPriceService
     }
 
     /**
+     * Сообщение — одни артикулы (можно с количеством): «M06258», «M04027 5», «M1234, M5678 2 шт».
+     * Это запрос цены, а не реплика менеджеру — даже пока идёт разговор по заявке (MZ2026-00881,
+     * 10.11.2026: три артикула подряд ушли менеджеру в старую заявку вместо цены).
+     */
+    public static function onlySkus(string $text): bool
+    {
+        if (self::skusIn($text) === []) {
+            return false;
+        }
+        $rest = (string) preg_replace(self::SKU_RE, ' ', $text);
+        $rest = (string) preg_replace('/(?:штук[иа]?|шт|pcs?)\.?|[\d\s,;:\/\-x×*.]+/iu', ' ', $rest);
+
+        return trim($rest) === '';
+    }
+
+    /**
      * @return array{found: bool, sku: string, name: ?string, price: ?float, for_org: ?string,
      *     stock: float, lead_days: ?int, catalog_item_id: ?int}
      */

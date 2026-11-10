@@ -221,8 +221,10 @@ class BotConversationService
             return;
         }
 
-        // Идёт разговор с менеджером по заявке — ответ клиента ему же.
-        if ($text !== '' && ! str_starts_with($text, '/') && ($ongoing = $this->ongoingConversation($chat)) !== null) {
+        // Идёт разговор с менеджером по заявке — ответ клиента ему же. Одни артикулы — запрос цены, не реплика:
+        // меню так и обещает («пришлите артикул — покажу цену»); дописать в заявку — кнопка «Ответить».
+        if ($text !== '' && ! str_starts_with($text, '/') && ! BotPriceService::onlySkus($text)
+            && ($ongoing = $this->ongoingConversation($chat)) !== null) {
             $this->passToManager($chat, $ongoing, $text);
 
             return;
@@ -791,6 +793,7 @@ class BotConversationService
     /**
      * Менеджер писал клиенту по заявке за последние сутки — обычный ответ
      * клиента продолжает этот разговор, без вопроса «куда отправить».
+     * Клиент вышел в «Меню» — разговор закончен, пока менеджер не напишет снова.
      */
     private function ongoingConversation(MessengerChat $chat): ?\App\Models\Request
     {
@@ -798,9 +801,15 @@ class BotConversationService
         if ($activeId === 0) {
             return null;
         }
+        $since = now()->subDay();
+        $menuAt = (int) $chat->stateGet('menu_at', 0);
+        if ($menuAt > $since->getTimestamp()) {
+            // В часовом поясе приложения: createFromTimestamp даёт UTC, а время в базе — московское.
+            $since = now()->setTimestamp($menuAt);
+        }
         $recent = MessengerMessage::query()
             ->where('messenger_chat_id', $chat->id)->where('request_id', $activeId)
-            ->where('kind', 'manager')->where('created_at', '>=', now()->subDay())
+            ->where('kind', 'manager')->where('created_at', '>', $since)
             ->exists();
 
         return $recent ? $this->ownRequest($chat, $activeId) : null;
@@ -981,6 +990,8 @@ class BotConversationService
     private function menu(MessengerChat $chat): void
     {
         $chat->stateForget('awaiting', 'flow');
+        // Вышел в меню — разговор по заявке закончен: обычный текст уже не уходит менеджеру (ongoingConversation).
+        $chat->stateSet('menu_at', time());
         $chat->save();
         $this->say($chat, 'Пришлите артикул M… — покажу цену и наличие. Или оформите заявку.', self::MENU);
     }

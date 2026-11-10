@@ -315,6 +315,55 @@ class BotConversationTest extends TestCase
         $this->assertStringContainsString('Передали менеджеру', $this->send('OTIS GEN2'));
     }
 
+    /** MZ2026-00881, 10.11.2026: артикулы после КП менеджера уходили ему в старую заявку вместо цены. */
+    private function chatInConversation(): array
+    {
+        $chat = MessengerChat::create(['channel' => 'telegram', 'external_user_id' => '77', 'chat_id' => '77', 'email' => 'a@b.ru', 'email_verified_at' => now()]);
+        $rid = \Illuminate\Support\Facades\DB::table('requests')->insertGetId(['internal_code' => 'M-2026-50003', 'messenger_chat_id' => $chat->id, 'created_at' => now()]);
+        $chat->stateSet('active_request_id', $rid);
+        $chat->save();
+        \App\Models\MessengerMessage::create(['messenger_chat_id' => $chat->id, 'request_id' => $rid, 'direction' => 'out', 'kind' => 'manager', 'text' => 'Предложение МЗ-373130', 'created_at' => now()->subMinutes(5)]);
+
+        return [$chat, $rid];
+    }
+
+    public function test_articles_during_a_conversation_show_the_price_not_the_manager(): void
+    {
+        $this->chatInConversation();
+        $prices = Mockery::mock(BotPriceService::class);
+        $prices->shouldReceive('quote')->andReturn(['found' => true, 'sku' => 'M06258', 'name' => 'Ролик', 'price' => 1500.0, 'for_org' => null, 'stock' => 2.0, 'lead_days' => null, 'catalog_item_id' => 1]);
+        $this->app->instance(BotPriceService::class, $prices);
+        $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
+        $thread->shouldNotReceive('fromClient');
+        $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
+
+        $answer = $this->send('M06258');
+
+        $this->assertStringNotContainsString('Передали менеджеру', $answer);
+        $this->assertStringContainsString('M06258', $answer);
+    }
+
+    public function test_menu_ends_the_conversation_with_the_manager(): void
+    {
+        $this->chatInConversation();
+        $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
+        $thread->shouldNotReceive('fromClient');
+        $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
+
+        $this->send('', 'menu');
+
+        $this->assertStringNotContainsString('Передали менеджеру', $this->send('Нужен ещё ролик на Otis'));
+    }
+
+    public function test_only_articles_tell_a_price_request_from_a_reply(): void
+    {
+        $this->assertTrue(BotPriceService::onlySkus('M06258'));
+        $this->assertTrue(BotPriceService::onlySkus('м04027 5'));
+        $this->assertTrue(BotPriceService::onlySkus("M1234, M5678 2 шт.\nM9999 x3"));
+        $this->assertFalse(BotPriceService::onlySkus('Добавьте M06258 к заказу'));
+        $this->assertFalse(BotPriceService::onlySkus('OTIS GEN2'));
+    }
+
     public function test_status_notification_texts(): void
     {
         $r = new Request();
