@@ -562,17 +562,24 @@ class QuotePartsRfqService
     {
         $n = 0;
         $until = $budgetSeconds !== null ? microtime(true) + $budgetSeconds : null;
+        // С паузами: подряд 129 обращений выбирали лимит API QuoteParts на минуту, и отправка менеджера
+        // в ту же минуту получала 429 (MZ2026-00125, 10.11.2026). 0 — без паузы.
+        $gap = ($perMinute = (int) config('services.quoteparts.refresh_per_minute', 60)) > 0 ? 60 / $perMinute : 0;
         foreach (QuotePartsRfq::query()->where('created_at', '>=', now()->subDays(60))
             ->where(fn ($q) => $q->where('status', 'open')->orWhere('synced_at', '>=', now()->subDays(30)))
             ->orderBy('synced_at')->limit(200)->get() as $rfq) {
             if ($until !== null && microtime(true) >= $until) {
                 break;
             }
+            $started = microtime(true);
             try {
                 $this->refresh($rfq);
                 $n++;
             } catch (Throwable $e) {
                 Log::warning('QuoteParts rfq refresh failed', ['rfq' => $rfq->remote_id, 'error' => $e->getMessage()]);
+            }
+            if (($rest = $gap - (microtime(true) - $started)) > 0) {
+                usleep((int) ($rest * 1_000_000));
             }
         }
 

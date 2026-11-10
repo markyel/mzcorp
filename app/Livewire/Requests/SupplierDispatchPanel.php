@@ -1273,6 +1273,15 @@ class SupplierDispatchPanel extends Component
 
             return null;
         }
+        // Отправки по одной заявке — по очереди: из двух окон сразу оба запроса шли параллельно (~14 с каждый) и
+        // не видели друг друга — проверка повтора смотрит на сохранённые запросы (MZ2026-00125, 10.11.2026).
+        $qpLock = \Illuminate\Support\Facades\Cache::lock('supplier-dispatch-qp:'.$req->id, 180);
+        if (! $qpLock->block(60)) {
+            $this->addError('send', 'По заявке сейчас отправляется другой запрос — повторите через минуту.');
+
+            return null;
+        }
+        try {
         // Повтор — те же позиции тому же поставщику по этой заявке недавно — через QuoteParts не шлём, как и письмом:
         // MZ2026-00296 10.11.2026 ушёл Elevatorcommerce дважды за 53 секунды и получил два отказа.
         $skipped = [];
@@ -1306,6 +1315,9 @@ class SupplierDispatchPanel extends Component
             }
             $offMsg = $this->routeToQuoteParts($req, $itemIds, $route['offsystem'], $user, $qpFiles, $letters);
             $qpMsg = trim(($qpMsg ?? '').' '.$offMsg);
+        }
+        } finally {
+            $qpLock->release();
         }
         // Письма — фоновой рассылкой (письмо уходит до минуты, страница ждёт 60 с: по таймауту
         // менеджер жал ещё раз и поставщики получали дубли). Повторы отсеиваем сразу.

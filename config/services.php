@@ -1189,6 +1189,9 @@ return [
         'platform_mailbox' => env('QUOTEPARTS_PLATFORM_MAILBOX', 'myzip@quoteparts.net'),
         'token' => env('QUOTEPARTS_API_TOKEN', ''),
         'timeout' => (int) env('QUOTEPARTS_TIMEOUT', 30),
+        // Фоновое обновление запросов (SyncQuotePartsRfqsJob): не больше стольких обращений в минуту — лимит API
+        // QuoteParts общий на ключ, и подряд идущее обновление отнимало его у отправки менеджера (429).
+        'refresh_per_minute' => (int) env('QUOTEPARTS_REFRESH_PER_MINUTE', 60),
         // Сколько позиций в одном запросе sync (лимит API — 500).
         // Позиций в одном items/sync: QuoteParts тратит ~0,15 с на позицию (удалённая БД), пачка
         // должна укладываться в sync_timeout с запасом.
