@@ -41,6 +41,12 @@ class SupplierCard extends Component
 
     public string $locale = 'ru';
 
+    /**
+     * Язык наших писем поставщику (10.11.2026): поставщик в кабинете выбирает язык интерфейса
+     * (предпочтительный, $locale), а на каком писать — решаем мы. Пусто — на языке получателя.
+     */
+    public string $letterLocale = '';
+
     public string $description = '';
 
     public string $brands = '';
@@ -85,6 +91,7 @@ class SupplierCard extends Component
         $this->companyName = (string) ($p['company']['name'] ?? $this->org->name);
         $this->country = (string) ($p['company']['country'] ?? '');
         $this->locale = (string) ($p['company']['locale'] ?? 'ru');
+        $this->letterLocale = (string) ($p['letter_locale'] ?? '');
         $this->description = (string) ($p['profile']['assortment_description'] ?? '');
         $this->brands = implode(', ', (array) ($p['profile']['brands'] ?? []));
         $this->notes = (string) ($p['profile']['notes'] ?? $this->org->notes ?? '');
@@ -126,6 +133,7 @@ class SupplierCard extends Component
             'companyName' => 'required|string|max:255',
             'country' => 'nullable|string|size:2',
             'locale' => 'required|in:ru,en,zh_CN',
+            'letterLocale' => 'nullable|in:ru,en,zh_CN',
             'description' => 'nullable|string|max:5000',
             'brands' => 'nullable|string|max:3000',
             'notes' => 'nullable|string|max:5000',
@@ -137,7 +145,7 @@ class SupplierCard extends Component
             'brands' => array_values(array_filter(array_map('trim', explode(',', $this->brands)))),
             'notes' => trim($this->notes) ?: null,
             'default_lead_time_days' => $this->leadDays !== '' ? (int) $this->leadDays : null,
-        ]];
+        ], 'letter_locale' => $this->letterLocale !== '' ? $this->letterLocale : null]; // язык писем — наш и у системного
         if (! $this->supplierOwnsCard) {
             $payload += ['company_name' => trim($this->companyName), 'country' => $this->country !== '' ? strtoupper($this->country) : null, 'locale' => $this->locale];
         }

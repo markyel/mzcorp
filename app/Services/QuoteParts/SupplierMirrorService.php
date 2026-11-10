@@ -104,7 +104,10 @@ class SupplierMirrorService
                     $row->fill([
                         'contact_person' => $c['name'] ?? $row->contact_person,
                         'phone' => array_key_exists('phone', $c) ? $c['phone'] : $row->phone,
-                        'language' => ($c['locale'] ?? null) === 'ru' ? 'ru' : (($c['locale'] ?? null) ? 'en' : ($row->language ?: 'ru')),
+                        // Язык наших писем: выбранный нами для поставщика (letter_locale) главнее языка человека.
+                        // Письма mzCorp — русские или английские: китайский пишем по-английски.
+                        'language' => (($link['letter_locale'] ?? null) ?: ($c['locale'] ?? null)) === 'ru' ? 'ru'
+                            : ((($link['letter_locale'] ?? null) ?: ($c['locale'] ?? null)) ? 'en' : ($row->language ?: 'ru')),
                     ]);
                     $row->forceFill([
                         'contact_topics' => $c['topics'],
@@ -123,6 +126,10 @@ class SupplierMirrorService
                     'quoteparts_status' => $link['status'] ?? null,
                     'quoteparts_agent' => (bool) ($link['is_agent'] ?? false),
                 ]);
+                // Язык писем выбран нами — всем адресам организации (наши письма mzCorp — ru или en).
+                if (! empty($link['letter_locale'])) {
+                    Supplier::query()->where('supplier_organization_id', $org->id)->update(['language' => $link['letter_locale'] === 'ru' ? 'ru' : 'en']);
+                }
                 // Матрица и описание ассортимента — у поставщика в QuoteParts; подбор под позицию
                 // (SupplierMatchService) читает их с адресов — раскладываем по всем.
                 if (array_key_exists('assortment_matrix', $link) && $link['assortment_matrix'] !== null) {

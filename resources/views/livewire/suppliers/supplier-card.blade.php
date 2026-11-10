@@ -79,13 +79,21 @@
                 </label>
                 <div class="grid grid-cols-3 gap-2">
                     <label>Страна <input type="text" wire:model="country" maxlength="2" placeholder="CN" class="{{ $in }} uppercase" @disabled($this->supplierOwnsCard)></label>
-                    <label>Язык
+                    <label title="{{ $this->supplierOwnsCard ? 'Язык кабинета — выбрал сам поставщик' : 'Язык кабинета поставщика' }}">Предпочтительный язык
                         <select wire:model="locale" class="{{ $in }}" @disabled($this->supplierOwnsCard)>
                             <option value="ru">русский</option><option value="en">английский</option><option value="zh_CN">китайский</option>
                         </select>
                     </label>
                     <label>Срок поставки, дн. <input type="number" wire:model="leadDays" min="0" class="{{ $in }}"></label>
                 </div>
+                {{-- Язык наших писем — выбираем мы, и у системного поставщика; пусто — на языке каждого получателя. --}}
+                <label class="block">Язык писем
+                    <select wire:model="letterLocale" class="{{ $in }}">
+                        <option value="">как предпочитает получатель</option>
+                        <option value="ru">русский</option><option value="en">английский</option><option value="zh_CN">китайский</option>
+                    </select>
+                    <span class="text-[12px] text-fg-4">Главнее предпочтительного языка: запросы, напоминания и переписка уйдут на нём.</span>
+                </label>
                 <label class="block">Ассортимент
                     <textarea wire:model="description" rows="3" class="{{ $ta }}" placeholder="Чем занимается: узлы, бренды, особенности"></textarea>
                 </label>
@@ -137,12 +145,22 @@
                     <th></th>
                 </tr></thead>
                 <tbody>
+                @php
+                    // Предпочтительный язык человека — тот, что он выбрал в кабинете (из копии QuoteParts).
+                    $langName = ['ru' => 'русский', 'en' => 'английский', 'zh_CN' => 'китайский'];
+                    $personLang = collect($p['contacts'] ?? [])->mapWithKeys(fn ($c) => [mb_strtolower((string) ($c['email'] ?? '')) => $c['locale'] ?? null])->all();
+                @endphp
                 @foreach($contacts as $i => $c)
                     {{-- Ключ — позиция и адрес: поля привязаны к номеру строки, и после ↑/↓ строка рисуется
                          заново со значениями нового номера (по одному адресу браузер переносил строку
                          вместе со старыми значениями в полях — имена и телефоны «уезжали»). --}}
                     <tr class="border-t border-border" wire:key="c-{{ $i }}-{{ $c['email'] }}">
-                        <td class="py-1 pr-2 mono text-[12px]">{{ $c['email'] }}</td>
+                        <td class="py-1 pr-2 mono text-[12px]">
+                            {{ $c['email'] }}
+                            @if($pl = $personLang[mb_strtolower($c['email'])] ?? null)
+                                <div class="text-[11px] text-fg-4" style="font-family: inherit" title="Предпочтительный язык человека (выбрал в кабинете)">язык: {{ $langName[$pl] ?? $pl }}</div>
+                            @endif
+                        </td>
                         <td class="pr-2"><input type="text" wire:model="contacts.{{ $i }}.name" class="{{ $in }}"></td>
                         <td class="pr-2"><input type="text" wire:model="contacts.{{ $i }}.phone" class="{{ $in }}" style="max-width:150px"></td>
                         @foreach(\App\Livewire\Suppliers\SupplierCard::TOPICS as $t => $label)
