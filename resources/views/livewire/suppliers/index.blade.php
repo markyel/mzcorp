@@ -210,7 +210,8 @@
             {{-- Поставщики — организации, копия QuoteParts (переезд поставщиков, 06.11.2026). Карточка —
                  профиль, условия, код 1С, контакты по темам; объединение — в карточке. --}}
             @php
-                $statusLabel = ['active' => 'в кабинете', 'mail' => 'через QuoteParts', 'invited' => 'приглашён', 'terms_discussed' => 'обсуждает условия', 'declined' => 'отказался'];
+                // Системный — принял приглашение (письмо QuoteParts, кабинет); остальные — внесистемные (наше письмо с orders@).
+                $statusLabel = ['active' => 'системный', 'mail' => 'внесистемный', 'invited' => 'внесистемный · приглашён', 'terms_discussed' => 'внесистемный · обсуждает условия', 'declined' => 'внесистемный · отказался'];
                 $orgGroups = $this->organizationGroups;
                 $pageIds = $this->organizations->pluck('id')->map(fn ($v) => (int) $v)->all();
                 $picked = count($archiveSelected);

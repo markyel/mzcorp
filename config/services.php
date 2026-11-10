@@ -1184,6 +1184,9 @@ return [
         // Ящик внесистемных поставщиков: запросы им QuoteParts шлёт с него; подключается входом через Яндекс
         // (вкладка «Пилот» раздела QuoteParts), токены — в QuoteParts, в почте mzCorp его нет.
         'offsystem_mailbox' => env('QUOTEPARTS_OFFSYSTEM_MAILBOX', 'orders@myzip.ru'),
+        // Ящик, с которого QuoteParts шлёт свои письма системным поставщикам (принявшим приглашение) —
+        // только для подписи в интерфейсе («системный / внесистемный» в карточке поставщика).
+        'platform_mailbox' => env('QUOTEPARTS_PLATFORM_MAILBOX', 'myzip@quoteparts.net'),
         'token' => env('QUOTEPARTS_API_TOKEN', ''),
         'timeout' => (int) env('QUOTEPARTS_TIMEOUT', 30),
         // Сколько позиций в одном запросе sync (лимит API — 500).

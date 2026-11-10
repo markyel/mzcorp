@@ -3,7 +3,14 @@
         $in = 'h-[30px] w-full px-2 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500';
         $ta = 'w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500';
         $p = (array) ($org->qp_payload ?? []);
-        $statusLabel = ['active' => 'работает в кабинете', 'mail' => 'запросы через QuoteParts', 'invited' => 'приглашён', 'terms_discussed' => 'обсуждает условия', 'declined' => 'отказался от платформы'][$org->qp_status] ?? 'не в QuoteParts';
+        // Системный — принял приглашение: запросы письмом QuoteParts, ответ в кабинете. Остальные — внесистемные:
+        // наше письмо через QuoteParts с ящика внесистемных (QuotePartsRouting::split). Ход приглашения — дополнением.
+        $isSystem = $org->qp_status === 'active';
+        $routeHint = $isSystem
+            ? 'запросы письмом QuoteParts с '.config('services.quoteparts.platform_mailbox').', ответ в кабинете'
+            : 'запросы нашим письмом с '.config('services.quoteparts.offsystem_mailbox').' через QuoteParts';
+        $statusLabel = ['invited' => 'приглашён', 'terms_discussed' => 'обсуждает условия', 'declined' => 'отказался от платформы'][$org->qp_status]
+            ?? ($org->qp_status === null ? 'ещё не в QuoteParts — заведётся при первом запросе' : null);
         $matrix = (array) ($p['assortment_matrix'] ?? []);
     @endphp
 
@@ -16,7 +23,8 @@
         @else
             <span class="chip chip-attn mono" title="Временный ключ до кода 1С">{{ $org->qp_key }}</span>
         @endif
-        <span class="chip {{ $org->qp_status === 'active' ? 'chip-ok' : '' }}">{{ $statusLabel }}</span>
+        <span class="chip {{ $isSystem ? 'chip-ok' : '' }}" title="{{ $routeHint }}">{{ $isSystem ? 'системный' : 'внесистемный' }}</span>
+        <span class="text-[12px] text-fg-3">{{ $routeHint }}{{ $statusLabel ? ' · '.$statusLabel : '' }}</span>
         @if($org->isArchived())<span class="chip chip-danger" title="Не виден в реестре и не предлагается в запросах цен">в архиве</span>@endif
         @if($p['is_agent'] ?? false)<span class="chip chip-info">агент</span>@endif
         <button type="button" wire:click="toggleAgent" class="btn btn-xs text-fg-3" title="Агент сам ищет поставщиков для нас: в его ценах — реальный поставщик">{{ ($p['is_agent'] ?? false) ? 'не агент' : 'это агент' }}</button>
