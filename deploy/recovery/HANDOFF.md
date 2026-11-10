@@ -94,7 +94,8 @@ php vendor/bin/phpunit tests/Unit/Retro tests/Unit/QuoteParts tests/Unit/Supplie
 ### QuoteParts на сервере
 
 - Код `/var/www/quoteparts`, пользователь `quoteparts`. **Запущен 06.11:** воркер `quoteparts-worker` (2 процесса), cron `quoteparts` → `schedule:run`. Чтение `orders@myzip.ru` и `myzip@quoteparts.net` каждую минуту (позиции выставлены на 06.11), фото — каждые 30 мин.
-- **Напоминания поставщикам и закрытие по сроку выключены:** `QP_RFQ_TICK=false` (включить по слову заказчика, затем `config:cache`).
+- **Напоминания поставщикам и закрытие по сроку:** `QP_RFQ_TICK=true` с 08.11 (полный режим, `mode.sh`).
+- **Служебная почта QuoteParts включена 10.11** (`MAIL_MAILER=smtp`, ящик `no-reply@quoteparts.net` на Beget, копия `.env` `*.20261110-083842-mail-smtp`). До этого стояло `log` с восстановления, и `mode.sh` его не трогает: коды входа поставщиков, приглашения и прочие письма через `Mail::` молча писались в журнал (жалоба YuanQi 10.11 — «не приходит код»). Письма поставщикам с запросами идут своим путём (ящик компании), их это не касалось.
 - Временный ретранслятор ответов `/opt/orders-relay` **удалён из cron** 06.11 (файлы остались).
 - **quoteparts.ru (07.11):** A-записи `@` и `www` в DNS Beget смотрят на этот сервер, сертификат Let's Encrypt (certbot webroot, после продления хук `renewal-hooks/deploy/reload-nginx.sh` перечитывает nginx), http → https, www → без www. Обход в `/etc/hosts` снят, `QUOTEPARTS_URL=https://quoteparts.ru`. Копии до правки: `/root/*.bak-2026-11-07`. Сам домен по-прежнему зарегистрирован у Beget (NS Beget, оплачен до 14.10.2027).
 - API QuoteParts для поставщиков: `GET /supplier-links` (всё, `updated_since`), `PATCH /supplier-links/{key}` (профиль, условия, карточка, ключ), `PUT …/matrix`, `PUT …/contacts` (с телефоном).

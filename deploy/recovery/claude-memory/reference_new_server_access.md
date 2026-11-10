@@ -16,3 +16,5 @@ metadata:
 - В `python3` на этом Windows-компьютере — заглушка Microsoft Store: для правок файлов — Edit, не python.
 
 **Why:** старая заметка [[prod-deploy]] — про сервер Beget до сбоя. **How to apply:** перед работой `git pull` в обоих проектах (работа идёт с двух компьютеров; 07.11 локальная копия отставала на 62 коммита).
+
+**Почта QuoteParts (10.11.2026):** `MAIL_MAILER` в `.env` QuoteParts после восстановления был `log` — коды входа и приглашения поставщикам не уходили (YuanQi «не приходит код»). Переключён на `smtp` (Beget, `<адрес>`, вход проверен пробным `EsmtpTransport::start()` без отправки). `deploy/ops/mode.sh` этот ключ не трогает. У mzCorp `MAIL_MAILER=log` по-прежнему намеренно — служебное там только через `SystemNotificationMailer` ([[staff-access-link]]).
