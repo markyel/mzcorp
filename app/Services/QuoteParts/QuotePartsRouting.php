@@ -23,9 +23,13 @@ class QuotePartsRouting
     }
 
     /**
-     * Три пути: принявшие приглашение — через платформу (её письмо и форма); внесистемные
-     * (suppliers.quoteparts_offsystem) — через платформу нашим письмом с ящика orders@;
-     * остальные — письмом из mzCorp, как раньше.
+     * Два пути: принявшие приглашение — через платформу (её письмо с myzip@quoteparts.net и форма);
+     * все остальные — внесистемные, через платформу нашим письмом с ящика orders@. Письмом из
+     * mzCorp (с ящика менеджера) — только когда маршрутизация выключена целиком (переключатель
+     * «Пилот») или QuoteParts не настроен.
+     *
+     * Раньше адрес без отметки quoteparts_offsystem шёл с ящика менеджера: так ушёл запрос на
+     * spareparts@paulschaab.de (MZ2026-00339, 10.11.2026) — адрес завела синхронизация без отметки.
      *
      * @param  list<int>  $supplierIds
      * @return array{quoteparts: list<int>, offsystem: list<int>, mail: list<int>}
@@ -37,7 +41,9 @@ class QuotePartsRouting
             return ['quoteparts' => [], 'offsystem' => [], 'mail' => $supplierIds];
         }
 
-        return $this->classify($supplierIds);
+        $route = $this->classify($supplierIds);
+
+        return ['quoteparts' => $route['quoteparts'], 'offsystem' => [...$route['offsystem'], ...$route['mail']], 'mail' => []];
     }
 
     /**

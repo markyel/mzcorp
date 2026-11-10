@@ -1072,7 +1072,8 @@ class Index extends Component
         $route = app(\App\Services\QuoteParts\QuotePartsRouting::class)->split($supplierIds);
         $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($cids, $route['quoteparts'], $extraFiles) : null;
         $edits = $this->letterEdits();
-        // Внесистемные — наше же письмо через QuoteParts (orders@); не принял — им обычное письмо.
+        // Внесистемные — наше же письмо через QuoteParts (orders@). Не принял — не отправлено, человек видит
+        // причину: письмо с ящика менеджера вместо этого три дня прятало сбой (ключи поставщиков, 06–09.11.2026).
         if ($route['offsystem'] !== []) {
             $catalog = \App\Models\CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article', 'articles']);
             $letters = [];
@@ -1080,13 +1081,15 @@ class Index extends Component
                 $letters[(int) $s->id] = $dispatcher->composeLetter($catalog, $s, $this->note, $edits);
             }
             $offMsg = $this->routeToQuoteParts($cids, $route['offsystem'], $extraFiles, $letters);
-            if (str_starts_with($offMsg, 'QuoteParts не принял')) {
-                $route['mail'] = array_values(array_unique([...$route['mail'], ...$route['offsystem']]));
-                $offMsg = 'Внесистемным поставщикам QuoteParts не принял запрос — им уходит обычное письмо.';
-            }
             $qpMsg = trim(($qpMsg ?? '').' '.$offMsg);
         }
         $supplierIds = $route['mail'];
+        // Отказ QuoteParts — выбор не сбрасываем: человек видит причину и повторяет.
+        if (str_contains((string) $qpMsg, 'QuoteParts не принял')) {
+            $this->addError('send', $qpMsg);
+
+            return;
+        }
         if ($supplierIds === []) {
             session()->flash('procurement_status', $qpMsg);
             $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',

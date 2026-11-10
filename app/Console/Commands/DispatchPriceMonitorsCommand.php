@@ -99,7 +99,8 @@ class DispatchPriceMonitorsCommand extends Command
                     Log::warning('PriceMonitors: QuoteParts не принял запрос', ['user_id' => $user->id, 'error' => $e->getMessage()]);
                 }
             }
-            // Внесистемные — наше же письмо через QuoteParts (orders@); не принял — им обычное письмо.
+            // Внесистемные — наше же письмо через QuoteParts (orders@); не принял — не отправлено (в лог),
+            // а не письмо с ящика менеджера: оно прятало сбой QuoteParts.
             if ($route['offsystem'] !== []) {
                 try {
                     $catalog = \App\Models\CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article', 'articles']);
@@ -111,7 +112,6 @@ class DispatchPriceMonitorsCommand extends Command
                     $qpSent += count($route['offsystem']);
                 } catch (\Throwable $e) {
                     Log::warning('PriceMonitors: QuoteParts не принял запрос внесистемным', ['user_id' => $user->id, 'error' => $e->getMessage()]);
-                    $route['mail'] = array_values(array_unique([...$route['mail'], ...$route['offsystem']]));
                 }
             }
             $res = $route['mail'] === [] ? ['sent' => 0] : $dispatcher->dispatch($cids, $route['mail'], $note, $user);

@@ -1279,17 +1279,14 @@ class SupplierDispatchPanel extends Component
             $qpFiles[] = ['path' => (string) $a->file_path, 'disk' => (string) ($a->disk ?: 'local'), 'name' => (string) $a->filename, 'mime' => (string) ($a->mime_type ?: 'application/octet-stream')];
         }
         $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($req, $itemIds, $route['quoteparts'], $user, $qpFiles) : null;
-        // Внесистемные — наше же письмо через QuoteParts (orders@); не принял — им обычное письмо.
+        // Внесистемные — наше же письмо через QuoteParts (orders@). Не принял — не отправлено, человек видит
+        // причину: письмо с ящика менеджера вместо этого три дня прятало сбой (ключи поставщиков, 06–09.11.2026).
         if ($route['offsystem'] !== []) {
             $letters = [];
             foreach (Supplier::query()->whereIn('id', $route['offsystem'])->get() as $s) {
                 $letters[(int) $s->id] = $dispatcher->composeLetter($req, $s, $itemIds, $this->note, $edits);
             }
             $offMsg = $this->routeToQuoteParts($req, $itemIds, $route['offsystem'], $user, $qpFiles, $letters);
-            if (str_starts_with($offMsg, 'QuoteParts не принял')) {
-                $route['mail'] = array_values(array_unique([...$route['mail'], ...$route['offsystem']]));
-                $offMsg = 'Внесистемным поставщикам QuoteParts не принял запрос — им уходит обычное письмо.';
-            }
             $qpMsg = trim(($qpMsg ?? '').' '.$offMsg);
         }
         // Письма — фоновой рассылкой (письмо уходит до минуты, страница ждёт 60 с: по таймауту
@@ -1310,7 +1307,8 @@ class SupplierDispatchPanel extends Component
             $run = $runs->start($req->id, (int) $user->id, (string) $user->name, $names, $skipped);
             \App\Jobs\Suppliers\SendSupplierDispatchJob::dispatch($run['id'], $req->id, $toSend, $itemIds, $this->note, (int) $user->id, $reqAttIds, $extraFiles, $edits);
         }
-        if ($qpMsg !== null && $route['mail'] === []) {
+        // Отказ QuoteParts — черновик оставляем: выбор позиций и поставщиков вернётся, человек повторит.
+        if ($qpMsg !== null && $route['mail'] === [] && ! str_contains($qpMsg, 'QuoteParts не принял')) {
             \App\Models\SupplierDispatchDraft::query()->where('request_id', $this->requestId)->where('user_id', $user->id)->delete();
         }
 

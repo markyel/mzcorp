@@ -96,6 +96,10 @@ class SupplierMirrorService
                         }
                         $row = new Supplier(['email' => $email, 'domain' => Str::after($email, '@'), 'supplier_organization_id' => $org->id]);
                         $row->source = 'quoteparts';
+                        // Новый адрес поставщика, не принявшего приглашение, — внесистемный, как и его остальные
+                        // адреса (QuotePartsSupplierService::register): spareparts@paulschaab.de 10.11.2026 и ещё
+                        // три адреса 07–08.11 заводились без отметки.
+                        $row->quoteparts_offsystem = ($link['status'] ?? null) !== 'active';
                     }
                     $row->fill([
                         'contact_person' => $c['name'] ?? $row->contact_person,
