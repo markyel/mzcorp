@@ -258,6 +258,14 @@
                                 <td class="px-3 py-2">
                                     <a href="{{ route('suppliers.card', $o->id) }}" wire:navigate class="text-sky-700 hover:underline font-medium">{{ $o->name }}</a>
                                     @if($p['is_agent'] ?? false)<span class="chip chip-info ml-1">агент</span>@endif
+                                    @php
+                                        // Адрес нашёлся в QuoteParts (там и сотрудники без карточки контакта) — показать какой.
+                                        $needle = mb_strtolower(trim($search));
+                                        $qpHits = $needle === '' ? collect() : collect($p['addresses'] ?? [])->filter(fn ($e) => str_contains((string) $e, $needle));
+                                    @endphp
+                                    @if($qpHits->isNotEmpty())
+                                        <div class="text-[11.5px] text-fg-4 mt-0.5">адрес в QuoteParts: <span class="mono">{{ $qpHits->implode(', ') }}</span></div>
+                                    @endif
                                     @if($o->isArchived())
                                         <div class="text-[11.5px] text-fg-4 mt-0.5">в архиве с {{ $o->archived_at->format('d.m.Y') }}{{ $o->archivedBy ? ' · '.$o->archivedBy->name : '' }}{{ $o->archived_reason ? ' · '.$o->archived_reason : '' }}</div>
                                     @endif

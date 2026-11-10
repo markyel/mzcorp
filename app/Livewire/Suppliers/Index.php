@@ -488,7 +488,10 @@ class Index extends Component
             $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
             $q->where(fn ($w) => $w->where('name', 'ilike', $like)->orWhere('onec_name', 'ilike', $like)
                 ->orWhere('onec_code', 'ilike', $like)->orWhere('qp_key', 'ilike', $like)->orWhere('inn', 'ilike', $like)
-                ->orWhereHas('suppliers', fn ($c) => $c->where('email', 'ilike', $like)->orWhere('domain', 'ilike', $like)));
+                ->orWhereHas('suppliers', fn ($c) => $c->where('email', 'ilike', $like)->orWhere('domain', 'ilike', $like))
+                // Адреса поставщика в QuoteParts, в том числе сотрудники без карточки контакта: иначе ящик,
+                // засевший у другого поставщика, не находился (spareparts@paulschaab.de у Omer, 10.11.2026).
+                ->orWhereRaw("qp_payload->'addresses' is not null and (qp_payload->'addresses')::text ilike ?", [$like]));
         }
 
         return $q->orderByRaw('lower(name)')->paginate(40);
