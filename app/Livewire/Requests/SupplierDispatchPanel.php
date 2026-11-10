@@ -1273,6 +1273,24 @@ class SupplierDispatchPanel extends Component
 
             return null;
         }
+        // Повтор — те же позиции тому же поставщику по этой заявке недавно — через QuoteParts не шлём, как и письмом:
+        // MZ2026-00296 10.11.2026 ушёл Elevatorcommerce дважды за 53 секунды и получил два отказа.
+        $skipped = [];
+        $codes = $this->quotePartsCodes($itemIds);
+        foreach (['quoteparts', 'offsystem'] as $way) {
+            $keep = [];
+            foreach (Supplier::query()->with('organization:id,name,qp_key')->whereIn('id', $route[$way])->get() as $s) {
+                $dup = $codes === null ? null : \App\Services\QuoteParts\QuotePartsRfqService::recentDuplicate($req->id, $s->quotepartsKey(), $codes);
+                if ($dup !== null) {
+                    $skipped[$s->quotepartsKey()] = ['supplier' => (string) ($s->organization?->name ?: $s->name ?: $s->email), 'at' => $dup->created_at->timezone('Europe/Moscow')->format('H:i')];
+
+                    continue;
+                }
+                $keep[] = (int) $s->id;
+            }
+            $route[$way] = $keep;
+        }
+        $skipped = array_values($skipped);
         // В QuoteParts — те же вложения, что и в письмо: фото позиций, загруженные файлы, отмеченные файлы заявки.
         $qpFiles = $extraFiles;
         foreach (\App\Models\EmailAttachment::query()->whereIn('id', $reqAttIds)->get() as $a) {
@@ -1291,7 +1309,6 @@ class SupplierDispatchPanel extends Component
         }
         // Письма — фоновой рассылкой (письмо уходит до минуты, страница ждёт 60 с: по таймауту
         // менеджер жал ещё раз и поставщики получали дубли). Повторы отсеиваем сразу.
-        $skipped = [];
         $toSend = [];
         $names = [];
         foreach (Supplier::query()->whereIn('id', $route['mail'])->get(['id', 'name', 'email']) as $s) {
@@ -1318,6 +1335,27 @@ class SupplierDispatchPanel extends Component
         session()->flash('status', trim($msg));
 
         return $this->redirect(route('requests.show', ['request' => $req, 'tab' => 'suppliers']), navigate: false);
+    }
+
+    /**
+     * Коды позиций в QuoteParts — M-артикул или код черновика. Позиция без кода туда ещё не уходила,
+     * значит повтора быть не может (null).
+     *
+     * @param  list<int>  $itemIds
+     * @return list<string>|null
+     */
+    private function quotePartsCodes(array $itemIds): ?array
+    {
+        $codes = [];
+        foreach (RequestItem::query()->whereIn('id', $itemIds)->with('catalogItem:id,sku')->get(['id', 'catalog_item_id', 'quoteparts_code']) as $it) {
+            $code = (string) ($it->catalogItem?->sku ?: $it->quoteparts_code);
+            if ($code === '') {
+                return null;
+            }
+            $codes[] = $code;
+        }
+
+        return $codes === [] ? null : $codes;
     }
 
     /**

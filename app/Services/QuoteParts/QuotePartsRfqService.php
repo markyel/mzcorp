@@ -199,6 +199,52 @@ class QuotePartsRfqService
      * @return \Illuminate\Support\Collection<string, string>
      */
     /**
+     * Запрос этому поставщику по этой заявке, ушедший через QuoteParts недавно (окно — то же, что у
+     * писем: services.supplier_dispatch.duplicate_window_min) и покрывающий все эти позиции: повтор.
+     * У писем такая проверка была, у QuoteParts — нет: MZ2026-00296 10.11.2026 ушёл Elevatorcommerce
+     * дважды за 53 секунды (QP-DOPX7O, QP-UPSC42), поставщик дважды отказал.
+     *
+     * @param  list<string>  $codes  коды позиций в QuoteParts (M-артикул или код черновика)
+     */
+    public static function recentDuplicate(int $requestId, string $supplierKey, array $codes): ?QuotePartsRfq
+    {
+        $window = (int) config('services.supplier_dispatch.duplicate_window_min', 30);
+        if ($window <= 0 || $codes === [] || $supplierKey === '') {
+            return null;
+        }
+        $recent = QuotePartsRfq::query()->where('request_id', $requestId)
+            ->where('created_at', '>=', now()->subMinutes($window))->latest('id')->get();
+        foreach ($recent as $rfq) {
+            if (self::coversSupplier((array) ($rfq->snapshot ?? []), $supplierKey, $codes)) {
+                return $rfq;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Снимок запроса: у поставщика с этим ключом есть строки по всем этим позициям.
+     *
+     * @param  array<string, mixed>  $snapshot
+     * @param  list<string>  $codes
+     */
+    public static function coversSupplier(array $snapshot, string $supplierKey, array $codes): bool
+    {
+        foreach ((array) ($snapshot['suppliers'] ?? []) as $s) {
+            if ((string) ($s['external_id'] ?? '') !== $supplierKey) {
+                continue;
+            }
+            $asked = array_map('strval', array_filter(array_column((array) ($s['lines'] ?? []), 'code')));
+            if (array_diff($codes, $asked) === []) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Правка названия каталожной позиции для поставщика QuoteParts: карточку под один запрос
      * не переименовать, поэтому английская формулировка менеджера, если отличается от
      * каталожной, уходит примечанием. Кириллица — не для иностранных поставщиков, пропускаем.
