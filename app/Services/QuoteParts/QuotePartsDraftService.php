@@ -22,25 +22,43 @@ class QuotePartsDraftService
     ) {}
 
     /**
+     * Черновик в QuoteParts заводится или обновляется по ключу ri:{id} — поставщик видит его
+     * название. Правка менеджера в панели рассылки (names) идёт туда же, что и в письмо: раньше
+     * уходила формулировка из заявки (MZ2026-00696, 09.11.2026: в письмах «Indication PCB
+     * TLHIB-8B red light», в QuoteParts — исходное «Плата индикации/управления … VORO»).
+     *
      * @param  list<int>  $requestItemIds
+     * @param  array{ru?: array<int, string>, en?: array<int, string>}  $names  правка названия: request_item_id => текст
      * @return array<int, string> request_item_id => код в QuoteParts
      */
-    public function ensureDrafts(array $requestItemIds): array
+    public function ensureDrafts(array $requestItemIds, array $names = []): array
     {
         $rows = RequestItem::query()->with('request:id,internal_code')->whereIn('id', $requestItemIds)->whereNull('catalog_item_id')->get();
         if ($rows->count() !== count(array_unique($requestItemIds))) {
             throw new RuntimeException('Предварительной позицией уходит только товар без M-артикула.');
         }
-        if ($rows->contains(fn ($r) => trim((string) $r->parsed_name) === '')) {
+        $ru = fn (RequestItem $r): string => trim((string) ($names['ru'][$r->id] ?? '')) ?: trim((string) $r->parsed_name);
+        if ($rows->contains(fn ($r) => $ru($r) === '')) {
             throw new RuntimeException('У позиции нет названия — заполните его в заявке.');
         }
 
-        $names = $this->translator->translate($rows->mapWithKeys(fn ($r) => [$r->id => (string) $r->parsed_name])->all());
+        // Английское: правка менеджера латиницей, иначе перевод (уже отредактированного) русского.
+        $en = [];
+        $toTranslate = [];
+        foreach ($rows as $r) {
+            $typed = trim((string) ($names['en'][$r->id] ?? ''));
+            if ($typed !== '' && preg_match('/\p{Cyrillic}/u', $typed) !== 1) {
+                $en[$r->id] = $typed;
+            } else {
+                $toTranslate[$r->id] = $ru($r);
+            }
+        }
+        $en += $toTranslate !== [] ? $this->translator->translate($toTranslate) : [];
 
         $result = $this->client->createDrafts($rows->map(fn (RequestItem $r) => [
             'ref' => 'ri:'.$r->id,
-            'name' => (string) $r->parsed_name,
-            'name_en' => $names[$r->id] ?? null,
+            'name' => $ru($r),
+            'name_en' => $en[$r->id] ?? null,
             'brand' => $r->parsed_brand ?: null,
             'mpn' => $r->parsed_article ?: null,
             'unit' => $r->parsed_unit ?: null,

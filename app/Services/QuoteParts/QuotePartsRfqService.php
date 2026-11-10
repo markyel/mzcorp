@@ -48,8 +48,10 @@ class QuotePartsRfqService
      * @param  list<int>|null  $explicitSupplierIds  адреса, отмеченные человеком: только их ящики получают
      *                                               запрос; остальным поставщикам получателя выбирает
      *                                               QuoteParts (тема «Расценка»). null — все отмеченные адреса.
+     * @param  array{ru?: array<int, string>, en?: array<int, string>}  $draftNames  название предварительных позиций
+     *                                               в редакции менеджера (request_item_id => текст), QuotePartsDraftService::ensureDrafts
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = [], array $letters = [], bool $automatic = false, ?array $explicitSupplierIds = null): QuotePartsRfq
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = [], array $letters = [], bool $automatic = false, ?array $explicitSupplierIds = null, array $draftNames = []): QuotePartsRfq
     {
         // routed — поставщики, принявшие приглашение, из обычной рассылки (QuotePartsRouting): у любого сотрудника.
         if ($routed ? ! QuotePartsRouting::enabled() : ! QuotePartsPilot::enabledFor($by)) {
@@ -81,7 +83,7 @@ class QuotePartsRfqService
             }
         }
         if ($draftQuantities !== []) {
-            foreach ($this->drafts->ensureDrafts(array_keys($draftQuantities)) as $requestItemId => $code) {
+            foreach ($this->drafts->ensureDrafts(array_keys($draftQuantities), $draftNames) as $requestItemId => $code) {
                 $items[] = ['code' => $code, 'quantity' => max(0.001, (float) $draftQuantities[$requestItemId]), 'note' => self::note($notes['d:'.$requestItemId] ?? null)];
             }
         }
@@ -196,6 +198,22 @@ class QuotePartsRfqService
      * @param  iterable<QuotePartsRfq>  $rfqs
      * @return \Illuminate\Support\Collection<string, string>
      */
+    /**
+     * Правка названия каталожной позиции для поставщика QuoteParts: карточку под один запрос
+     * не переименовать, поэтому английская формулировка менеджера, если отличается от
+     * каталожной, уходит примечанием. Кириллица — не для иностранных поставщиков, пропускаем.
+     */
+    public static function wordingNote(?string $edited, ?string $catalogNameEn): ?string
+    {
+        $edited = trim((string) $edited);
+        if ($edited === '' || preg_match('/\p{Cyrillic}/u', $edited) === 1) {
+            return null;
+        }
+        $norm = fn (string $s): string => mb_strtolower((string) preg_replace('/\s+/u', ' ', trim($s)));
+
+        return $norm($edited) === $norm((string) $catalogNameEn) ? null : 'Our wording: '.$edited;
+    }
+
     private static function note(?string $note): ?string
     {
         $note = trim((string) $note);

@@ -1334,7 +1334,10 @@ class SupplierDispatchPanel extends Component
         $quantities = [];
         $drafts = [];
         $notes = [];
-        foreach (RequestItem::query()->whereIn('id', $itemIds)->get(['id', 'catalog_item_id', 'parsed_qty', 'parsed_length', 'parsed_length_unit']) as $it) {
+        $draftNames = ['ru' => [], 'en' => []];
+        $rows = RequestItem::query()->whereIn('id', $itemIds)->with('catalogItem:id,name,name_en')
+            ->get(['id', 'catalog_item_id', 'parsed_qty', 'parsed_length', 'parsed_length_unit']);
+        foreach ($rows as $it) {
             // Кол-во — свободный текст, как в письме по старому алгоритму («21,710 mm»): поставщикам
             // QuoteParts он уходит примечанием к позиции. Английское поле — первым (они иностранцы).
             $typed = trim((string) ($this->editedQtyEn[$it->id] ?? '')) ?: trim((string) ($this->editedQty[$it->id] ?? ''));
@@ -1347,13 +1350,21 @@ class SupplierDispatchPanel extends Component
             }
             if ($it->catalog_item_id === null) {
                 $drafts[(int) $it->id] = $line['quantity'];
+                // Название — в редакции менеджера, как в письмах: черновик в QuoteParts обновится им.
+                $draftNames['ru'][(int) $it->id] = (string) ($this->editedNames[$it->id] ?? '');
+                $draftNames['en'][(int) $it->id] = (string) ($this->editedNamesEn[$it->id] ?? '');
             } else {
                 $quantities[(int) $it->catalog_item_id] = ($quantities[(int) $it->catalog_item_id] ?? 0) + $line['quantity'];
+                // Карточку каталога под один запрос не переименовать — правку менеджера показываем примечанием.
+                $wording = \App\Services\QuoteParts\QuotePartsRfqService::wordingNote($this->editedNamesEn[$it->id] ?? null, $it->catalogItem?->name_en);
+                if ($wording !== null) {
+                    $notes[$key] = isset($notes[$key]) ? $wording.'; '.$notes[$key] : $wording;
+                }
             }
         }
         try {
             $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true, files: $files, notes: $notes, letters: $letters,
-                explicitSupplierIds: $this->explicitAddresses($supplierIds));
+                explicitSupplierIds: $this->explicitAddresses($supplierIds), draftNames: $draftNames);
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('QuoteParts RFQ refused', ['request_id' => $req->id, 'offsystem' => $letters !== [], 'error' => $e->getMessage()]);
 
@@ -1613,14 +1624,16 @@ class SupplierDispatchPanel extends Component
 
         $toTranslate = [];
         foreach ($items as $it) {
+            // Уже на английском (правка менеджера / прошлый перевод) — не трогаем. Раньше у
+            // каталожных позиций проверка шла после подстановки name_en, и выбор поставщика
+            // молча затирал правку менеджера каталожным названием.
+            $current = trim((string) ($this->editedNamesEn[$it->id] ?? ''));
+            if ($current !== '' && preg_match('/\p{Cyrillic}/u', $current) !== 1) {
+                continue;
+            }
             $catalog = $it->catalog_item_id ? $it->catalogItem : null;
             if ($catalog && trim((string) $catalog->name_en) !== '') {
                 $this->editedNamesEn[$it->id] = $catalog->name_en; // каталог — готовый перевод
-                continue;
-            }
-            // Уже на английском (правка менеджера / прошлый перевод) — не трогаем.
-            $current = trim((string) ($this->editedNamesEn[$it->id] ?? ''));
-            if ($current !== '' && preg_match('/\p{Cyrillic}/u', $current) !== 1) {
                 continue;
             }
             $src = trim((string) ($this->editedNames[$it->id] ?? '')) ?: (string) ($it->parsed_name ?? '');
