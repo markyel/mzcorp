@@ -29,7 +29,8 @@ class QuotePartsRfqService
     ) {}
 
     /**
-     * @param  array<int, float>  $quantities  catalog_item_id => количество
+     * @param  array<int, float|null>  $quantities  catalog_item_id => количество; null — без количества,
+     *                                               нужна актуальная цена за штуку (актуализация цен)
      * @param  list<int>  $supplierIds
      * @param  array<int, float>  $draftQuantities  request_item_id => количество: новые товары без
      *                                               M-артикула уходят предварительными позициями
@@ -79,7 +80,7 @@ class QuotePartsRfqService
                 throw new RuntimeException('Позиции не в работе в QuoteParts (на паузе или не переданы): '.$notReady->pluck('sku')->implode(', ').'.');
             }
             foreach ($catalog as $c) {
-                $items[] = ['code' => $c->sku, 'quantity' => max(0.001, (float) $quantities[$c->id]), 'note' => self::note($notes['c:'.$c->id] ?? null)];
+                $items[] = ['code' => $c->sku, 'quantity' => $quantities[$c->id] !== null ? max(0.001, (float) $quantities[$c->id]) : null, 'note' => self::note($notes['c:'.$c->id] ?? null)];
             }
         }
         if ($draftQuantities !== []) {

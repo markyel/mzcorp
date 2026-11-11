@@ -93,7 +93,7 @@ class DispatchPriceMonitorsCommand extends Command
             $qpSent = 0;
             if ($route['quoteparts'] !== []) {
                 try {
-                    app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send(null, array_fill_keys($cids, 1.0), $route['quoteparts'], null, $note, $user, [], routed: true, automatic: true);
+                    app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send(null, array_fill_keys($cids, null), $route['quoteparts'], null, $note, $user, [], routed: true, automatic: true);
                     $qpSent = count($route['quoteparts']);
                 } catch (\Throwable $e) {
                     Log::warning('PriceMonitors: QuoteParts не принял запрос', ['user_id' => $user->id, 'error' => $e->getMessage()]);
@@ -108,7 +108,7 @@ class DispatchPriceMonitorsCommand extends Command
                     foreach (\App\Models\Supplier::query()->whereIn('id', $route['offsystem'])->get() as $s) {
                         $letters[(int) $s->id] = $dispatcher->composeLetter($catalog, $s, $note);
                     }
-                    app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send(null, array_fill_keys($cids, 1.0), $route['offsystem'], null, $note, $user, [], routed: true, letters: $letters, automatic: true);
+                    app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send(null, array_fill_keys($cids, null), $route['offsystem'], null, $note, $user, [], routed: true, letters: $letters, automatic: true);
                     $qpSent += count($route['offsystem']);
                 } catch (\Throwable $e) {
                     Log::warning('PriceMonitors: QuoteParts не принял запрос внесистемным', ['user_id' => $user->id, 'error' => $e->getMessage()]);

@@ -250,8 +250,9 @@ class Index extends Component
         $quantities = [];
         foreach ($cids as $cid) {
             $raw = trim((string) ($this->editedQty[$cid] ?? ''));
-            $q = preg_match('/\d+(?:[.,]\d+)?/', $raw, $m) ? (float) str_replace(',', '.', $m[0]) : 1.0;
-            $quantities[$cid] = $q > 0 ? $q : 1.0;
+            // Пусто — без количества: нужна актуальная цена за штуку (актуализация, 11.11.2026), не «1 шт.».
+            $q = preg_match('/\d+(?:[.,]\d+)?/', $raw, $m) ? (float) str_replace(',', '.', $m[0]) : 0.0;
+            $quantities[$cid] = $q > 0 ? $q : null;
         }
 
         try {
@@ -280,8 +281,9 @@ class Index extends Component
         $quantities = [];
         foreach ($cids as $cid) {
             $raw = trim((string) ($this->editedQty[$cid] ?? ''));
-            $q = preg_match('/\d+(?:[.,]\d+)?/', $raw, $m) ? (float) str_replace(',', '.', $m[0]) : 1.0;
-            $quantities[$cid] = $q > 0 ? $q : 1.0;
+            // Пусто — без количества: нужна актуальная цена за штуку (актуализация, 11.11.2026), не «1 шт.».
+            $q = preg_match('/\d+(?:[.,]\d+)?/', $raw, $m) ? (float) str_replace(',', '.', $m[0]) : 0.0;
+            $quantities[$cid] = $q > 0 ? $q : null;
         }
         try {
             // Отмечен один представитель поставщика — получателя выбирает QuoteParts; иначе — отмеченные адреса.

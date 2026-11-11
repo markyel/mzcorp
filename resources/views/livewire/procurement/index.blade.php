@@ -968,9 +968,9 @@
                                 <button type="button" wire:click="removePosition({{ $ci->id }})" class="text-fg-4 hover:text-red-600 text-[13px] leading-none" style="width:18px" title="Убрать позицию из запроса">🗑</button>
                                 <span class="chip chip-neutral mono text-[10px]" style="width:78px">{{ $ci->sku }}</span>
                                 <span class="flex-1 truncate text-[12.5px]">{{ $ci->name }}</span>
-                                <input type="text" wire:model.lazy="editedQty.{{ $ci->id }}" placeholder="1"
+                                <input type="text" wire:model.lazy="editedQty.{{ $ci->id }}" placeholder="—"
                                        class="px-2 h-[28px] border border-border rounded bg-surface text-[12px] text-right outline-none focus:border-sky-500" style="width:80px"
-                                       title="Количество; пусто — 1">
+                                       title="Количество; пусто — без количества, нужна цена за 1 шт.">
                             </div>
                         @endforeach
                         <div class="flex items-center gap-2 pt-1.5">
