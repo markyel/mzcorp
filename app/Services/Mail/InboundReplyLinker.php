@@ -64,6 +64,12 @@ class InboundReplyLinker
     private const OWN_FORWARD_DAYS = 14;
 
     /**
+     * Сколько ответ ждёт, пока письмо-родитель без заявки станет заявкой (уровень 1, кейс 3, и
+     * parentAwaitingRequest). Дальше родитель не держит ответ: он идёт по остальным уровням.
+     */
+    private const PARENT_WAIT_HOURS = 24;
+
+    /**
      * @return Request|null  null = thread не найден, обычный flow.
      */
     public function tryLink(EmailMessage $message): ?Request
@@ -238,7 +244,13 @@ class InboundReplyLinker
                 // fallback — ждём пока parent обработается, cron
                 // `mail:relink-deferred` подберёт reply повторно.
                 // Кейс 25.05 #3684 → M-2026-1654.
-                $orphanParent = $parents->first(fn (EmailMessage $p): bool => $p->related_request_id === null);
+                // Ждём не дольше PARENT_WAIT_HOURS (как parentAwaitingRequest): родитель, так и не
+                // ставший заявкой (наше письмо, ушедшее не из заявки), не должен отключать остальные
+                // уровни — ответ проходит их как обычное письмо. MZ2026-01169 (11.11.2026): письмо
+                // «Bidzaar #393-737» без заявки, ответ через 5 дней не дошёл до уровня 4, где была
+                // единственная открытая заявка клиента MZ2026-00612, и стал новой заявкой.
+                $orphanParent = $parents->first(fn (EmailMessage $p): bool => $p->related_request_id === null
+                    && $p->created_at !== null && $p->created_at->gte(now()->subHours(self::PARENT_WAIT_HOURS)));
                 if ($orphanParent) {
                     Log::info('InboundReplyLinker: deferred — parent exists but not yet linked to Request', [
                         'email_message_id' => $message->id,
@@ -411,7 +423,7 @@ class InboundReplyLinker
             ->whereNull('related_request_id')
             // Ждём недолго: если родитель за сутки заявкой не стал, ответ
             // должен жить своей — потерять письмо хуже, чем задвоить.
-            ->where('created_at', '>=', now()->subDay())
+            ->where('created_at', '>=', now()->subHours(self::PARENT_WAIT_HOURS))
             ->exists();
     }
 
