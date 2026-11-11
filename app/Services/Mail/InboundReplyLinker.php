@@ -165,14 +165,6 @@ class InboundReplyLinker
                 });
             $matchedBy = $matched ? 'in_reply_to_or_references' : null;
 
-            // Кейс 1б: родитель без заявки (наше письмо, ушедшее не из заявки), но на него уже отвечал
-            // этот же клиент, и тот ответ стал заявкой — продолжение там же. MZ2026-00612 → 01169
-            // (11.11.2026): второй ответ на «Bidzaar #393-737» через 5 дней завёл новую заявку.
-            if (! $matched) {
-                $matched = $this->siblingReply($message, $parents);
-                $matchedBy = $matched ? 'sibling_reply' : null;
-            }
-
             if (! $matched) {
                 // Кейс 2: parent найден, но его Request в terminal (closed_won/
                 // closed_lost). Это «реанимация» — клиент молчал, передумал.
@@ -406,33 +398,6 @@ class InboundReplyLinker
      * В таком случае заявку по ответу создавать нельзя: родитель вот-вот
      * получит свою, и `mail:relink-deferred` прицепит ответ к ней.
      */
-    /**
-     * Ответ того же клиента на то же наше письмо, уже ставший заявкой (открытой). Только если сам
-     * родитель без заявки: наше письмо ушло не из заявки, и сделку держит первый ответ. Тот же
-     * домен отправителя — ответы разных клиентов на одну рассылку не склеиваем.
-     *
-     * @param  \Illuminate\Support\Collection<int, EmailMessage>  $parents
-     */
-    private function siblingReply(EmailMessage $message, $parents): ?EmailMessage
-    {
-        $orphanIds = $parents->filter(fn (EmailMessage $p) => $p->related_request_id === null)
-            ->map(fn (EmailMessage $p) => $this->normalize((string) $p->message_id))->filter()->unique()->values()->all();
-        $domain = mb_strtolower((string) substr(strrchr((string) $message->from_email, '@') ?: '', 1));
-        if ($orphanIds === [] || $domain === '') {
-            return null;
-        }
-
-        return EmailMessage::query()
-            ->whereIn('in_reply_to', array_merge($orphanIds, array_map(fn ($id) => '<'.$id.'>', $orphanIds)))
-            ->where('id', '!=', $message->id)
-            ->where('direction', 'inbound')
-            ->whereNotNull('related_request_id')
-            ->whereRaw('lower(from_email) like ?', ['%@'.$domain])
-            ->orderByDesc('id')
-            ->get()
-            ->first(fn (EmailMessage $s) => ($r = Request::find($s->related_request_id)) !== null && ! $r->status->isTerminal());
-    }
-
     public function parentAwaitingRequest(EmailMessage $message): bool
     {
         $candidateIds = $this->collectCandidateMessageIds($message);
