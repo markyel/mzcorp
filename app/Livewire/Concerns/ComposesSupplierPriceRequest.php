@@ -85,12 +85,6 @@ trait ComposesSupplierPriceRequest
     /** cid => количество строкой (англ.). */
     public array $editedQtyEn = [];
 
-    /**
-     * Канал отправки: mail — письмо с нашего ящика, как раньше; quoteparts — через
-     * платформу (только участникам пилота при включённом рубильнике).
-     */
-    public string $channel = 'mail';
-
     /** Срок ответа для запроса через QuoteParts. */
     public string $qpReplyBy = '';
 
@@ -98,38 +92,6 @@ trait ComposesSupplierPriceRequest
     public function quotePartsEnabled(): bool
     {
         return QuotePartsPilot::enabledFor(auth()->user());
-    }
-
-    /**
-     * Отправка через QuoteParts: письмо (EN + ZH) пишет платформа по карточкам позиций,
-     * поэтому правки текста письма, вложения и мониторинг цен здесь не участвуют.
-     *
-     * @param  list<int>  $cids
-     * @param  list<int>  $supplierIds
-     */
-    private function sendViaQuoteParts(array $cids, array $supplierIds, QuotePartsRfqService $service): void
-    {
-        $quantities = [];
-        foreach ($cids as $cid) {
-            $raw = trim((string) ($this->editedQty[$cid] ?? ''));
-            // Пусто — без количества: нужна актуальная цена за штуку (актуализация, 11.11.2026), не «1 шт.».
-            $q = preg_match('/\d+(?:[.,]\d+)?/', $raw, $m) ? (float) str_replace(',', '.', $m[0]) : 0.0;
-            $quantities[$cid] = $q > 0 ? $q : null;
-        }
-
-        try {
-            $rfq = $service->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), files: $this->rfqFiles($cids, auth()->user()));
-        } catch (Throwable $e) {
-            $this->addError('send', mb_substr($e->getMessage(), 0, 400));
-
-            return;
-        }
-
-        $this->supplierRequestStatus('Запрос '.$rfq->tag.' отправлен через QuoteParts. Ответы — в блоке «Запросы через QuoteParts».');
-        $this->reset(['selected', 'selectedSuppliers', 'addedSupplierIds', 'supplierSearch', 'note',
-            'editedNames', 'editedNamesEn', 'editedOem', 'editedQty', 'editedQtyEn', 'rfqFiles', 'attachCatalogPhotos']);
-        unset($this->supplierOptions, $this->selectedPositions, $this->oemOptions, $this->previewLanguages);
-        $this->afterSupplierRequestReset();
     }
 
     /**
@@ -850,13 +812,6 @@ trait ComposesSupplierPriceRequest
         }
         if ($supplierIds === []) {
             $this->addError('send', 'Отметьте хотя бы одного поставщика.');
-
-            return;
-        }
-
-        if ($this->channel === 'quoteparts') {
-            abort_unless($this->quotePartsEnabled, 403);
-            $this->sendViaQuoteParts($cids, $supplierIds, app(QuotePartsRfqService::class));
 
             return;
         }

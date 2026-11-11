@@ -1,4 +1,4 @@
-{{-- «Запросить цены» раздела «QuoteParts»: панель «Запрос поставщикам» из «Снабжения», без выбора канала. --}}
+{{-- «Запросить цены» раздела «QuoteParts»: панель «Запрос поставщикам» из «Снабжения». --}}
 <div>
-    @include('livewire.procurement._supplier-request-panel', ['panelAddsItems' => true, 'panelChannelChoice' => false])
+    @include('livewire.procurement._supplier-request-panel', ['panelAddsItems' => true])
 </div>
