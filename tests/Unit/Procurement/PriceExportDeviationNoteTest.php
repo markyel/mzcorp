@@ -50,6 +50,21 @@ class PriceExportDeviationNoteTest extends TestCase
         $this->assertSame('поставщик Sicor Italy; срок поставки 3 дн.; ELT0206 €312 + Support SUP0147 €17', PriceExportService::offerComment($o));
     }
 
+    /** 11.11.2026: наименование товара от поставщика — в комментарий 1С, без повтора. */
+    public function test_the_suppliers_description_goes_to_the_comment_once(): void
+    {
+        // Оригинал: наименование отдельной частью.
+        $o = new QuotePartsOffer(['kind' => 'original', 'origin_supplier' => 'Sicor Italy', 'description' => 'Door operator ELT0206 complete',
+            'tiers' => [['min_qty' => 1, 'price' => 329]], 'lead_time_days' => 3]);
+        $this->assertSame('поставщик Sicor Italy; наименование поставщика: Door operator ELT0206 complete; срок поставки 3 дн.', PriceExportService::offerComment($o));
+
+        // Аналог: описание уже стало названием товара в описании отклонения — второй раз не пишем.
+        $a = new QuotePartsOffer(['kind' => 'analog', 'brand' => 'Fermator', 'part_number' => 'FR-60', 'product_name' => 'Roller 60 mm',
+            'description' => 'Roller 60 mm', 'tiers' => [['min_qty' => 1, 'price' => 5]]]);
+        $this->assertSame(1, substr_count((string) PriceExportService::offerComment($a), 'Roller 60 mm'));
+        $this->assertStringNotContainsString('наименование поставщика', (string) PriceExportService::offerComment($a));
+    }
+
     public function test_mail_comment(): void
     {
         $this->assertSame('KM601 pulley: USD 52/pc, MOQ 10', PriceExportService::mailComment('30 days', "KM601 pulley:\n USD 52/pc, MOQ 10"));

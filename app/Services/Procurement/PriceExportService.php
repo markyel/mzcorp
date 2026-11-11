@@ -348,6 +348,12 @@ class PriceExportService
         if (($o->kind ?? 'original') !== 'original') {
             $parts[] = self::deviationNote($o);
         }
+        // Как поставщик называет товар (11.11.2026) — если его ещё нет в описании отклонения (у аналога, копии,
+        // замены это название товара поставщика).
+        $description = trim((string) $o->description);
+        if ($description !== '' && ! (($o->kind ?? 'original') !== 'original' && str_contains(self::deviationNote($o), $description))) {
+            $parts[] = 'наименование поставщика: '.$description;
+        }
         $tiers = collect((array) ($o->tiers ?? []))->filter(fn ($t) => isset($t['price']))->sortBy(fn ($t) => (float) ($t['min_qty'] ?? 1))->values();
         $first = (float) ($tiers->first()['min_qty'] ?? 1);
         if ($first > 1) {
