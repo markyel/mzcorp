@@ -68,6 +68,7 @@
                                                 {{ ! empty($of['lead_time_days']) ? '· '.$of['lead_time_days'].' дн.' : '' }}
                                                 {{ ! empty($of['valid_until']) ? '· до '.\Illuminate\Support\Carbon::parse($of['valid_until'])->format('d.m.Y') : '' }}
                                             </span>
+                                            @if(! empty($of['description']))<div class="text-fg-1 text-[11.5px]" title="Наименование товара от поставщика">{{ $of['description'] }}</div>@endif
                                             @if(! empty($of['note']))<div class="text-fg-3 text-[11.5px]">«{{ $of['note'] }}»</div>@endif
                                             @if(! empty($of['photos']) && ! empty($of['id']))
                                                 @php $gallery = collect(range(0, (int) $of['photos'] - 1))->map(fn ($i) => ['src' => route('quoteparts.offer-photo', [$of['id'], $i]), 'name' => 'Фото '.($i + 1), 'dl' => route('quoteparts.offer-photo', [$of['id'], $i])])->all(); @endphp

@@ -26,11 +26,11 @@ class TranslateForeignTextsCommand extends Command
         $dry = (bool) $this->option('dry-run');
 
         $offers = QuotePartsOffer::query()->where('updated_at', '>=', $since)
-            ->get(['id', 'brand', 'part_number', 'product_name', 'note', 'original_texts'])
-            ->filter(fn (QuotePartsOffer $o) => collect($o->only(['brand', 'part_number', 'product_name', 'note']))->contains(fn ($t) => ForeignTextTranslator::needs($t)));
+            ->get(['id', 'brand', 'part_number', 'product_name', 'note', 'description', 'original_texts'])
+            ->filter(fn (QuotePartsOffer $o) => collect($o->only(['brand', 'part_number', 'product_name', 'note', 'description']))->contains(fn ($t) => ForeignTextTranslator::needs($t)));
         $this->info('Предложений с китайским текстом: '.$offers->count());
         if (! $dry && $offers->isNotEmpty()) {
-            $texts = $offers->mapWithKeys(fn (QuotePartsOffer $o) => [$o->id => $o->only(['brand', 'part_number', 'product_name', 'note'])]);
+            $texts = $offers->mapWithKeys(fn (QuotePartsOffer $o) => [$o->id => $o->only(['brand', 'part_number', 'product_name', 'note', 'description'])]);
             $ru = $translator->toRussian($texts->flatten()->filter()->values()->all());
             $done = 0;
             foreach ($offers as $o) {

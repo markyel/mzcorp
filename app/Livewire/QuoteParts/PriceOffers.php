@@ -959,6 +959,8 @@ class PriceOffers extends Component
             'lead' => $o->lead_time_days,
             'valid' => $o->valid_until,
             'note' => $o->note,
+            // Как поставщик называет предлагаемый товар (любой вид), 11.11.2026.
+            'description' => $o->description,
             // Фото товара от поставщика (лежат в QuoteParts, сотруднику — через mzcorp).
             'photos' => $o->remote_id && (int) $o->photos > 0
                 ? array_map(fn ($i) => route('quoteparts.offer-photo', [$o->remote_id, $i]), range(0, (int) $o->photos - 1))

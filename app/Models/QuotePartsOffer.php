@@ -33,6 +33,8 @@ class QuotePartsOffer extends Model
         'part_number',
         'product_name',
         'note',
+        // Наименование предлагаемого товара от поставщика (любой вид), необязательное.
+        'description',
         // Поставщик писал по-китайски: в полях выше — перевод, здесь — его текст по полям.
         'original_texts',
         // Цена агента (UniSystem): реальный поставщик за ней — Sicor, Donati…; null — не агент или не назвал.

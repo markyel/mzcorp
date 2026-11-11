@@ -141,6 +141,8 @@ class RequestSupplierOverview
                                     ! empty($of['lead_time_days']) ? $of['lead_time_days'].' дн.' : null,
                                     ! empty($of['valid_until']) ? 'до '.Carbon::parse($of['valid_until'])->format('d.m.Y') : null,
                                     $kind !== 'original' && ! empty($of['product']) ? trim(($of['product']['brand'] ?? '').' '.($of['product']['part_number'] ?? '')) ?: null : null,
+                                    // Как поставщик называет товар (11.11.2026): переведённое из копии, иначе из снимка.
+                                    ($desc = $lo?->description ?: ($of['description'] ?? null)) ? Str::limit((string) $desc, 60) : null,
                                     ! empty($of['note']) ? '«'.Str::limit((string) $of['note'], 40).'»' : null,
                                 ])),
                                 // Копия / аналог, ещё не принятые к закупке, — на разборе.

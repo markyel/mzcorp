@@ -61,8 +61,19 @@ class ForeignTextTranslatorTest extends TestCase
         $o = ['note' => '确认附件中图片和尺寸', 'product' => ['brand' => '无', 'part_number' => 'AZ05', 'name' => null]];
         [$local, $originals] = QuotePartsPriceService::localized(QuotePartsPriceService::offerTexts($o), ['确认附件中图片和尺寸' => 'Проверьте фото и размеры во вложении', '无' => '']);
 
-        $this->assertSame(['brand' => null, 'part_number' => 'AZ05', 'product_name' => null, 'note' => 'Проверьте фото и размеры во вложении'], $local);
+        $this->assertSame(['brand' => null, 'part_number' => 'AZ05', 'product_name' => null, 'note' => 'Проверьте фото и размеры во вложении', 'description' => null], $local);
         $this->assertSame(['brand' => '无', 'note' => '确认附件中图片和尺寸'], $originals);
+    }
+
+    /** 11.11.2026: наименование товара от поставщика — переводится и хранит оригинал, как примечание. */
+    public function test_the_suppliers_description_is_translated_too(): void
+    {
+        $o = ['description' => ' 呼梯按钮板 ', 'product' => null];
+        [$local, $originals] = QuotePartsPriceService::localized(QuotePartsPriceService::offerTexts($o), ['呼梯按钮板' => 'Плата кнопки вызова']);
+
+        $this->assertSame('Плата кнопки вызова', $local['description']);
+        $this->assertSame(['description' => '呼梯按钮板'], $originals);
+        $this->assertNull(QuotePartsPriceService::offerTexts(['description' => '  '])['description']);
     }
 
     public function test_supplier_letters_in_chinese_get_text_ru(): void

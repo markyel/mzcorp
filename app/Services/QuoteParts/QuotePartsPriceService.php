@@ -210,7 +210,7 @@ class QuotePartsPriceService
     /**
      * Тексты оффера, которые пишет поставщик. Аналог, копия, замена — другой товар: чей и какой артикул.
      *
-     * @return array{brand: ?string, part_number: ?string, product_name: ?string, note: ?string}
+     * @return array{brand: ?string, part_number: ?string, product_name: ?string, note: ?string, description: ?string}
      */
     public static function offerTexts(array $o): array
     {
@@ -219,6 +219,8 @@ class QuotePartsPriceService
             'part_number' => $o['product']['part_number'] ?? null,
             'product_name' => $o['product']['name'] ?? null,
             'note' => isset($o['note']) ? mb_substr((string) $o['note'], 0, 1000) : null,
+            // Как поставщик называет предлагаемый товар (любой вид), 11.11.2026.
+            'description' => isset($o['description']) && trim((string) $o['description']) !== '' ? mb_substr(trim((string) $o['description']), 0, 500) : null,
         ];
     }
 

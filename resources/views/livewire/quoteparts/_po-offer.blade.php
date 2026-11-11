@@ -80,6 +80,7 @@
                     <span style="color: var(--fg-3); font-size: 12px">фото поставщика</span>
                 </span>
             @endif
+            @if(! empty($r['description']))<span class="pa-note" @isset($orig['description']) title="Оригинал: {{ $orig['description'] }}" @endisset>Наименование поставщика: <b style="font-weight: 600; color: var(--fg-1)">{{ $r['description'] }}</b>@isset($orig['description'])<span style="color: var(--fg-4); font-size: 11px"> · перевод</span>@endisset</span>@endif
             @if($r['note'])<span class="pa-note" @isset($orig['note']) title="Оригинал: {{ $orig['note'] }}" @endisset>Поставщик: «{{ $r['note'] }}»@isset($orig['note'])<span style="color: var(--fg-4); font-size: 11px"> · перевод</span>@endisset</span>@endif
             @if($clState === \App\Services\QuoteParts\OfferClarifications::ANSWERED)
                 <span class="pa-pill pa-pill-info" style="align-self: flex-start; font-size: 12px; font-weight: 500; padding: 2px 8px">↩ ответил на уточнение {{ $cl['answered_at']->timezone($tz)->format('d.m H:i') }} — решите по ответу</span>

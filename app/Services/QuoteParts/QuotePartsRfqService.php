@@ -495,8 +495,8 @@ class QuotePartsRfqService
         return $draft;
     }
 
-    /** Что поставщик пишет в строках запроса: примечание и аналог в предложении, отсрочка, отказ. */
-    private const LINE_TEXT_KEYS = ['note', 'brand', 'part_number', 'name', 'postpone_note', 'decline_reason'];
+    /** Что поставщик пишет в строках запроса: примечание, наименование товара и аналог в предложении, отсрочка, отказ. */
+    private const LINE_TEXT_KEYS = ['note', 'description', 'brand', 'part_number', 'name', 'postpone_note', 'decline_reason'];
 
     /**
      * Снимок запроса по-русски там, где поставщик написал по-китайски. Письма — русский перевод своей
