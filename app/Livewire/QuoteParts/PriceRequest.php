@@ -50,6 +50,12 @@ class PriceRequest extends Component
         $this->autoTranslateIfEnglish();
     }
 
+    /** Выбора канала здесь нет: всегда маршрутизация через QuoteParts (системным — платформа, внесистемным — orders@). */
+    public function updatedChannel(): void
+    {
+        $this->channel = 'mail';
+    }
+
     /** Запрос ушёл — вкладки раздела снимают отметки. */
     protected function afterSupplierRequestReset(): void
     {

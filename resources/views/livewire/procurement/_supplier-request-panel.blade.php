@@ -43,7 +43,7 @@
                 <div @mousedown.prevent.stop="startResize($event)" x-show="!min" title="Потяните, чтобы изменить размер окна"
                      style="position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;z-index:5;background:linear-gradient(135deg,transparent 50%,var(--fg-4) 50%,var(--fg-4) 58%,transparent 58%,transparent 70%,var(--fg-4) 70%,var(--fg-4) 78%,transparent 78%);opacity:.6"></div>
             <div class="ds-card-body space-y-3" x-show="!min" :style="h && x !== null ? { flex: '1', maxHeight: 'none' } : {}" style="max-height:40vh;overflow-y:auto">
-                @php $viaQp = $channel === 'quoteparts' && $this->quotePartsEnabled; @endphp
+                @php $viaQp = ($panelChannelChoice ?? true) && $channel === 'quoteparts' && $this->quotePartsEnabled; @endphp
                 {{-- Раздел «QuoteParts»: своего поиска по каталогу там нет — позиции дописываются списком. --}}
                 @if($panelAddsItems ?? false)
                     <details @if($skuListReport && $skuListReport['missing'] !== []) open @endif>
@@ -63,8 +63,9 @@
                         </div>
                     </details>
                 @endif
-                {{-- Канал отправки: по умолчанию письмо, как раньше; QuoteParts — пилот. --}}
-                @if($this->quotePartsEnabled)
+                {{-- Канал отправки: по умолчанию письмо, как раньше; QuoteParts — пилот. В разделе «QuoteParts»
+                     выбора нет (заказчик, 11.11.2026): системным — запрос платформы, внесистемным — письмо с orders@. --}}
+                @if($this->quotePartsEnabled && ($panelChannelChoice ?? true))
                     <div class="flex flex-wrap items-center gap-3 text-[12.5px]">
                         <span class="text-fg-3">Как отправить:</span>
                         <label class="inline-flex items-center gap-1.5 cursor-pointer">
