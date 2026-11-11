@@ -5,6 +5,7 @@ namespace App\Livewire\QuoteParts;
 use App\Enums\Role;
 use App\Models\CatalogItem;
 use App\Models\Supplier;
+use App\Services\Procurement\RfqFileStager;
 use App\Services\QuoteParts\QuotePartsPriceRequestService;
 use App\Services\QuoteParts\QuotePartsRouting;
 use App\Services\Supplier\SupplierManualSearch;
@@ -13,6 +14,7 @@ use App\Services\Supplier\SupplierOrganizationService;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 /**
  * «Запросить цены» в разделе «QuoteParts» (11.11.2026): пачка позиций из «Кандидатов» или пула —
@@ -21,6 +23,8 @@ use Livewire\Component;
  */
 class PriceRequest extends Component
 {
+    use WithFileUploads;
+
     /** Позиций в одном запросе: столько принимает QuoteParts. */
     public const MAX_ITEMS = 200;
 
@@ -46,6 +50,14 @@ class PriceRequest extends Component
 
     public string $note = '';
 
+    /** @var array<int|string, string> catalog_item_id => артикул для поставщика (по умолчанию — OEM каталога) */
+    public array $oem = [];
+
+    /** Фото и файлы к запросу — каждому поставщику. */
+    public $rfqFiles = [];
+
+    public bool $attachCatalogPhotos = false;
+
     public static function canSend(): bool
     {
         return (bool) auth()->user()?->hasAnyRole([
@@ -64,6 +76,7 @@ class PriceRequest extends Component
         $this->open = true;
         $this->resetErrorBag();
         unset($this->items, $this->supplierOptions);
+        $this->prefillArticles();
     }
 
     public function close(): void
@@ -75,13 +88,67 @@ class PriceRequest extends Component
     public function items()
     {
         return CatalogItem::query()->whereIn('id', $this->cids)->orderBy('sku')
-            ->get(['id', 'sku', 'name', 'brand']);
+            ->get(['id', 'sku', 'name', 'brand', 'brand_article', 'brands', 'articles', 'photo_url']);
+    }
+
+    /** Артикул для поставщика по умолчанию — OEM каталога без нашего M-кода, как в «Снабжении». */
+    private function prefillArticles(): void
+    {
+        foreach ($this->items as $ci) {
+            $this->oem[$ci->id] ??= (string) ($ci->oemForExternal() ?? '');
+        }
+    }
+
+    /**
+     * OEM-артикулы каталога по позициям (brand_article + articles[], без наших M-кодов) с брендом —
+     * для подсказки «показать OEM» и быстрого добавления в поле артикула.
+     *
+     * @return array<int, list<array{article:string, brand:string}>>
+     */
+    #[Computed]
+    public function oemOptions(): array
+    {
+        $out = [];
+        foreach ($this->items as $ci) {
+            $articles = array_merge([$ci->brand_article], (array) ($ci->articles ?? []));
+            $brands = array_merge([$ci->brand], (array) ($ci->brands ?? []));
+            $seen = [];
+            $list = [];
+            foreach ($articles as $idx => $art) {
+                $art = trim((string) $art);
+                if ($art === '' || CatalogItem::isInternalCode($art, $ci->sku) || isset($seen[mb_strtolower($art)])) {
+                    continue;
+                }
+                $seen[mb_strtolower($art)] = true;
+                $list[] = ['article' => $art, 'brand' => trim((string) ($brands[$idx] ?? ''))];
+            }
+            $out[$ci->id] = $list;
+        }
+
+        return $out;
+    }
+
+    /** Добавить OEM-артикул каталога в поле артикула позиции (через запятую, без повторов). */
+    public function addOem(int $cid, string $article): void
+    {
+        $article = trim($article);
+        if ($article === '') {
+            return;
+        }
+        $parts = array_values(array_filter(array_map('trim', explode(',', (string) ($this->oem[$cid] ?? ''))), fn ($p) => $p !== ''));
+        foreach ($parts as $p) {
+            if (mb_strtolower($p) === mb_strtolower($article)) {
+                return;
+            }
+        }
+        $parts[] = $article;
+        $this->oem[$cid] = implode(', ', $parts);
     }
 
     public function removeItem(int $cid): void
     {
         $this->cids = array_values(array_filter($this->cids, fn ($id) => $id !== $cid));
-        unset($this->qty[$cid], $this->items, $this->supplierOptions);
+        unset($this->qty[$cid], $this->oem[$cid], $this->items, $this->supplierOptions, $this->oemOptions);
     }
 
     /** Добавить позиции списком артикулов M…: «M06374, M26773 M31866». */
@@ -102,7 +169,8 @@ class PriceRequest extends Component
         if ($missing !== []) {
             $this->addError('skus', 'Нет в каталоге: '.implode(', ', $missing).'.');
         }
-        unset($this->items, $this->supplierOptions);
+        unset($this->items, $this->supplierOptions, $this->oemOptions);
+        $this->prefillArticles();
     }
 
     /**
@@ -191,7 +259,8 @@ class PriceRequest extends Component
         $this->validate([
             'replyBy' => ['nullable', 'date', 'after_or_equal:today'],
             'note' => ['nullable', 'string', 'max:2000'],
-        ], [], ['replyBy' => 'срок ответа', 'note' => 'комментарий']);
+            'rfqFiles.*' => ['file', 'max:25600'],
+        ], [], ['replyBy' => 'срок ответа', 'note' => 'комментарий', 'rfqFiles.*' => 'файл']);
 
         $supplierIds = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
         if ($this->cids === []) {
@@ -212,7 +281,9 @@ class PriceRequest extends Component
             $quantities[$cid] = $q > 0 ? $q : null;
         }
 
-        $result = $service->send($quantities, $supplierIds, $this->replyBy ?: null, trim($this->note) ?: null, auth()->user());
+        $files = app(RfqFileStager::class)->stage((array) $this->rfqFiles, $this->cids, $this->attachCatalogPhotos, auth()->user());
+        $oem = array_intersect_key(array_map(fn ($v) => (string) $v, $this->oem), array_flip($this->cids));
+        $result = $service->send($quantities, $supplierIds, $this->replyBy ?: null, trim($this->note) ?: null, auth()->user(), $oem, $files);
         if ($result['tags'] === []) {
             $this->addError('send', implode(' ', $result['errors']) ?: 'Запрос не отправлен.');
 

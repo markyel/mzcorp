@@ -29,9 +29,12 @@ class QuotePartsPriceRequestService
     /**
      * @param  array<int, float|null>  $quantities  catalog_item_id => количество; null — без количества
      * @param  list<int>  $supplierIds
+     * @param  array<int, string>  $oem  catalog_item_id => артикул для поставщика, как его поправил человек;
+     *                                   нет ключа — артикул каталога (CatalogItem::oemForExternal)
+     * @param  list<array{path:string, name:string, mime:string, size?:int}>  $files  фото и файлы — каждому поставщику
      * @return array{tags: list<string>, errors: list<string>, sent: int}
      */
-    public function send(array $quantities, array $supplierIds, ?string $replyBy, ?string $note, User $by): array
+    public function send(array $quantities, array $supplierIds, ?string $replyBy, ?string $note, User $by, array $oem = [], array $files = []): array
     {
         $out = ['tags' => [], 'errors' => [], 'sent' => 0];
         $route = $this->routing->split($supplierIds);
@@ -40,11 +43,14 @@ class QuotePartsPriceRequestService
 
             return $out;
         }
+        $catalog = CatalogItem::query()->whereIn('id', array_keys($quantities))
+            ->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article', 'articles']);
 
         if ($route['quoteparts'] !== []) {
             try {
                 $out['tags'][] = $this->rfqs->send(null, $quantities, $route['quoteparts'], $replyBy, $note, $by, [],
-                    routed: true, explicitSupplierIds: $this->explicitAddresses($route['quoteparts']))->tag;
+                    routed: true, files: $files, notes: self::articleNotes($catalog, $oem),
+                    explicitSupplierIds: $this->explicitAddresses($route['quoteparts']))->tag;
                 $out['sent'] += count($route['quoteparts']);
             } catch (Throwable $e) {
                 Log::warning('QuoteParts price request refused', ['offsystem' => false, 'error' => $e->getMessage()]);
@@ -53,11 +59,10 @@ class QuotePartsPriceRequestService
         }
 
         if ($route['offsystem'] !== []) {
-            $catalog = CatalogItem::query()->whereIn('id', array_keys($quantities))
-                ->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article', 'articles']);
             $edits = [
                 'qty' => array_map(fn ($q) => $q === null ? '' : self::number($q).' шт.', $quantities),
                 'qty_en' => array_map(fn ($q) => $q === null ? '' : self::number($q).' pcs', $quantities),
+                'oem' => $oem,
             ];
             $letters = [];
             foreach (Supplier::query()->whereIn('id', $route['offsystem'])->get() as $s) {
@@ -65,7 +70,7 @@ class QuotePartsPriceRequestService
             }
             try {
                 $out['tags'][] = $this->rfqs->send(null, $quantities, $route['offsystem'], $replyBy, $note, $by, [],
-                    routed: true, letters: $letters, explicitSupplierIds: $this->explicitAddresses($route['offsystem']))->tag;
+                    routed: true, files: $files, letters: $letters, explicitSupplierIds: $this->explicitAddresses($route['offsystem']))->tag;
                 $out['sent'] += count($route['offsystem']);
             } catch (Throwable $e) {
                 Log::warning('QuoteParts price request refused', ['offsystem' => true, 'error' => $e->getMessage()]);
@@ -94,6 +99,33 @@ class QuotePartsPriceRequestService
         }
 
         return $explicit;
+    }
+
+    /**
+     * Артикул для поставщика, если он не тот, что в карточке QuoteParts (там brand_article), —
+     * системному поставщику примечанием к позиции: карточку под один запрос не поменять, а в
+     * письме платформы стоит артикул карточки. Совпадает с карточкой или стёрт — примечания нет.
+     *
+     * @param  \Illuminate\Support\Collection<int, CatalogItem>  $catalog
+     * @param  array<int, string>  $oem
+     * @return array<string, string> «c:{catalog_item_id}» => примечание
+     */
+    public static function articleNotes(\Illuminate\Support\Collection $catalog, array $oem): array
+    {
+        $norm = fn (?string $s): string => mb_strtolower((string) preg_replace('/\s+/u', ' ', trim((string) $s)));
+        $notes = [];
+        foreach ($catalog as $ci) {
+            if (! array_key_exists($ci->id, $oem)) {
+                continue;
+            }
+            $edited = trim((string) $oem[$ci->id]);
+            $card = (string) $ci->brand_article;
+            if ($edited !== '' && ! in_array($norm($edited), [$norm($card), $norm(CatalogItem::externalArticle($card))], true)) {
+                $notes['c:'.$ci->id] = 'Part No.: '.$edited;
+            }
+        }
+
+        return $notes;
     }
 
     private static function number(float $q): string

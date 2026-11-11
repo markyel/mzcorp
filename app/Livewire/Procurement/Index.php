@@ -1148,38 +1148,8 @@ class Index extends Component
     private function rfqFiles(array $cids, \App\Models\User $user): array
     {
         $this->validate(['rfqFiles.*' => 'file|max:25600']);
-        $extraFiles = [];
-        foreach ((array) $this->rfqFiles as $tmp) {
-            if ($tmp === null) {
-                continue;
-            }
-            $name = $tmp->getClientOriginalName();
-            $path = sprintf('mail/procurement-staging/%d/%s', $user->id, Str::random(10).'_'.$name);
-            Storage::disk('local')->put($path, $tmp->get());
-            $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $tmp->getMimeType() ?: 'application/octet-stream', 'size' => $tmp->getSize() ?: 0];
-        }
-        if ($this->attachCatalogPhotos) {
-            $cache = app(\App\Services\Catalog\CatalogPhotoCache::class);
-            $cats = CatalogItem::query()->whereIn('id', $cids)->whereNotNull('photo_url')->get(['id', 'name', 'photo_url']);
-            foreach ($cats as $ci) {
-                $cached = $cache->ensure((int) $ci->id);
-                if ($cached === null) {
-                    continue;
-                }
-                $bytes = Storage::disk('public')->get($cached['rel']);
-                if ($bytes === null || $bytes === '') {
-                    continue;
-                }
-                $ext = str_contains($cached['mime'], 'png') ? 'png' : (str_contains($cached['mime'], 'webp') ? 'webp' : 'jpg');
-                $base = Str::slug(mb_substr((string) ($ci->name ?: 'foto'), 0, 40)) ?: 'foto';
-                $name = 'foto_'.$base.'.'.$ext;
-                $path = sprintf('mail/procurement-staging/%d/%s', $user->id, Str::random(10).'_'.$name);
-                Storage::disk('local')->put($path, $bytes);
-                $extraFiles[] = ['path' => $path, 'name' => $name, 'mime' => $cached['mime'], 'size' => strlen($bytes)];
-            }
-        }
 
-        return $extraFiles;
+        return app(\App\Services\Procurement\RfqFileStager::class)->stage((array) $this->rfqFiles, $cids, $this->attachCatalogPhotos, $user);
     }
 
     /* ----------------------- Прайсы поставщиков (QuoteParts) ----------------------- */

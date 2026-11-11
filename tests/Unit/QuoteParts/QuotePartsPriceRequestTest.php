@@ -87,6 +87,40 @@ class QuotePartsPriceRequestTest extends TestCase
         $this->assertSame(2, $out['sent']);
     }
 
+    public function test_an_article_other_than_the_cards_goes_to_system_suppliers_as_a_note(): void
+    {
+        DB::table('catalog_items')->where('id', 10)->update(['brand_article' => 'XAA380N2 (11 мм)']);
+        $catalog = \App\Models\CatalogItem::query()->whereIn('id', [10, 11])->get();
+
+        // Карточка как есть, без пояснения в скобках, или не трогали — примечания нет.
+        $this->assertSame([], QuotePartsPriceRequestService::articleNotes($catalog, [10 => 'XAA380N2 (11 мм)']));
+        $this->assertSame([], QuotePartsPriceRequestService::articleNotes($catalog, [10 => 'xaa380n2']));
+        $this->assertSame([], QuotePartsPriceRequestService::articleNotes($catalog, [10 => ' ']));
+        $this->assertSame(['c:10' => 'Part No.: XAA380N2, XAA380AA1'], QuotePartsPriceRequestService::articleNotes($catalog, [10 => 'XAA380N2, XAA380AA1']));
+        $this->assertSame(['c:11' => 'Part No.: KM51173460R02'], QuotePartsPriceRequestService::articleNotes($catalog, [11 => 'KM51173460R02']));
+    }
+
+    public function test_articles_and_files_reach_both_routes(): void
+    {
+        $files = [['path' => 'mail/procurement-staging/9/a_foto.jpg', 'name' => 'foto.jpg', 'mime' => 'image/jpeg', 'size' => 10]];
+        $rfqs = Mockery::mock(QuotePartsRfqService::class);
+        $rfqs->shouldReceive('send')->once()
+            ->withArgs(fn ($req, $q, $ids, $by, $note, $user, $drafts, $routed, $f, $notes) => $ids === [1] && $f === $files && $notes === ['c:11' => 'Part No.: KM51173460R02'])
+            ->andReturn(self::rfq('QP-DDD'));
+        $rfqs->shouldReceive('send')->once()
+            ->withArgs(fn ($req, $q, $ids, $by, $note, $user, $drafts, $routed, $f) => $ids === [2] && $f === $files)
+            ->andReturn(self::rfq('QP-EEE'));
+        $letters = Mockery::mock(SupplierProcurementDispatchService::class);
+        $letters->shouldReceive('composeLetter')->once()
+            ->withArgs(fn ($items, $s, $note, $edits) => $edits['oem'] === [11 => 'KM51173460R02'])
+            ->andReturn(['lang' => 'en', 'subject' => 's', 'html' => 'h', 'plain' => 'p']);
+
+        $out = $this->service(['quoteparts' => [1], 'offsystem' => [2], 'mail' => []], $rfqs, $letters)
+            ->send([11 => null], [1, 2], null, 'Please quote', new User(), [11 => 'KM51173460R02'], $files);
+
+        $this->assertSame(['QP-DDD', 'QP-EEE'], $out['tags']);
+    }
+
     public function test_nothing_goes_from_a_managers_mailbox_when_routing_is_off(): void
     {
         $rfqs = Mockery::mock(QuotePartsRfqService::class);
