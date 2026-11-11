@@ -10,8 +10,8 @@ use Livewire\Attributes\Url;
  * Фильтр раздела QuoteParts «чьи запросы»: позиции, запрошенные у поставщиков конкретным
  * сотрудником (автор запроса QuoteParts — quoteparts_rfqs.created_by_user_id).
  *
- * Пусто в адресе — по умолчанию для пользователя: менеджеру и снабжению — свои запросы,
- * остальным (РОП, директорат, админ) — все.
+ * Пусто в адресе — по умолчанию для пользователя: менеджеру — свои запросы,
+ * остальным (снабжение, РОП, директорат, админ) — все.
  */
 trait FiltersByRfqAuthor
 {
@@ -36,12 +36,15 @@ trait FiltersByRfqAuthor
         return $this->author !== '' ? $this->author : $this->defaultAuthorFilter();
     }
 
-    /** По умолчанию: менеджеру и снабжению — свои запросы, остальным (РОП, директорат, админ) — все. */
+    /**
+     * По умолчанию: менеджеру — свои запросы, остальным — все. Снабжению тоже все: оно ведёт
+     * актуализацию цен по всем запросам, не только по своим (заказчик, 11.11.2026).
+     */
     private function defaultAuthorFilter(): string
     {
         $u = auth()->user();
 
-        return $u && $u->hasAnyRole(['manager', 'procurement']) && ! $u->hasAnyRole(['director', 'admin', 'head_of_sales']) ? 'mine' : 'all';
+        return $u && $u->hasRole('manager') && ! $u->hasAnyRole(['procurement', 'director', 'admin', 'head_of_sales']) ? 'mine' : 'all';
     }
 
     /** Чьи запросы показывать: id сотрудника или null — всех. */
