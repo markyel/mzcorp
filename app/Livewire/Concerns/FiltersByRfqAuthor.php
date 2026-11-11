@@ -19,11 +19,26 @@ trait FiltersByRfqAuthor
     #[Url(as: 'au', except: '')]
     public string $author = '';
 
+    /**
+     * Действующий фильтр — сразу в поле: пустое значение в списке не найти, и браузер показывал
+     * первый пункт «Все», хотя работало «Мои»; выбрать «Все» было нельзя — он уже «выбран»
+     * (снабжение, 11.11.2026). Livewire вызывает mount{Трейт} при открытии компонента.
+     */
+    public function mountFiltersByRfqAuthor(): void
+    {
+        if ($this->author === '') {
+            $this->author = $this->defaultAuthorFilter();
+        }
+    }
+
     public function authorFilter(): string
     {
-        if ($this->author !== '') {
-            return $this->author;
-        }
+        return $this->author !== '' ? $this->author : $this->defaultAuthorFilter();
+    }
+
+    /** По умолчанию: менеджеру и снабжению — свои запросы, остальным (РОП, директорат, админ) — все. */
+    private function defaultAuthorFilter(): string
+    {
         $u = auth()->user();
 
         return $u && $u->hasAnyRole(['manager', 'procurement']) && ! $u->hasAnyRole(['director', 'admin', 'head_of_sales']) ? 'mine' : 'all';
