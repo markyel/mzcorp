@@ -21,6 +21,13 @@
             <input type="search" wire:model.live.debounce.300ms="search"
                    placeholder="{{ $tab === 'registry' ? 'Поиск: название / код 1С / ИНН / адрес' : ($tab === 'nomenclature' ? 'Поиск: M-артикул / название / артикул' : 'Поиск: M-артикул / заявка / поставщик / тема') }}"
                    class="h-[30px] w-full max-w-[440px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
+            @if($tab === 'inquiries' && ($withCorrespondence || $this->correspondenceCount > 0))
+                <label class="inline-flex items-center gap-1.5 ml-3 text-[12px] text-fg-2 cursor-pointer"
+                       title="Письма поставщиков из ящиков снабжения, не относящиеся к запросам цены: заказы, PI, счета, отгрузки, рассылки. Они есть в «Почте»; здесь по умолчанию скрыты">
+                    <input type="checkbox" wire:click="toggleCorrespondence" @checked($withCorrespondence)>
+                    показать и переписку без запроса цены ({{ $this->correspondenceCount }})
+                </label>
+            @endif
         </div>
 
         @if($tab === 'nomenclature')

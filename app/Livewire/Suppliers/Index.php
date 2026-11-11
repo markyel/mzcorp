@@ -29,6 +29,26 @@ class Index extends Component
     #[Url(as: 'q', except: '')]
     public string $search = '';
 
+    /**
+     * «Запросы»: по умолчанию — только запросы цены (SupplierInquiry::scopePriceRequests). Переписка
+     * поставщика из ящиков снабжения (заказы, PI, счета, отгрузки) — за переключателем (11.11.2026).
+     */
+    #[Url(as: 'mail', except: false)]
+    public bool $withCorrespondence = false;
+
+    public function toggleCorrespondence(): void
+    {
+        $this->withCorrespondence = ! $this->withCorrespondence;
+        $this->resetPage();
+    }
+
+    /** Сколько веток переписки без запроса цены спрятано. */
+    #[Computed]
+    public function correspondenceCount(): int
+    {
+        return SupplierInquiry::query()->count() - SupplierInquiry::query()->priceRequests()->count();
+    }
+
     /** Фильтр реестра по группе (0 — все). */
     #[Url(as: 'group', except: 0)]
     public int $groupFilter = 0;
@@ -390,7 +410,8 @@ class Index extends Component
                 'items.requestItem:id,request_id,catalog_item_id,parsed_article,parsed_name',
                 'items.requestItem.catalogItem:id,sku,name',
                 'relatedRequest:id,internal_code',
-            ]);
+            ])
+            ->when(! $this->withCorrespondence, fn ($q) => $q->priceRequests());
 
         $s = trim($this->search);
         if ($s !== '') {

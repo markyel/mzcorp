@@ -26,6 +26,50 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class SupplierInquiry extends Model
 {
+    /*
+     * Запрос цены или просто переписка (11.11.2026). Ящики снабжения заводят ветку на каждое письмо
+     * поставщика (ingestSupplierMessage): заказы, PI, счета, отгрузки, рассылки — 163 из 268 веток
+     * раздела «Поставщики». Запросы цены, отправленные снабженцем со своего ящика, системных меток не
+     * несут — их видно по теме: «Запрос 000372849», «Request … M02350», номер КП «000373308».
+     * Шаблоны — POSIX (Postgres ~*) и PCRE одновременно: без \b, только классы и альтернативы.
+     */
+    public const PRICE_SUBJECT_RE = '(запрос|request|rfq|quot|price|цен[аыуе]|расценк|прайс|angebot|enquiry|inquiry|предложени)';
+
+    /** Тема начинается с номера КП 1С: «000373308», «Re: 372897», «[372853] GAA177HR1». */
+    public const NUMBER_SUBJECT_RE = '^\s*((re|fwd?|aw|ответ)\s*:\s*)*\[?0*[0-9]{5,9}\]?(\s|$)';
+
+    public const ORDER_SUBJECT_RE = '(заказ|order|сч[её]т|invoice|proforma|оплат|отгруз|shipment|delivery|достав|сертификат|реализац|упд|накладн|tracking|трек)';
+
+    /**
+     * Наши запросы цены: отправленные системой (токен RFQ, автор, позиции) и ветки с темой запроса
+     * или номером КП, кроме заказов/счетов/отгрузок. Остальное — переписка поставщика.
+     */
+    public function scopePriceRequests(\Illuminate\Database\Eloquent\Builder $q): void
+    {
+        $q->where(fn ($w) => $w->whereNotNull('rfq_token')
+            ->orWhereNotNull('created_by_user_id')
+            ->orWhereHas('items')
+            ->orWhere(fn ($s) => $s
+                ->where(fn ($p) => $p->whereNotNull('related_request_id')
+                    ->orWhereRaw('subject ~* ?', [self::PRICE_SUBJECT_RE])
+                    ->orWhereRaw('subject ~* ?', [self::NUMBER_SUBJECT_RE]))
+                ->whereRaw('coalesce(subject, \'\') !~* ?', [self::ORDER_SUBJECT_RE])));
+    }
+
+    /** То же по одной ветке — для проверки и тестов (scopePriceRequests — для списка). */
+    public function isPriceRequestThread(): bool
+    {
+        $hasItems = $this->relationLoaded('items') ? $this->items->isNotEmpty() : $this->items()->exists();
+        if ($this->rfq_token !== null || $this->created_by_user_id !== null || $hasItems) {
+            return true;
+        }
+        $subject = (string) $this->subject;
+        $re = fn (string $p): bool => preg_match('/'.$p.'/iu', $subject) === 1;
+
+        return ($this->related_request_id !== null || $re(self::PRICE_SUBJECT_RE) || $re(self::NUMBER_SUBJECT_RE))
+            && ! $re(self::ORDER_SUBJECT_RE);
+    }
+
     protected $fillable = [
         'supplier_email',
         'supplier_name',
