@@ -43,25 +43,6 @@
                 <div @mousedown.prevent.stop="startResize($event)" x-show="!min" title="Потяните, чтобы изменить размер окна"
                      style="position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;z-index:5;background:linear-gradient(135deg,transparent 50%,var(--fg-4) 50%,var(--fg-4) 58%,transparent 58%,transparent 70%,var(--fg-4) 70%,var(--fg-4) 78%,transparent 78%);opacity:.6"></div>
             <div class="ds-card-body space-y-3" x-show="!min" :style="h && x !== null ? { flex: '1', maxHeight: 'none' } : {}" style="max-height:40vh;overflow-y:auto">
-                {{-- Раздел «QuoteParts»: своего поиска по каталогу там нет — позиции дописываются списком. --}}
-                @if($panelAddsItems ?? false)
-                    <details @if($skuListReport && $skuListReport['missing'] !== []) open @endif>
-                        <summary class="text-[12.5px] text-sky-700 cursor-pointer select-none">Добавить позиции списком артикулов</summary>
-                        <div class="mt-2">
-                            <textarea wire:model="skuList" rows="2" placeholder="M05333, M26889 — столбец из Excel, через запятую или пробел"
-                                      class="w-full px-2 py-1.5 border border-border rounded-md bg-surface text-[12.5px] mono outline-none focus:border-sky-500"></textarea>
-                            <div class="flex flex-wrap items-center gap-2 mt-1.5 text-[12px]">
-                                <button type="button" wire:click="addCatalogSkus" wire:loading.attr="disabled" wire:target="addCatalogSkus" class="btn btn-sm">Найти и добавить</button>
-                                @if($skuListReport)
-                                    @if($skuListReport['empty'])<span class="text-amber-700">В тексте нет M-артикулов.</span>
-                                    @else<span class="text-emerald-700">Добавлено: {{ $skuListReport['added'] }}</span>@if($skuListReport['already'] > 0)<span class="text-fg-3"> · уже были: {{ $skuListReport['already'] }}</span>@endif
-                                        @if($skuListReport['missing'] !== [])<span class="text-red-700">· нет в каталоге: <span class="mono">{{ implode(', ', $skuListReport['missing']) }}</span></span>@endif
-                                    @endif
-                                @endif
-                            </div>
-                        </div>
-                    </details>
-                @endif
                 {{-- Поставщики --}}
                 <div>
                     <label class="block text-[11.5px] text-fg-3 mb-1">Поставщики <span class="text-fg-4">— подобраны по матрице под выбранные позиции; ✎ — карточка поставщика (правки подтянутся при возврате)</span></label>

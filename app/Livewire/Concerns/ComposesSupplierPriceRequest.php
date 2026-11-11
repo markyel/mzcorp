@@ -371,26 +371,12 @@ trait ComposesSupplierPriceRequest
      */
     public function addCatalogSkus(): void
     {
-        preg_match_all('/(?<![\p{L}\d])[MМmм]\s?-?\s?(\d{1,5})(?!\d)/u', $this->skuList, $m);
-        $wanted = [];
-        foreach ($m[1] as $digits) {
-            // В каталоге все артикулы — M + 5 цифр; «M5333» = M05333.
-            $wanted['M'.str_pad($digits, 5, '0', STR_PAD_LEFT)] = true;
-        }
-        $wanted = array_keys($wanted);
+        ['wanted' => $wanted, 'found' => $found, 'missing' => $missing] = \App\Services\Catalog\CatalogSkuList::resolve($this->skuList);
         if ($wanted === []) {
             $this->skuListReport = ['added' => 0, 'already' => 0, 'missing' => [], 'empty' => true];
 
             return;
         }
-
-        $found = CatalogItem::query()
-            ->whereIn(\Illuminate\Support\Facades\DB::raw('upper(sku)'), $wanted)
-            ->orderByDesc('is_active')
-            ->orderBy('id')
-            ->get(['id', 'sku'])
-            ->unique(fn (CatalogItem $ci) => mb_strtoupper((string) $ci->sku))
-            ->keyBy(fn (CatalogItem $ci) => mb_strtoupper((string) $ci->sku));
 
         $added = 0;
         $already = 0;
@@ -408,7 +394,6 @@ trait ComposesSupplierPriceRequest
             $added++;
         }
 
-        $missing = array_values(array_filter($wanted, fn ($sku) => ! $found->has($sku)));
         $this->skuListReport = ['added' => $added, 'already' => $already, 'missing' => $missing, 'empty' => false];
         if ($added > 0) {
             // Программное добавление не триггерит updatedSelected — префилл вручную.

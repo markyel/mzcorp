@@ -113,6 +113,9 @@
             $picked = count(array_filter($selected));
             $pickedNew = count(array_filter($selected, fn ($v, $cid) => $v && ! isset($inPool[$cid]), ARRAY_FILTER_USE_BOTH));
         @endphp
+        @if(\App\Livewire\QuoteParts\PriceRequest::canSend())
+            <livewire:quote-parts.catalog-picker wire:key="qp-catalog-picker" />
+        @endif
         <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
             <button type="button" wire:click="selectShown" class="btn btn-sm">Отметить показанные</button>
             @if($picked > 0)
@@ -383,6 +386,9 @@
 
     @if($tab === 'pool')
         <livewire:quote-parts.pool-rules />
+        @if(\App\Livewire\QuoteParts\PriceRequest::canSend())
+            <livewire:quote-parts.catalog-picker wire:key="qp-catalog-picker" />
+        @endif
         @php $pickedPool = count(array_filter($selectedPool)); @endphp
         <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
             <button type="button" wire:click="refreshStatuses" class="btn btn-sm">Обновить статусы</button>
