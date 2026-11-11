@@ -116,17 +116,26 @@ class BotRequestNotifier
             ->get()->all();
     }
 
+    /** PDF в переписке бота, который менеджер прислал как КП или как счёт — по имени файла. */
+    private const QUOTE_FILE_RE = '/предложени|(?<![a-zа-яё])кп(?![a-zа-яё])|quot|offer/iu';
+
+    private const INVOICE_FILE_RE = '/сч[её]т|invoice/iu';
+
     /**
-     * Последний распознанный КП или счёт заявки — тот файл, что ушёл клиенту письмом; null — не было.
-     * «Прислать КП/счёт ещё раз» в «Моих заявках» бота.
+     * Последний КП или счёт заявки, ушедший клиенту: распознанный документ из письма (OutboundQuote)
+     * или PDF, который менеджер прислал в переписке бота (по заявкам из бота КП шлют файлом в чат —
+     * MZ2026-00881, MZ2026-00946). Новее из двух; null — не было. «Ещё раз» в «Моих заявках» бота.
+     *
+     * @return array{name: string, disk: string, path: string, at: \Illuminate\Support\Carbon}|null
      */
-    public static function latestDocument(Request $request, bool $invoice): ?OutboundQuote
+    public static function latestDocument(Request $request, bool $invoice): ?array
     {
         $types = $invoice
             ? [DetectorType::OutboundInvoice->value]
             : [DetectorType::OutboundQuotationFull->value, DetectorType::OutboundQuotationPartial->value];
 
-        return OutboundQuote::query()
+        $found = [];
+        $oq = OutboundQuote::query()
             ->with('attachment')
             ->where('request_id', $request->id)
             ->whereIn('document_type', $types)
@@ -135,18 +144,47 @@ class BotRequestNotifier
             ->whereHas('attachment', fn ($q) => $q->where('size_bytes', '<=', self::MAX_FILE_BYTES))
             ->latest('id')
             ->first();
+        if ($oq !== null) {
+            $found[] = ['name' => $oq->displayFilename(), 'disk' => $oq->attachment->disk ?: 'local', 'path' => (string) $oq->attachment->file_path, 'at' => $oq->created_at ?? now()->subYears(10)];
+        }
+
+        $re = $invoice ? self::INVOICE_FILE_RE : self::QUOTE_FILE_RE;
+        $sent = MessengerMessage::query()
+            ->where('request_id', $request->id)->where('direction', 'out')->where('kind', 'manager')
+            ->latest('id')->limit(30)->get(['id', 'meta', 'created_at']);
+        foreach ($sent as $m) {
+            if (! empty(($m->meta ?? [])['send_failed'])) {
+                continue;
+            }
+            foreach (array_reverse((array) (($m->meta ?? [])['attachments'] ?? [])) as $att) {
+                $name = (string) ($att['name'] ?? '');
+                $pdf = ($att['mime'] ?? '') === 'application/pdf' || str_ends_with(mb_strtolower($name), '.pdf');
+                if ($pdf && ! empty($att['path']) && (int) ($att['size'] ?? 0) <= self::MAX_FILE_BYTES && preg_match($re, $name)) {
+                    $found[] = ['name' => $name, 'disk' => BotIntakeStore::DISK, 'path' => (string) $att['path'], 'at' => $m->created_at];
+                    break 2;
+                }
+            }
+        }
+
+        return collect($found)->sortByDesc(fn ($d) => $d['at']->getTimestamp())->first();
     }
 
     /** Отправить документ в чат; false — файла нет на диске или мессенджер не принял. */
-    public function sendDocument(\App\Models\MessengerChat $chat, OutboundQuote $doc, string $caption): bool
+    public function sendDocument(\App\Models\MessengerChat $chat, array $doc, string $caption): bool
     {
         $messenger = $this->messengers->for($chat->channel);
-        $bytes = $doc->attachment !== null ? $this->bytes($doc->attachment) : null;
+        try {
+            $disk = Storage::disk($doc['disk']);
+            $bytes = $disk->exists($doc['path']) ? $disk->get($doc['path']) : null;
+        } catch (\Throwable $e) {
+            Log::warning('BotRequestNotifier: document unreadable', ['path' => $doc['path'], 'error' => $e->getMessage()]);
+            $bytes = null;
+        }
         if ($messenger === null || $bytes === null) {
             return false;
         }
 
-        return $messenger->sendDocument((string) $chat->chat_id, $bytes, $doc->displayFilename(), $caption);
+        return $messenger->sendDocument((string) $chat->chat_id, $bytes, $doc['name'], $caption);
     }
 
     private function bytes(EmailAttachment $att): ?string

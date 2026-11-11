@@ -467,13 +467,32 @@ class BotConversationTest extends TestCase
     {
         [$chat, $ids] = $this->chatWithRequests();
         $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
-        $thread->shouldReceive('fromClient')->once()->withArgs(fn ($c, $r, $text) => $r->id === $ids['mail'] && $text === '🧾 Прошу выставить счёт по КП №373130.');
+        $thread->shouldReceive('fromClient')->once()->withArgs(fn ($c, $r, $text) => $r->id === $ids['mail'] && $text === '🧾 Прошу выставить счёт по «КП №373130».');
         $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
         $states = Mockery::mock(\App\Services\Request\RequestStateService::class);
         $states->shouldReceive('transitionTo')->once()->withArgs(fn ($r, $to) => $r->id === $ids['mail'] && $to === \App\Enums\RequestStatus::AwaitingInvoice);
         $this->app->instance(\App\Services\Request\RequestStateService::class, $states);
 
         $this->assertStringContainsString('счёт по заявке <b>M-2026-50010</b> пришлём', $this->send('', 'askinv:'.$ids['mail']));
+    }
+
+    /** MZ2026-00946: КП менеджер прислал файлом в чат бота, не письмом — его и шлём ещё раз. */
+    public function test_the_quote_the_manager_sent_in_the_chat_is_sent_again(): void
+    {
+        [$chat, $ids] = $this->chatWithRequests();
+        \Illuminate\Support\Facades\Storage::disk('local')->put('bot-thread/1/a_kp.pdf', '%PDF');
+        \Illuminate\Support\Facades\Storage::disk('local')->put('bot-thread/1/b_draw.pdf', '%PDF');
+        \App\Models\MessengerMessage::create(['messenger_chat_id' => $chat->id, 'request_id' => $ids['bot'], 'direction' => 'out', 'kind' => 'manager', 'text' => '',
+            'meta' => ['attachments' => [['path' => 'bot-thread/1/a_kp.pdf', 'name' => 'Предложение МЗ-373191 от 2026-11-10.pdf', 'mime' => 'application/pdf', 'size' => 4]]]]);
+        \App\Models\MessengerMessage::create(['messenger_chat_id' => $chat->id, 'request_id' => $ids['bot'], 'direction' => 'out', 'kind' => 'manager', 'text' => 'чертёж',
+            'meta' => ['attachments' => [['path' => 'bot-thread/1/b_draw.pdf', 'name' => 'Чертёж ролика.pdf', 'mime' => 'application/pdf', 'size' => 4]]]]);
+
+        $this->send('/requests');
+        $data = array_column(array_merge(...array_merge(...array_column($this->messenger->sent, 'buttons'))), 'data');
+        $this->assertContains('kp:'.$ids['bot'], $data);
+
+        $this->send('', 'kp:'.$ids['bot']);
+        $this->assertSame('Предложение МЗ-373191 от 2026-11-10.pdf', $this->messenger->documents[0]['filename'] ?? null);
     }
 
     public function test_writing_on_a_request_from_the_email_links_it_to_the_chat(): void

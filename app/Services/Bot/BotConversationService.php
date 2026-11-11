@@ -911,7 +911,7 @@ class BotConversationService
             'direction' => 'out',
             'kind' => 'bot',
             'text' => $caption,
-            'meta' => array_filter(['files' => $ok ? [$doc->displayFilename()] : null, 'send_failed' => $ok ? null : true]),
+            'meta' => array_filter(['files' => $ok ? [$doc['name']] : null, 'send_failed' => $ok ? null : true]),
         ]);
         if (! $ok) {
             $this->say($chat, 'Не получилось отправить файл. Попробуйте позже или напишите менеджеру.',
@@ -935,7 +935,8 @@ class BotConversationService
             return;
         }
         $doc = BotRequestNotifier::latestDocument($request, invoice: false);
-        $text = '🧾 Прошу выставить счёт'.($doc?->document_number ? ' по КП №'.$doc->document_number : '').'.';
+        // Название файла КП без расширения: «КП №373130 от 10.11.2026» или «Предложение МЗ-373130 от …».
+        $text = '🧾 Прошу выставить счёт'.($doc !== null ? ' по «'.preg_replace('/\.pdf$/iu', '', $doc['name']).'»' : '').'.';
         $this->thread->fromClient($chat, $request, $text);
         try {
             $this->states->transitionTo($request, \App\Enums\RequestStatus::AwaitingInvoice, null, [
