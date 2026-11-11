@@ -33,6 +33,9 @@ class BotConversationService
     /** Строк в черновике заявки. */
     public const DRAFT_MAX_LINES = 100;
 
+    /** Режим «Ответить» без сообщений клиента столько минут — разговор по заявке закончен. */
+    public const REPLY_IDLE_MINUTES = 30;
+
     /** Сколько символов непонятого события площадки хранить в журнале. */
     private const RAW_MAX_CHARS = 16000;
 
@@ -159,6 +162,18 @@ class BotConversationService
 
         $awaiting = (string) $chat->stateGet('awaiting', '');
 
+        // «Ответить» и полчаса тишины — разговор по заявке закончен, следующее сообщение уже не к ней
+        // (MZ2026-00881, 11.11.2026: режим держался до «Готово, в меню», артикул через час ушёл бы в заявку).
+        if ($awaiting === 'reply') {
+            if ((int) $chat->stateGet('reply_at', 0) < now()->subMinutes(self::REPLY_IDLE_MINUTES)->getTimestamp()) {
+                $chat->stateForget('awaiting', 'reply_request_id', 'reply_at');
+                $awaiting = '';
+            } else {
+                $chat->stateSet('reply_at', time());
+            }
+            $chat->save();
+        }
+
         // Кнопки анкеты в Telegram при «Отправить номер» — обычная клавиатура:
         // нажатие приходит текстом.
         if (in_array($awaiting, ['name', 'phone', 'inn', 'company'], true)) {
@@ -221,11 +236,11 @@ class BotConversationService
             return;
         }
 
-        // Идёт разговор с менеджером по заявке — ответ клиента ему же. Одни артикулы — запрос цены, не реплика:
-        // меню так и обещает («пришлите артикул — покажу цену»); дописать в заявку — кнопка «Ответить».
-        if ($text !== '' && ! str_starts_with($text, '/') && ! BotPriceService::onlySkus($text)
+        // Идёт разговор с менеджером по заявке — ответ клиента ему же. Одни артикулы — то ли дополнение
+        // к заявке, то ли запрос цены (меню обещает «пришлите артикул — покажу цену»): спрашиваем.
+        if ($text !== '' && ! str_starts_with($text, '/')
             && ($ongoing = $this->ongoingConversation($chat)) !== null) {
-            $this->passToManager($chat, $ongoing, $text);
+            BotPriceService::onlySkus($text) ? $this->askSkuIntent($chat, $ongoing, $text) : $this->passToManager($chat, $ongoing, $text);
 
             return;
         }
@@ -272,6 +287,7 @@ class BotConversationService
             'no_inn' => $this->askCompany($chat),
             'reply' => $this->startReply($chat, (int) $arg),
             'tomgr' => $this->savedTextToManager($chat, (int) $arg),
+            'skuprice' => $this->priceFromSavedText($chat),
             default => $this->menu($chat),
         };
     }
@@ -831,6 +847,7 @@ class BotConversationService
             return;
         }
         $chat->stateSet('reply_request_id', $request->id);
+        $chat->stateSet('reply_at', time());
         $this->setAwaiting($chat, 'reply');
         $this->say($chat, 'Пишите по заявке <b>'.e((string) $request->internal_code).'</b> — всё, что пришлёте (текст, фото, файлы), передадим менеджеру.',
             [[['text' => 'Готово, в меню', 'data' => 'menu']]]);
@@ -845,7 +862,35 @@ class BotConversationService
 
             return;
         }
+        if (BotPriceService::onlySkus($text)) {
+            $this->askSkuIntent($chat, $request, $text);
+
+            return;
+        }
         $this->passToManager($chat, $request, $text);
+    }
+
+    /**
+     * Артикулы посреди разговора по заявке: дописать их в заявку или показать цену — решает клиент.
+     * Текст ждёт ответа в last_text, как у «Куда отправить?» (кнопки tomgr и skuprice).
+     */
+    private function askSkuIntent(MessengerChat $chat, \App\Models\Request $request, string $text): void
+    {
+        $chat->stateSet('last_text', mb_substr($text, 0, 4000));
+        $chat->stateForget('pending_files');
+        $chat->save();
+        $this->say($chat, 'Это к заявке <b>'.e((string) $request->internal_code).'</b> или узнать цену?', [
+            [['text' => '💬 Дописать в '.$request->internal_code, 'data' => 'tomgr:'.$request->id]],
+            [['text' => '💰 Узнать цену', 'data' => 'skuprice']],
+        ]);
+    }
+
+    private function priceFromSavedText(MessengerChat $chat): void
+    {
+        $skus = BotPriceService::skusIn((string) $chat->stateGet('last_text', ''));
+        $chat->stateForget('last_text', 'pending_files');
+        $chat->save();
+        $skus !== [] ? $this->showPrices($chat, $skus) : $this->menu($chat);
     }
 
     private function savedTextToManager(MessengerChat $chat, int $requestId): void

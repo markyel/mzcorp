@@ -327,9 +327,9 @@ class BotConversationTest extends TestCase
         return [$chat, $rid];
     }
 
-    public function test_articles_during_a_conversation_show_the_price_not_the_manager(): void
+    public function test_articles_during_a_conversation_ask_whether_for_the_request_or_the_price(): void
     {
-        $this->chatInConversation();
+        [, $rid] = $this->chatInConversation();
         $prices = Mockery::mock(BotPriceService::class);
         $prices->shouldReceive('quote')->andReturn(['found' => true, 'sku' => 'M06258', 'name' => 'Ролик', 'price' => 1500.0, 'for_org' => null, 'stock' => 2.0, 'lead_days' => null, 'catalog_item_id' => 1]);
         $this->app->instance(BotPriceService::class, $prices);
@@ -339,8 +339,68 @@ class BotConversationTest extends TestCase
 
         $answer = $this->send('M06258');
 
+        $this->assertStringContainsString('Это к заявке <b>M-2026-50003</b> или узнать цену?', $answer);
         $this->assertStringNotContainsString('Передали менеджеру', $answer);
-        $this->assertStringContainsString('M06258', $answer);
+        $this->assertStringContainsString('Ролик', $this->send('', 'skuprice'));
+    }
+
+    public function test_articles_for_the_request_go_to_the_manager_on_the_button(): void
+    {
+        [, $rid] = $this->chatInConversation();
+        $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
+        $thread->shouldReceive('fromClient')->once()->withArgs(fn ($c, $r, $text) => $r->id === $rid && $text === 'M06258 2');
+        $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
+
+        $this->send('M06258 2');
+
+        $this->assertStringContainsString('Передали менеджеру', $this->send('', 'tomgr:'.$rid));
+    }
+
+    private function chatInReplyMode(int $minutesAgo): int
+    {
+        $chat = MessengerChat::create(['channel' => 'telegram', 'external_user_id' => '77', 'chat_id' => '77', 'email' => 'a@b.ru', 'email_verified_at' => now()]);
+        $rid = \Illuminate\Support\Facades\DB::table('requests')->insertGetId(['internal_code' => 'M-2026-50004', 'messenger_chat_id' => $chat->id, 'created_at' => now()]);
+        $chat->stateSet('awaiting', 'reply');
+        $chat->stateSet('reply_request_id', $rid);
+        $chat->stateSet('reply_at', now()->subMinutes($minutesAgo)->getTimestamp());
+        $chat->save();
+
+        return $rid;
+    }
+
+    public function test_articles_in_the_reply_mode_ask_too(): void
+    {
+        $this->chatInReplyMode(5);
+        $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
+        $thread->shouldNotReceive('fromClient');
+        $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
+
+        $this->assertStringContainsString('Это к заявке <b>M-2026-50004</b>', $this->send('M06258'));
+    }
+
+    public function test_the_reply_mode_ends_after_half_an_hour_of_silence(): void
+    {
+        $rid = $this->chatInReplyMode(BotConversationService::REPLY_IDLE_MINUTES + 1);
+        $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
+        $thread->shouldNotReceive('fromClient');
+        $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
+        \Illuminate\Support\Facades\DB::table('requests')->where('id', $rid)->update(['status' => 'closed_won', 'closed_at' => now()]);
+
+        $answer = $this->send('Нужен ещё ролик на Otis');
+
+        $this->assertStringNotContainsString('Передали менеджеру', $answer);
+        $this->assertSame('', (string) $this->chat()->stateGet('awaiting', ''));
+    }
+
+    public function test_the_reply_mode_keeps_going_while_the_client_writes(): void
+    {
+        $rid = $this->chatInReplyMode(20);
+        $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
+        $thread->shouldReceive('fromClient')->once()->withArgs(fn ($c, $r, $text) => $r->id === $rid);
+        $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
+
+        $this->assertStringContainsString('Передали менеджеру', $this->send('Нужен ещё ролик на Otis'));
+        $this->assertGreaterThan(now()->subMinute()->getTimestamp(), (int) $this->chat()->stateGet('reply_at', 0));
     }
 
     public function test_menu_ends_the_conversation_with_the_manager(): void
