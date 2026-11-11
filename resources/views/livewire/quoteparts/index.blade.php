@@ -111,14 +111,22 @@
             $rows = array_slice($this->candidates, 0, $perPage);
             $inPool = $this->poolByCatalogId;
             $picked = count(array_filter($selected));
+            $pickedNew = count(array_filter($selected, fn ($v, $cid) => $v && ! isset($inPool[$cid]), ARRAY_FILTER_USE_BOTH));
         @endphp
+        <livewire:quote-parts.price-request wire:key="qp-price-request" />
         <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
             <button type="button" wire:click="selectShown" class="btn btn-sm">Отметить показанные</button>
             @if($picked > 0)
                 <button type="button" wire:click="clearSelection" class="btn btn-sm">Снять отметки</button>
-                <button type="button" wire:click="transfer" wire:loading.attr="disabled" class="btn btn-sm btn-primary">
-                    Передать в QuoteParts: {{ $picked }}
-                </button>
+                @if($pickedNew > 0)
+                    <button type="button" wire:click="transfer" wire:loading.attr="disabled" class="btn btn-sm">
+                        Передать в QuoteParts: {{ $pickedNew }}
+                    </button>
+                @endif
+                @if(\App\Livewire\QuoteParts\PriceRequest::canSend())
+                    <button type="button" wire:click="requestPrices" class="btn btn-sm btn-primary"
+                            title="Запросить цены у поставщиков через QuoteParts; количество не обязательно">💬 Запросить цены: {{ $picked }}</button>
+                @endif
             @endif
             <span class="text-fg-4">Передаётся часть карточки (наименование, бренд, артикулы, категория, размеры, вес, фото) и закупки 1С. Цены продажи и остатки не уходят.</span>
         </div>
@@ -142,9 +150,8 @@
                             @php $poolRow = $inPool[$p['cid']] ?? null; @endphp
                             <tr wire:key="cand-{{ $p['cid'] }}" class="border-b border-border-subtle hover:bg-hover">
                                 <td class="px-3 py-2">
-                                    @if($poolRow === null)
-                                        <input type="checkbox" wire:model.live="selected.{{ $p['cid'] }}" class="w-4 h-4 accent-sky-600 cursor-pointer">
-                                    @endif
+                                    <input type="checkbox" wire:model.live="selected.{{ $p['cid'] }}" class="w-4 h-4 accent-sky-600 cursor-pointer">
+
                                 </td>
                                 <td class="px-3 py-2 mono whitespace-nowrap">{{ $p['sku'] }}</td>
                                 <td class="px-3 py-2 text-fg-2">
@@ -378,10 +385,15 @@
     @if($tab === 'pool')
         <livewire:quote-parts.pool-rules />
         @php $pickedPool = count(array_filter($selectedPool)); @endphp
+        <livewire:quote-parts.price-request wire:key="qp-price-request" />
         <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
             <button type="button" wire:click="refreshStatuses" class="btn btn-sm">Обновить статусы</button>
             @if($pickedPool > 0)
                 <button type="button" wire:click="clearSelection" class="btn btn-sm">Снять отметки</button>
+                @if(\App\Livewire\QuoteParts\PriceRequest::canSend())
+                    <button type="button" wire:click="requestPrices" class="btn btn-sm btn-primary"
+                            title="Запросить цены у поставщиков через QuoteParts; количество не обязательно">💬 Запросить цены: {{ $pickedPool }}</button>
+                @endif
                 <button type="button" wire:click="remove" wire:confirm="Убрать отмеченные позиции из QuoteParts? История там сохранится." class="btn btn-sm">
                     Убрать из QuoteParts: {{ $pickedPool }}
                 </button>

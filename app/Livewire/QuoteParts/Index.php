@@ -455,12 +455,11 @@ class Index extends Component
         return app(QuotePartsClient::class)->isConfigured();
     }
 
+    /** Отметить показанные: и уже переданные в пул — по ним тоже запрашивают цены (11.11.2026). */
     public function selectShown(): void
     {
         foreach (array_slice($this->candidates, 0, $this->perPage) as $row) {
-            if (! isset($this->poolByCatalogId[$row['cid']])) {
-                $this->selected[$row['cid']] = true;
-            }
+            $this->selected[$row['cid']] = true;
         }
     }
 
@@ -468,6 +467,26 @@ class Index extends Component
     {
         $this->selected = [];
         $this->selectedPool = [];
+    }
+
+    /** Отмеченные позиции вкладки — в панель «Запрос цен» (PriceRequest). */
+    public function requestPrices(): void
+    {
+        $cids = $this->tab === 'pool'
+            ? QuotePartsPoolItem::query()->whereIn('id', array_map('intval', array_keys(array_filter($this->selectedPool))))
+                ->pluck('catalog_item_id')->map(fn ($v) => (int) $v)->all()
+            : array_map('intval', array_keys(array_filter($this->selected)));
+        if ($cids !== []) {
+            $this->dispatch('qp-price-request', cids: $cids)->to(PriceRequest::class);
+        }
+    }
+
+    #[\Livewire\Attributes\On('qp-price-request-sent')]
+    public function afterPriceRequest(): void
+    {
+        $this->selected = [];
+        $this->selectedPool = [];
+        unset($this->activity);
     }
 
     public function transfer(QuotePartsPoolService $pool): void
