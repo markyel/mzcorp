@@ -113,7 +113,6 @@
             $picked = count(array_filter($selected));
             $pickedNew = count(array_filter($selected, fn ($v, $cid) => $v && ! isset($inPool[$cid]), ARRAY_FILTER_USE_BOTH));
         @endphp
-        <livewire:quote-parts.price-request wire:key="qp-price-request" />
         <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
             <button type="button" wire:click="selectShown" class="btn btn-sm">Отметить показанные</button>
             @if($picked > 0)
@@ -385,7 +384,6 @@
     @if($tab === 'pool')
         <livewire:quote-parts.pool-rules />
         @php $pickedPool = count(array_filter($selectedPool)); @endphp
-        <livewire:quote-parts.price-request wire:key="qp-price-request" />
         <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
             <button type="button" wire:click="refreshStatuses" class="btn btn-sm">Обновить статусы</button>
             @if($pickedPool > 0)
@@ -477,5 +475,10 @@
                 </div>
             @endif
         </div>
+    @endif
+
+    {{-- Панель «Запрос поставщикам» (как в «Снабжении»): позиции — из «К актуализации» и «В QuoteParts». --}}
+    @if(\App\Livewire\QuoteParts\PriceRequest::canSend())
+        <livewire:quote-parts.price-request wire:key="qp-price-request" />
     @endif
 </div>

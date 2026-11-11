@@ -261,6 +261,33 @@ class QuotePartsRfqService
         return $norm($edited) === $norm((string) $catalogNameEn) ? null : 'Our wording: '.$edited;
     }
 
+    /**
+     * Артикул для поставщика, если он не тот, что в карточке QuoteParts (там brand_article), —
+     * системному поставщику примечанием к позиции: карточку под один запрос не поменять, а в
+     * письме платформы стоит артикул карточки. Совпадает с карточкой или стёрт — примечания нет.
+     *
+     * @param  \Illuminate\Support\Collection<int, CatalogItem>  $catalog
+     * @param  array<int|string, string>  $oem  catalog_item_id => артикул из поля «Артикул / OEM»
+     * @return array<string, string> «c:{catalog_item_id}» => примечание
+     */
+    public static function articleNotes(\Illuminate\Support\Collection $catalog, array $oem): array
+    {
+        $norm = fn (?string $s): string => mb_strtolower((string) preg_replace('/\s+/u', ' ', trim((string) $s)));
+        $notes = [];
+        foreach ($catalog as $ci) {
+            if (! array_key_exists($ci->id, $oem)) {
+                continue;
+            }
+            $edited = trim((string) $oem[$ci->id]);
+            $card = (string) $ci->brand_article;
+            if ($edited !== '' && ! in_array($norm($edited), [$norm($card), $norm(CatalogItem::externalArticle($card))], true)) {
+                $notes['c:'.$ci->id] = 'Part No.: '.$edited;
+            }
+        }
+
+        return $notes;
+    }
+
     private static function note(?string $note): ?string
     {
         $note = trim((string) $note);
