@@ -86,7 +86,28 @@ class BotConversationTest extends TestCase
             $t->unsignedBigInteger('assigned_user_id')->nullable();
             $t->string('client_name')->nullable();
             $t->string('client_email')->nullable();
+            $t->unsignedBigInteger('merged_into_id')->nullable();
             $t->timestamp('closed_at')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('email_attachments', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('email_message_id')->nullable();
+            $t->string('filename');
+            $t->string('mime_type')->nullable();
+            $t->unsignedBigInteger('size_bytes')->default(0);
+            $t->string('file_path');
+            $t->string('disk')->nullable();
+            $t->timestamps();
+        });
+        Schema::create('outbound_quotes', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('request_id');
+            $t->unsignedBigInteger('email_attachment_id')->nullable();
+            $t->string('document_type');
+            $t->string('document_number')->nullable();
+            $t->date('document_date')->nullable();
+            $t->string('status');
             $t->timestamps();
         });
 
@@ -390,6 +411,77 @@ class BotConversationTest extends TestCase
 
         $this->assertStringNotContainsString('Передали менеджеру', $answer);
         $this->assertSame('', (string) $this->chat()->stateGet('awaiting', ''));
+    }
+
+    /** «Мои заявки», 11.11.2026: открытые заявки чата и с подтверждённого e-mail, КП ещё раз, запрос счёта. */
+    private function chatWithRequests(): array
+    {
+        $chat = MessengerChat::create(['channel' => 'telegram', 'external_user_id' => '77', 'chat_id' => '77', 'email' => 'a@b.ru', 'email_verified_at' => now()]);
+        $db = \Illuminate\Support\Facades\DB::table('requests');
+        $ids = [
+            'bot' => $db->insertGetId(['internal_code' => 'MZ2026-00001', 'status' => 'assigned', 'messenger_chat_id' => $chat->id, 'created_at' => now()]),
+            'mail' => $db->insertGetId(['internal_code' => 'M-2026-50010', 'status' => 'quoted', 'client_email' => 'A@B.ru', 'created_at' => now()]),
+            'closed' => $db->insertGetId(['internal_code' => 'M-2026-50011', 'status' => 'closed_won', 'client_email' => 'a@b.ru', 'closed_at' => now(), 'created_at' => now()]),
+            'merged' => $db->insertGetId(['internal_code' => 'M-2026-50012', 'status' => 'assigned', 'client_email' => 'a@b.ru', 'merged_into_id' => 1, 'created_at' => now()]),
+            'foreign' => $db->insertGetId(['internal_code' => 'M-2026-50013', 'status' => 'quoted', 'client_email' => 'c@d.ru', 'created_at' => now()]),
+        ];
+        \Illuminate\Support\Facades\Storage::fake('local');
+        \Illuminate\Support\Facades\Storage::disk('local')->put('att/kp.pdf', '%PDF');
+        $att = \Illuminate\Support\Facades\DB::table('email_attachments')->insertGetId(['filename' => 'kp.pdf', 'mime_type' => 'application/pdf', 'size_bytes' => 4, 'file_path' => 'att/kp.pdf', 'disk' => 'local']);
+        \Illuminate\Support\Facades\DB::table('outbound_quotes')->insert(['request_id' => $ids['mail'], 'email_attachment_id' => $att, 'document_type' => 'outbound_quotation_full', 'document_number' => '373130', 'status' => 'matched']);
+
+        return [$chat, $ids];
+    }
+
+    public function test_my_requests_lists_open_ones_of_the_chat_and_of_the_email(): void
+    {
+        $this->chatWithRequests();
+
+        $answer = $this->send('/requests');
+
+        $this->assertStringContainsString('MZ2026-00001', $answer);
+        $this->assertStringContainsString('M-2026-50010', $answer);
+        $this->assertStringNotContainsString('M-2026-50011', $answer);
+        $this->assertStringNotContainsString('M-2026-50012', $answer);
+        $this->assertStringNotContainsString('M-2026-50013', $answer);
+        $data = array_column(array_merge(...array_merge(...array_column($this->messenger->sent, 'buttons'))), 'data');
+        $this->assertContains('kp:2', $data);
+        $this->assertContains('askinv:2', $data);
+        $this->assertNotContains('kp:1', $data);
+        $this->assertNotContains('askinv:1', $data);
+    }
+
+    public function test_the_quote_is_sent_again_and_a_foreign_one_is_not(): void
+    {
+        [, $ids] = $this->chatWithRequests();
+
+        $this->send('', 'kp:'.$ids['mail']);
+        $this->assertSame('КП №373130.pdf', $this->messenger->documents[0]['filename'] ?? null);
+
+        $this->messenger->documents = [];
+        $this->assertStringContainsString('Заявка не найдена', $this->send('', 'kp:'.$ids['foreign']));
+        $this->assertSame([], $this->messenger->documents);
+    }
+
+    public function test_asking_for_an_invoice_tells_the_manager_and_awaits_the_invoice(): void
+    {
+        [$chat, $ids] = $this->chatWithRequests();
+        $thread = Mockery::mock(\App\Services\Bot\BotThreadService::class);
+        $thread->shouldReceive('fromClient')->once()->withArgs(fn ($c, $r, $text) => $r->id === $ids['mail'] && $text === '🧾 Прошу выставить счёт по КП №373130.');
+        $this->app->instance(\App\Services\Bot\BotThreadService::class, $thread);
+        $states = Mockery::mock(\App\Services\Request\RequestStateService::class);
+        $states->shouldReceive('transitionTo')->once()->withArgs(fn ($r, $to) => $r->id === $ids['mail'] && $to === \App\Enums\RequestStatus::AwaitingInvoice);
+        $this->app->instance(\App\Services\Request\RequestStateService::class, $states);
+
+        $this->assertStringContainsString('счёт по заявке <b>M-2026-50010</b> пришлём', $this->send('', 'askinv:'.$ids['mail']));
+    }
+
+    public function test_writing_on_a_request_from_the_email_links_it_to_the_chat(): void
+    {
+        [$chat, $ids] = $this->chatWithRequests();
+        \App\Services\Bot\BotThreadService::adopt($chat, Request::query()->findOrFail($ids['mail']));
+
+        $this->assertSame($chat->id, (int) Request::query()->findOrFail($ids['mail'])->messenger_chat_id);
     }
 
     public function test_the_reply_mode_keeps_going_while_the_client_writes(): void

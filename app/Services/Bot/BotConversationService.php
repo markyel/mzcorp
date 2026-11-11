@@ -44,7 +44,7 @@ class BotConversationService
 
     private const MENU = [
         [['text' => '💰 Цена по артикулу', 'data' => 'price'], ['text' => '📝 Новая заявка', 'data' => 'req']],
-        [['text' => '👤 Мои данные', 'data' => 'profile']],
+        [['text' => '📋 Мои заявки', 'data' => 'list'], ['text' => '👤 Мои данные', 'data' => 'profile']],
     ];
 
     private ?BotMessenger $messenger = null;
@@ -58,6 +58,8 @@ class BotConversationService
         private readonly OrganizationLinkGuard $linkGuard,
         private readonly BotThreadService $thread,
         private readonly BotIntakeStore $store,
+        private readonly BotRequestNotifier $notifier,
+        private readonly \App\Services\Request\RequestStateService $states,
     ) {}
 
     public function handle(BotUpdate $u): void
@@ -249,6 +251,7 @@ class BotConversationService
             $lower === '/price' => $this->onButton($chat, 'price'),
             $lower === '/request' => $this->onButton($chat, 'req'),
             $lower === '/profile' => $this->onButton($chat, 'profile'),
+            $lower === '/requests' => $this->onButton($chat, 'list'),
             BotPriceService::skusIn($text) !== [] => $this->showPrices($chat, BotPriceService::skusIn($text)),
             $text !== '' && ! str_starts_with($text, '/') => $this->offerDraftFromText($chat, $text),
             default => $this->menu($chat),
@@ -288,6 +291,10 @@ class BotConversationService
             'reply' => $this->startReply($chat, (int) $arg),
             'tomgr' => $this->savedTextToManager($chat, (int) $arg),
             'skuprice' => $this->priceFromSavedText($chat),
+            'list' => $this->listRequests($chat),
+            'kp' => $this->resendDocument($chat, (int) $arg, invoice: false),
+            'inv' => $this->resendDocument($chat, (int) $arg, invoice: true),
+            'askinv' => $this->askInvoice($chat, (int) $arg),
             default => $this->menu($chat),
         };
     }
@@ -833,9 +840,115 @@ class BotConversationService
 
     /* ─────────────────────── Переписка по заявке ─────────────────────── */
 
+    /** Заявка этого клиента: из чата или с его подтверждённого e-mail (BotThreadService::clientRequests). */
     private function ownRequest(MessengerChat $chat, int $requestId): ?\App\Models\Request
     {
-        return \App\Models\Request::query()->where('id', $requestId)->where('messenger_chat_id', $chat->id)->first();
+        return BotThreadService::clientRequests($chat)->where('id', $requestId)->first();
+    }
+
+    /* ─────────────────────────── Мои заявки ─────────────────────────── */
+
+    /** Статусы, в которых клиенту предлагаем «Запросить счёт»: КП у него, счёта ещё нет. */
+    private const INVOICE_ASK_STATUSES = [
+        \App\Enums\RequestStatus::Quoted,
+        \App\Enums\RequestStatus::PartiallyQuoted,
+        \App\Enums\RequestStatus::UnderReview,
+    ];
+
+    /** Сколько открытых заявок показывать в «Моих заявках». */
+    private const LIST_LIMIT = 10;
+
+    /** Открытые заявки клиента — из бота и с его e-mail; каждая отдельным сообщением со своими кнопками. */
+    private function listRequests(MessengerChat $chat): void
+    {
+        $chat->stateForget('awaiting', 'flow');
+        $chat->save();
+        $open = BotThreadService::clientRequests($chat)
+            ->whereNull('closed_at')
+            ->whereNotIn('status', [\App\Enums\RequestStatus::ClosedWon->value, \App\Enums\RequestStatus::ClosedLost->value])
+            ->latest('id')
+            ->limit(self::LIST_LIMIT)
+            ->get(['id', 'internal_code', 'status', 'created_at']);
+        if ($open->isEmpty()) {
+            $this->say($chat, 'Открытых заявок нет.', self::MENU);
+
+            return;
+        }
+
+        $this->say($chat, $open->count() < self::LIST_LIMIT ? 'Ваши открытые заявки:' : 'Ваши открытые заявки, последние '.self::LIST_LIMIT.':');
+        foreach ($open as $r) {
+            $status = $r->status instanceof \App\Enums\RequestStatus ? $r->status : \App\Enums\RequestStatus::tryFrom((string) $r->status);
+            $row = [];
+            if (BotRequestNotifier::latestDocument($r, invoice: false) !== null) {
+                $row[] = ['text' => '📄 КП ещё раз', 'data' => 'kp:'.$r->id];
+            }
+            if (in_array($status, self::INVOICE_ASK_STATUSES, true)) {
+                $row[] = ['text' => '🧾 Запросить счёт', 'data' => 'askinv:'.$r->id];
+            } elseif (BotRequestNotifier::latestDocument($r, invoice: true) !== null) {
+                $row[] = ['text' => '🧾 Счёт ещё раз', 'data' => 'inv:'.$r->id];
+            }
+            $buttons = array_values(array_filter([$row, [['text' => '💬 Написать менеджеру', 'data' => 'reply:'.$r->id]]]));
+            $this->say($chat, '<b>'.e((string) $r->internal_code).'</b> от '.$r->created_at?->format('d.m.Y')
+                .' — '.e((string) $status?->label()), $buttons);
+        }
+    }
+
+    private function resendDocument(MessengerChat $chat, int $requestId, bool $invoice): void
+    {
+        $request = $this->ownRequest($chat, $requestId);
+        $doc = $request !== null ? BotRequestNotifier::latestDocument($request, $invoice) : null;
+        $what = $invoice ? 'Счёт' : 'КП';
+        if ($doc === null) {
+            $this->say($chat, $request === null ? 'Заявка не найдена.' : $what.' по этой заявке ещё не отправляли.', self::MENU);
+
+            return;
+        }
+        $caption = $what.' по заявке <b>'.e((string) $request->internal_code).'</b>';
+        $ok = $this->notifier->sendDocument($chat, $doc, $caption);
+        MessengerMessage::create([
+            'messenger_chat_id' => $chat->id,
+            'request_id' => $request->id,
+            'direction' => 'out',
+            'kind' => 'bot',
+            'text' => $caption,
+            'meta' => array_filter(['files' => $ok ? [$doc->displayFilename()] : null, 'send_failed' => $ok ? null : true]),
+        ]);
+        if (! $ok) {
+            $this->say($chat, 'Не получилось отправить файл. Попробуйте позже или напишите менеджеру.',
+                [[['text' => '💬 Написать менеджеру', 'data' => 'reply:'.$request->id]]]);
+        }
+    }
+
+    /**
+     * Клиент просит счёт по КП: заявка — «Согласован / ждёт счёт», менеджеру — сообщение в переписку
+     * с уведомлением. Реквизиты, если чего-то не хватает, менеджер спросит сам (заказчик, 11.11.2026).
+     */
+    private function askInvoice(MessengerChat $chat, int $requestId): void
+    {
+        $request = $this->ownRequest($chat, $requestId);
+        $status = $request?->status instanceof \App\Enums\RequestStatus ? $request->status : \App\Enums\RequestStatus::tryFrom((string) $request?->status);
+        if ($request === null || ! in_array($status, self::INVOICE_ASK_STATUSES, true)) {
+            $this->say($chat, $status === \App\Enums\RequestStatus::AwaitingInvoice
+                ? 'Счёт по этой заявке уже запрошен — менеджер пришлёт его.'
+                : 'По этой заявке счёт сейчас запросить нельзя — напишите менеджеру.', self::MENU);
+
+            return;
+        }
+        $doc = BotRequestNotifier::latestDocument($request, invoice: false);
+        $text = '🧾 Прошу выставить счёт'.($doc?->document_number ? ' по КП №'.$doc->document_number : '').'.';
+        $this->thread->fromClient($chat, $request, $text);
+        try {
+            $this->states->transitionTo($request, \App\Enums\RequestStatus::AwaitingInvoice, null, [
+                'event' => 'bot_invoice_request',
+                'comment' => 'Клиент запросил счёт в '.$chat->channel->label(),
+            ], systemTransition: true);
+        } catch (\Throwable $e) {
+            Log::warning('BotConversation: invoice request transition failed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
+        }
+        $chat->stateSet('active_request_id', $request->id);
+        $chat->save();
+        $this->say($chat, '✅ Передали менеджеру: счёт по заявке <b>'.e((string) $request->internal_code).'</b> пришлём на '
+            .e((string) ($request->client_email ?: $chat->email)).'.', self::MENU);
     }
 
     private function startReply(MessengerChat $chat, int $requestId): void

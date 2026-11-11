@@ -3,6 +3,7 @@
 namespace App\Services\Bot;
 
 use App\Enums\RequestActivityType;
+use App\Enums\RequestStatus;
 use App\Models\MessengerChat;
 use App\Models\MessengerMessage;
 use App\Models\Request;
@@ -35,18 +36,48 @@ class BotThreadService
     /** Открытые заявки клиента — по ним можно написать менеджеру. */
     public static function openRequests(MessengerChat $chat): \Illuminate\Support\Collection
     {
-        return Request::query()
-            ->where('messenger_chat_id', $chat->id)
+        return self::clientRequests($chat)
             ->whereNull('closed_at')
+            ->whereNotIn('status', [RequestStatus::ClosedWon->value, RequestStatus::ClosedLost->value])
             ->where('created_at', '>=', now()->subDays(90))
             ->latest('id')
             ->limit(5)
             ->get(['id', 'internal_code', 'assigned_user_id', 'client_name', 'status']);
     }
 
+    /**
+     * Заявки клиента бота: оформленные в этом чате и пришедшие письмом с его подтверждённого e-mail
+     * (11.11.2026, заказчик: «все заявки, привязанные к этой почте»). Слитые в другую — не его.
+     */
+    public static function clientRequests(MessengerChat $chat): \Illuminate\Database\Eloquent\Builder
+    {
+        $email = $chat->isVerified() ? mb_strtolower(trim((string) $chat->email)) : '';
+
+        return Request::query()
+            ->whereNull('merged_into_id')
+            ->where(function ($q) use ($chat, $email) {
+                $q->where('messenger_chat_id', $chat->id);
+                if ($email !== '') {
+                    $q->orWhereRaw('lower(client_email) = ?', [$email]);
+                }
+            });
+    }
+
+    /**
+     * Клиент пишет по заявке, пришедшей письмом, — она становится заявкой этого чата: переписка видна
+     * в карточке, менеджер отвечает в мессенджер, о ходе заявки клиенту пишет бот.
+     */
+    public static function adopt(MessengerChat $chat, Request $request): void
+    {
+        if ($request->messenger_chat_id === null) {
+            $request->forceFill(['messenger_chat_id' => $chat->id])->save();
+        }
+    }
+
     /** @param  list<array{path: string, name: string, mime: ?string, size: int}>  $files сохранённые файлы клиента */
     public function fromClient(MessengerChat $chat, Request $request, string $text, array $files = []): void
     {
+        self::adopt($chat, $request);
         MessengerMessage::create([
             'messenger_chat_id' => $chat->id,
             'request_id' => $request->id,

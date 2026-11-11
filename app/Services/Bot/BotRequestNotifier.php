@@ -2,10 +2,12 @@
 
 namespace App\Services\Bot;
 
+use App\Enums\DetectorType;
 use App\Enums\RequestStatus;
 use App\Models\EmailAttachment;
 use App\Models\EmailMessage;
 use App\Models\MessengerMessage;
+use App\Models\OutboundQuote;
 use App\Models\Request;
 use App\Models\RequestStateChange;
 use Illuminate\Support\Facades\Log;
@@ -112,6 +114,39 @@ class BotRequestNotifier
             ->orderBy('id')
             ->limit(self::MAX_FILES)
             ->get()->all();
+    }
+
+    /**
+     * Последний распознанный КП или счёт заявки — тот файл, что ушёл клиенту письмом; null — не было.
+     * «Прислать КП/счёт ещё раз» в «Моих заявках» бота.
+     */
+    public static function latestDocument(Request $request, bool $invoice): ?OutboundQuote
+    {
+        $types = $invoice
+            ? [DetectorType::OutboundInvoice->value]
+            : [DetectorType::OutboundQuotationFull->value, DetectorType::OutboundQuotationPartial->value];
+
+        return OutboundQuote::query()
+            ->with('attachment')
+            ->where('request_id', $request->id)
+            ->whereIn('document_type', $types)
+            ->whereIn('status', [OutboundQuote::STATUS_PARSED, OutboundQuote::STATUS_MATCHED])
+            ->whereNotNull('email_attachment_id')
+            ->whereHas('attachment', fn ($q) => $q->where('size_bytes', '<=', self::MAX_FILE_BYTES))
+            ->latest('id')
+            ->first();
+    }
+
+    /** Отправить документ в чат; false — файла нет на диске или мессенджер не принял. */
+    public function sendDocument(\App\Models\MessengerChat $chat, OutboundQuote $doc, string $caption): bool
+    {
+        $messenger = $this->messengers->for($chat->channel);
+        $bytes = $doc->attachment !== null ? $this->bytes($doc->attachment) : null;
+        if ($messenger === null || $bytes === null) {
+            return false;
+        }
+
+        return $messenger->sendDocument((string) $chat->chat_id, $bytes, $doc->displayFilename(), $caption);
     }
 
     private function bytes(EmailAttachment $att): ?string

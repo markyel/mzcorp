@@ -130,6 +130,7 @@ class TelegramBotMessenger implements BotMessenger
             ['command' => 'start', 'description' => 'Начать'],
             ['command' => 'price', 'description' => 'Узнать цену по артикулу'],
             ['command' => 'request', 'description' => 'Оформить заявку'],
+            ['command' => 'requests', 'description' => 'Мои заявки: КП, счёт'],
             ['command' => 'profile', 'description' => 'Мои данные'],
         ], JSON_UNESCAPED_UNICODE)]);
 
