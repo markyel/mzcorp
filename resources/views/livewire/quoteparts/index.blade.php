@@ -99,10 +99,11 @@
         </div></div>
     @endunless
 
-    {{-- Общий поиск раздела: на вкладках, где он что-то ищет (у «Актуализации цен» и «Групп товаров» — свой). --}}
-    @if(in_array($tab, ['candidates', 'pool', 'questions', 'suppliers'], true))
+    {{-- Общий поиск раздела: на вкладках, где он что-то ищет (у «Актуализации цен» и «Групп товаров» — свой).
+         У «К актуализации» и «В QuoteParts» — в строке над таблицей: ищет только по списку (заказчик, 11.11.2026). --}}
+    @if(in_array($tab, ['questions', 'suppliers'], true))
         <input type="search" wire:model.live.debounce.300ms="search"
-               placeholder="{{ match ($tab) { 'questions' => 'Поиск: артикул, позиция, поставщик, заявка, QP-…', 'suppliers' => 'Поиск: поставщик, e-mail, контакт', default => 'Поиск: артикул / наименование / бренд' } }}"
+               placeholder="{{ $tab === 'questions' ? 'Поиск: артикул, позиция, поставщик, заявка, QP-…' : 'Поиск: поставщик, e-mail, контакт' }}"
                class="h-[32px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
     @endif
 
@@ -117,6 +118,9 @@
             <livewire:quote-parts.catalog-picker wire:key="qp-catalog-picker" />
         @endif
         <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
+            <input type="search" wire:model.live.debounce.300ms="search" placeholder="Поиск в этом списке: артикул / наименование / бренд"
+                   title="Ищет только среди позиций «К актуализации». Любая позиция каталога — в карточке «Запросить расценку на позиции каталога» выше"
+                   class="h-[30px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
             <button type="button" wire:click="selectShown" class="btn btn-sm">Отметить показанные</button>
             @if($picked > 0)
                 <button type="button" wire:click="clearSelection" class="btn btn-sm">Снять отметки</button>
@@ -391,6 +395,9 @@
         @endif
         @php $pickedPool = count(array_filter($selectedPool)); @endphp
         <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
+            <input type="search" wire:model.live.debounce.300ms="search" placeholder="Поиск в этом списке: артикул / наименование / бренд"
+                   title="Ищет только среди позиций, переданных в QuoteParts. Любая позиция каталога — в карточке «Запросить расценку на позиции каталога» выше"
+                   class="h-[30px] w-full max-w-[340px] px-2.5 border border-border rounded-md bg-surface text-[13px] outline-none focus:border-sky-500">
             <button type="button" wire:click="refreshStatuses" class="btn btn-sm">Обновить статусы</button>
             @if($pickedPool > 0)
                 <button type="button" wire:click="clearSelection" class="btn btn-sm">Снять отметки</button>
