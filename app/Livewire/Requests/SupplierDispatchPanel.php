@@ -501,11 +501,14 @@ class SupplierDispatchPanel extends Component
             ->sortByDesc(fn ($m) => $m->sent_at?->getTimestamp() ?? 0)
             ->values()
             ->map(function ($m) use ($internal, $cleaner) {
-                $ours = $m->direction === \App\Enums\MailDirection::Outbound || $internal->detect($m) !== null;
+                // Копия ответа поставщика, пересланная QuoteParts с нашего ящика (orders@ / myzip@quoteparts.net),
+                // — письмо поставщика, не наше: «Eve.candice@evelevator.com через orders@» (M-2026-20764).
+                $qpCopyOf = self::quotePartsCopySender($m);
+                $ours = $qpCopyOf === null && ($m->direction === \App\Enums\MailDirection::Outbound || $internal->detect($m) !== null);
                 $to = (array) (($m->to_recipients ?? [])[0] ?? []);
-                $who = $ours
+                $who = $qpCopyOf ?? ($ours
                     ? trim((string) (($to['name'] ?? '') ?: ($to['email'] ?? '')))
-                    : trim((string) ($m->from_name ?: $m->from_email));
+                    : trim((string) ($m->from_name ?: $m->from_email)));
                 // Текстовая часть письма бывает обрубком («Hello?» вместо «How many meters you need?» —
                 // Jiefeng, запрос #7937): тогда текст из HTML, как в карточке запроса поставщику.
                 $body = trim((string) $m->body_plain);
@@ -528,6 +531,30 @@ class SupplierDispatchPanel extends Component
                 ];
             })
             ->all();
+    }
+
+    /**
+     * Поставщик, чей ответ QuoteParts переслал копией с нашего ящика: входящее письмо с ящика
+     * внесистемных (orders@) или платформы (myzip@quoteparts.net), в имени — «<поставщик> через <ящик>».
+     * Не копия — null.
+     */
+    public static function quotePartsCopySender(\App\Models\EmailMessage $m): ?string
+    {
+        if ($m->direction !== \App\Enums\MailDirection::Inbound) {
+            return null;
+        }
+        $relays = array_filter(array_map(fn ($v) => mb_strtolower(trim((string) $v)), [
+            config('services.quoteparts.offsystem_mailbox'), config('services.quoteparts.platform_mailbox'),
+        ]));
+        if (! in_array(mb_strtolower(trim((string) $m->from_email)), $relays, true)) {
+            return null;
+        }
+        // Имя бывает разорвано переносом заголовка: «… ч ерез orders@».
+        if (preg_match('/^(.+?)\s+ч\s?ерез\s+\S+\s*$/u', trim((string) $m->from_name), $mm) !== 1) {
+            return null;
+        }
+
+        return trim($mm[1], " \"'") ?: null;
     }
 
     /** Меньше — значок подписи (логотип, иконки соцсетей), а не фото детали. */
