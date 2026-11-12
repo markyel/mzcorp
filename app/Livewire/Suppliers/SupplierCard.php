@@ -77,6 +77,15 @@ class SupplierCard extends Component
 
     public string $newGroupName = '';
 
+    // Приглашение в QuoteParts: внесистемный станет системным, когда примет его в кабинете.
+    public bool $inviteOpen = false;
+
+    public string $inviteEmail = '';
+
+    public string $inviteLocale = 'en';
+
+    public string $inviteMessage = '';
+
     public function mount(SupplierOrganization $org): void
     {
         abort_unless(auth()->check(), 403);
@@ -331,6 +340,78 @@ class SupplierCard extends Component
         $show = ! (bool) (($this->org->qp_payload ?? [])['show_internal_code'] ?? false);
         $this->push(fn (QuotePartsClient $qp) => $qp->setShowInternalCode($this->org->qp_key, $show),
             $show ? 'Поставщик видит наш M-артикул в каждом запросе.' : 'M-артикул поставщику больше не показываем.');
+    }
+
+    /** Приглашают в QuoteParts директорат, РОП, снабжение и админ. */
+    public static function canInvite(): bool
+    {
+        return (bool) auth()->user()?->hasAnyRole([
+            \App\Enums\Role::Director->value, \App\Enums\Role::Admin->value,
+            \App\Enums\Role::HeadOfSales->value, \App\Enums\Role::Procurement->value,
+        ]);
+    }
+
+    public function openInvite(): void
+    {
+        $first = collect($this->contacts)->first(fn ($c) => in_array('quoting', $c['topics'], true)) ?? ($this->contacts[0] ?? null);
+        $this->inviteEmail = (string) ($first['email'] ?? '');
+        $this->inviteLocale = in_array($this->locale, ['ru', 'en', 'zh_CN'], true) ? $this->locale : 'en';
+        $this->inviteMessage = '';
+        $this->inviteOpen = true;
+    }
+
+    /**
+     * Пригласить в QuoteParts (12.11.2026): письмо-приглашение выбранному сотруднику, условия — из блока «Условия»,
+     * группы товаров и показ M-артикула — как сейчас у поставщика. Принял в кабинете — стал системным.
+     */
+    public function invite(\App\Services\QuoteParts\QuotePartsSupplierService $service): void
+    {
+        abort_unless(self::canInvite(), 403);
+        $this->validate([
+            'inviteEmail' => ['required', 'email', 'max:255'],
+            'inviteLocale' => ['required', 'in:en,zh_CN,ru'],
+            'inviteMessage' => ['nullable', 'string', 'max:2000'],
+        ], [], ['inviteEmail' => 'кому', 'inviteLocale' => 'язык', 'inviteMessage' => 'сообщение']);
+
+        $supplier = Supplier::query()->where('supplier_organization_id', $this->org->id)
+            ->whereRaw('lower(email) = ?', [mb_strtolower(trim($this->inviteEmail))])->first();
+        if ($supplier === null) {
+            $this->addError('inviteEmail', 'Этого адреса нет в контактах поставщика — добавьте его и сохраните контакты.');
+
+            return;
+        }
+        $contact = collect($this->contacts)->first(fn ($c) => mb_strtolower($c['email']) === mb_strtolower($supplier->email));
+        try {
+            $service->invite($supplier, [
+                'company_name' => trim($this->companyName) ?: (string) $this->org->name,
+                'contact_name' => ($contact['name'] ?? '') ?: null,
+                'email' => (string) $supplier->email,
+                'locale' => $this->inviteLocale,
+                'country' => strlen(trim($this->country)) === 2 ? strtoupper(trim($this->country)) : null,
+                'incoterm' => in_array($this->incoterm, self::INCOTERMS, true) ? $this->incoterm : null,
+                'incoterm_place' => trim($this->incotermPlace) ?: null,
+                'currency' => strlen(trim($this->currency)) === 3 ? strtoupper(trim($this->currency)) : null,
+                'payment_terms' => trim($this->paymentTerms) ?: null,
+                'packaging_included' => $this->packaging ?: null,
+                'offer_validity_days' => (int) $this->validityDays > 0 ? (int) $this->validityDays : null,
+                'message' => trim($this->inviteMessage) ?: null,
+                'show_internal_code' => (bool) (($this->org->qp_payload ?? [])['show_internal_code'] ?? false),
+                'groups' => $supplier->quoteparts_groups,
+            ]);
+            if (($link = $service->link($supplier)) !== null) {
+                app(SupplierMirrorService::class)->apply($link);
+            }
+        } catch (Throwable $e) {
+            $this->dispatch('toast', message: 'QuoteParts: '.mb_substr($e->getMessage(), 0, 300), type: 'error');
+
+            return;
+        }
+        \Illuminate\Support\Facades\Log::info('Supplier invited to QuoteParts from the card', [
+            'organization_id' => $this->org->id, 'email' => $supplier->email, 'user_id' => auth()->id(),
+        ]);
+        $this->org->refresh();
+        $this->inviteOpen = false;
+        $this->dispatch('toast', message: 'Приглашение отправлено: '.$supplier->email.'. Примет в кабинете — станет системным.', type: 'success');
     }
 
     public function rebuildMatrix(SupplierMatrixBuilder $builder): void

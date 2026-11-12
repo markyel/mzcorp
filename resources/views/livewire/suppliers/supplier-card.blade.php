@@ -27,10 +27,7 @@
         <span class="text-[12px] text-fg-3">{{ $routeHint }}{{ $statusLabel ? ' · '.$statusLabel : '' }}</span>
         @if($org->isArchived())<span class="chip chip-danger" title="Не виден в реестре и не предлагается в запросах цен">в архиве</span>@endif
         @if($p['is_agent'] ?? false)<span class="chip chip-info">агент</span>@endif
-        <button type="button" wire:click="toggleAgent" class="btn btn-xs text-fg-3" title="Агент сам ищет поставщиков для нас: в его ценах — реальный поставщик">{{ ($p['is_agent'] ?? false) ? 'не агент' : 'это агент' }}</button>
         @if($p['show_internal_code'] ?? false)<span class="chip chip-info" title="M-артикул стоит перед названием позиции в каждом запросе цены">видит M-артикул</span>@endif
-        <button type="button" wire:click="toggleShowCode" class="btn btn-xs text-fg-3"
-                title="Всегда показывать наш M-артикул: системному — в кабинете и письмах QuoteParts, внесистемному — перед названием позиции в нашем письме. По умолчанию скрыт.">{{ ($p['show_internal_code'] ?? false) ? 'скрыть M-артикул' : 'показывать M-артикул' }}</button>
         @if($org->qp_synced_at)<span class="text-[12px] text-fg-4 ml-auto">сверено с QuoteParts {{ $org->qp_synced_at->format('d.m H:i') }}</span>@endif
     </div>
     @if($org->onec_name && $org->onec_name !== $org->name)
@@ -132,6 +129,66 @@
                 @error('currency')<div class="text-[12px] text-red-700">{{ $message }}</div>@enderror
                 @unless($this->termsLocked)
                     <button type="button" wire:click="saveTerms" class="btn btn-primary btn-sm" wire:loading.attr="disabled" wire:target="saveTerms">Сохранить условия</button>
+                @endunless
+
+                {{-- Как работаем: признаки связи в QuoteParts, действуют сразу. --}}
+                <div class="border-t border-border-subtle pt-3 mt-1 space-y-2">
+                    <div class="text-[11px] uppercase tracking-wider text-fg-3">Как работаем</div>
+                    <label class="flex items-start gap-2 cursor-pointer">
+                        <input type="checkbox" wire:click="toggleShowCode" @checked($p['show_internal_code'] ?? false) class="w-4 h-4 mt-0.5 accent-sky-600">
+                        <span><span class="font-medium text-fg-1">Всегда показывать наш M-артикул</span>
+                            <span class="block text-fg-3">Внесистемному — перед названием позиции в нашем письме, системному — в кабинете и письмах QuoteParts. По умолчанию скрыт.</span></span>
+                    </label>
+                    <label class="flex items-start gap-2 cursor-pointer">
+                        <input type="checkbox" wire:click="toggleAgent" @checked($p['is_agent'] ?? false) class="w-4 h-4 mt-0.5 accent-sky-600">
+                        <span><span class="font-medium text-fg-1">Агент — ищет поставщиков для нас</span>
+                            <span class="block text-fg-3">В каждой его цене — реальный поставщик, на позицию несколько цен. В 1С контрагент — агент, реальный поставщик — в комментарии.</span></span>
+                    </label>
+                </div>
+
+                {{-- Приглашение: внесистемный станет системным, когда примет его в кабинете. --}}
+                @unless($isSystem)
+                    <div class="border-t border-border-subtle pt-3 mt-1 space-y-2">
+                        <div class="text-[11px] uppercase tracking-wider text-fg-3">Стать системным</div>
+                        <div class="text-fg-3">
+                            @if($org->qp_status === 'invited')
+                                Приглашение отправлено — ждём, пока поставщик примет его в кабинете. Можно отправить ещё раз.
+                            @elseif($org->qp_status === 'terms_discussed')
+                                Поставщик предлагает другие условия@if(! empty($p['supplier_comment'])): «{{ $p['supplier_comment'] }}»@endif. Поправьте условия выше и пригласите ещё раз.
+                            @elseif($org->qp_status === 'declined')
+                                Поставщик отказался от платформы. Можно пригласить ещё раз.
+                            @else
+                                Сейчас запросы идут нашим письмом с {{ config('services.quoteparts.offsystem_mailbox') }}. Пригласите в QuoteParts: поставщик получит кабинет, примет условия — и станет системным, запросы и ответы пойдут через кабинет.
+                            @endif
+                        </div>
+                        @if(! \App\Livewire\Suppliers\SupplierCard::canInvite())
+                            <div class="text-fg-4">Пригласить могут директорат, РОП и снабжение.</div>
+                        @elseif(! $inviteOpen)
+                            <button type="button" wire:click="openInvite" class="btn btn-sm">{{ in_array($org->qp_status, ['invited', 'terms_discussed', 'declined'], true) ? 'Пригласить ещё раз' : 'Пригласить в QuoteParts' }}</button>
+                        @else
+                            <div class="grid grid-cols-3 gap-2">
+                                <label style="grid-column:span 2">Кому
+                                    <select wire:model="inviteEmail" class="{{ $in }}">
+                                        @foreach($contacts as $c)<option value="{{ $c['email'] }}">{{ $c['email'] }}{{ $c['name'] ? ' — '.$c['name'] : '' }}</option>@endforeach
+                                    </select>
+                                </label>
+                                <label>Язык кабинета
+                                    <select wire:model="inviteLocale" class="{{ $in }}">
+                                        <option value="ru">русский</option><option value="en">английский</option><option value="zh_CN">китайский</option>
+                                    </select>
+                                </label>
+                            </div>
+                            @error('inviteEmail')<div class="text-[12px] text-red-700">{{ $message }}</div>@enderror
+                            <label class="block">Сообщение поставщику (необязательно)
+                                <textarea wire:model="inviteMessage" rows="2" maxlength="2000" class="{{ $in }}" style="height:auto"></textarea>
+                            </label>
+                            <div class="text-fg-4">В приглашении — условия из полей выше (сохранять не обязательно), группы товаров и показ M-артикула — как сейчас.</div>
+                            <div class="flex gap-2">
+                                <button type="button" wire:click="invite" class="btn btn-primary btn-sm" wire:loading.attr="disabled" wire:target="invite">Отправить приглашение</button>
+                                <button type="button" wire:click="$set('inviteOpen', false)" class="btn btn-sm">Отмена</button>
+                            </div>
+                        @endif
+                    </div>
                 @endunless
             </div>
         </div>
