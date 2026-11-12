@@ -1451,10 +1451,12 @@ class SupplierDispatchPanel extends Component
             return 'QuoteParts не принял запрос ('.mb_substr($e->getMessage(), 0, 200).') — этим поставщикам не отправлено.';
         }
         if ($letters !== []) {
-            return 'Внесистемным через QuoteParts (письмо с orders@): запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' — ответы придут копией вам и в блок QuoteParts ниже.';
+            return 'Внесистемным через QuoteParts (письмо с orders@): запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' — ответы придут копией вам и в блок QuoteParts ниже.'
+                .\App\Services\QuoteParts\QuotePartsRfqService::skippedNote($rfq);
         }
 
-        return 'Через QuoteParts: запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' (приняли приглашение) — ответы в блоке QuoteParts ниже.';
+        return 'Через QuoteParts: запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' (приняли приглашение) — ответы в блоке QuoteParts ниже.'
+            .\App\Services\QuoteParts\QuotePartsRfqService::skippedNote($rfq);
     }
 
     /* ------------------------ Превью письма (модалка) --------------------- */

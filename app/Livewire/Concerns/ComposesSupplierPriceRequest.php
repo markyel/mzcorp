@@ -149,10 +149,10 @@ trait ComposesSupplierPriceRequest
             return 'QuoteParts не принял запрос ('.mb_substr($e->getMessage(), 0, 200).') — этим поставщикам не отправлено.';
         }
         if ($letters !== []) {
-            return 'Внесистемным через QuoteParts (письмо с orders@): запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' — ответы придут копией вам.';
+            return 'Внесистемным через QuoteParts (письмо с orders@): запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' — ответы придут копией вам.'.QuotePartsRfqService::skippedNote($rfq);
         }
 
-        return 'Через QuoteParts: запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' (приняли приглашение).';
+        return 'Через QuoteParts: запрос '.$rfq->tag.', поставщиков '.count($supplierIds).' (приняли приглашение).'.QuotePartsRfqService::skippedNote($rfq);
     }
 
     /** Правки письма: названия/кол-во по языкам, артикул, обращение, вступление, заключение. */

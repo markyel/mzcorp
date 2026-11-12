@@ -21,6 +21,20 @@ use Throwable;
  */
 class QuotePartsRfqService
 {
+    /** @var list<string> файлы последнего запроса, не ушедшие поставщику (не прочитались или сверх лимита) */
+    private array $skippedFiles = [];
+
+    /** Хвост сообщения автору о файлах, не ушедших с запросом; всё ушло — пусто. */
+    public static function skippedNote(QuotePartsRfq $rfq): string
+    {
+        if ($rfq->skippedFiles === []) {
+            return '';
+        }
+
+        return ' ⚠ Не ушли файлы (не прочитались или не влезли в '.round((int) config('services.quoteparts.attachments_max_bytes', 15 * 1024 * 1024) / 1048576).' МБ на запрос): '
+            .implode(', ', array_slice($rfq->skippedFiles, 0, 10)).' — дошлите их ответом поставщику.';
+    }
+
     public function __construct(
         private readonly QuotePartsClient $client,
         private readonly QuotePartsPoolService $pool,
@@ -127,7 +141,7 @@ class QuotePartsRfqService
         }
         $result = $this->client->createRfq($payload);
 
-        return QuotePartsRfq::create([
+        return tap(QuotePartsRfq::create([
             'remote_id' => $result['id'],
             'tag' => $result['tag'] ?? null,
             'request_id' => $request?->id,
@@ -136,7 +150,7 @@ class QuotePartsRfqService
             'status' => 'open',
             'snapshot' => $result,
             'synced_at' => now(),
-        ]);
+        ]), fn (QuotePartsRfq $rfq) => $rfq->skippedFiles = $this->skippedFiles);
     }
 
     /**
@@ -163,23 +177,37 @@ class QuotePartsRfqService
     {
         $out = [];
         $total = 0;
+        $this->skippedFiles = [];
         $limit = (int) config('services.quoteparts.attachments_max_bytes', 15 * 1024 * 1024);
         foreach ($files as $f) {
+            $name = (string) ($f['name'] ?? 'file');
             try {
                 $bytes = \Illuminate\Support\Facades\Storage::disk($f['disk'] ?? 'local')->get((string) $f['path']);
             } catch (Throwable) {
                 $bytes = null;
             }
             if ($bytes === null || $bytes === '') {
+                $this->skippedFiles[] = $name;
+
                 continue;
             }
+            $mime = (string) ($f['mime'] ?? 'application/octet-stream');
+            // Фото с телефона (3–7 МБ) — ужатым до 2048 px JPEG: поставщику хватает, а в лимит запроса влезают все
+            // (12.11.2026: сверх 15 МБ фото молча отбрасывались — MZ2026-00935).
+            if (str_starts_with($mime, 'image/') && strlen($bytes) > \App\Services\AI\VisionImageDownscaler::MAX_BYTES
+                && ($jpeg = \App\Services\AI\VisionImageDownscaler::jpeg($bytes)) !== null) {
+                $bytes = $jpeg;
+                $mime = 'image/jpeg';
+                $name = preg_replace('/\.(png|webp|heic|heif|bmp|tiff?|jpe?g)$/i', '', $name).'.jpg';
+            }
             if ($total + strlen($bytes) > $limit) {
-                Log::warning('QuoteParts RFQ: attachment skipped over the size limit', ['file' => $f['name'] ?? null, 'size' => strlen($bytes)]);
+                Log::warning('QuoteParts RFQ: attachment skipped over the size limit', ['file' => $name, 'size' => strlen($bytes)]);
+                $this->skippedFiles[] = $name;
 
                 continue;
             }
             $total += strlen($bytes);
-            $out[] = ['name' => mb_substr((string) ($f['name'] ?? 'file'), 0, 200), 'mime' => (string) ($f['mime'] ?? 'application/octet-stream'), 'content' => base64_encode($bytes)];
+            $out[] = ['name' => mb_substr($name, 0, 200), 'mime' => $mime, 'content' => base64_encode($bytes)];
         }
 
         return $out;

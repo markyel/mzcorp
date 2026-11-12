@@ -47,10 +47,26 @@ class VisionImageDownscaler
             return self::raw($bytes, $mime);
         }
 
+        $jpeg = self::jpeg($bytes, $attachmentId);
+
+        return $jpeg !== null ? 'data:image/jpeg;base64,'.base64_encode($jpeg) : self::raw($bytes, $mime);
+    }
+
+    /**
+     * Фото, ужатое до MAX_EDGE по длинной стороне, в JPEG — для писем и запросов поставщикам (12.11.2026:
+     * QuoteParts отбрасывал фото с телефона сверх лимита запроса). Поворот снимка из EXIF учитывается — иначе
+     * фото с телефона легло бы набок. null — ужать не вышло или выигрыша нет: шлём оригинал.
+     */
+    public static function jpeg(string $bytes, ?int $attachmentId = null): ?string
+    {
+        if (! function_exists('imagecreatefromstring')) {
+            return null;
+        }
+
         // Гард от OOM: габариты читаем из заголовка (без полного декода).
         $dim = @getimagesizefromstring($bytes);
         if (is_array($dim) && isset($dim[0], $dim[1]) && ($dim[0] * $dim[1]) > self::MAX_PIXELS) {
-            return self::raw($bytes, $mime);
+            return null;
         }
 
         $src = null;
@@ -58,13 +74,14 @@ class VisionImageDownscaler
         try {
             $src = @imagecreatefromstring($bytes);
             if ($src === false) {
-                return self::raw($bytes, $mime);
+                return null;
             }
+            $src = self::upright($src, $bytes);
 
             $w = imagesx($src);
             $h = imagesy($src);
             if ($w < 1 || $h < 1) {
-                return self::raw($bytes, $mime);
+                return null;
             }
 
             $long = max($w, $h);
@@ -85,17 +102,17 @@ class VisionImageDownscaler
 
             // Если не выиграли в байтах — оставляем оригинал (редкий случай).
             if ($out === '' || strlen($out) >= strlen($bytes)) {
-                return self::raw($bytes, $mime);
+                return null;
             }
 
-            return 'data:image/jpeg;base64,'.base64_encode($out);
+            return $out;
         } catch (\Throwable $e) {
             Log::warning('VisionImageDownscaler: downscale failed, using original', [
                 'attachment_id' => $attachmentId,
                 'error' => $e->getMessage(),
             ]);
 
-            return self::raw($bytes, $mime);
+            return null;
         } finally {
             if ($src instanceof \GdImage) {
                 imagedestroy($src);
@@ -104,6 +121,31 @@ class VisionImageDownscaler
                 imagedestroy($canvas);
             }
         }
+    }
+
+    /** Повернуть кадр по EXIF Orientation (3 — 180°, 6 — 90° по часовой, 8 — 90° против); без EXIF — как есть. */
+    private static function upright(\GdImage $img, string $bytes): \GdImage
+    {
+        if (! function_exists('exif_read_data') || ! str_starts_with($bytes, "\xFF\xD8")) {
+            return $img;
+        }
+        $exif = @exif_read_data('data://image/jpeg;base64,'.base64_encode($bytes));
+        $angle = match ((int) ($exif['Orientation'] ?? 1)) {
+            3 => 180,
+            6 => -90,
+            8 => 90,
+            default => 0,
+        };
+        if ($angle === 0) {
+            return $img;
+        }
+        $rotated = imagerotate($img, $angle, 0);
+        if ($rotated === false) {
+            return $img;
+        }
+        imagedestroy($img);
+
+        return $rotated;
     }
 
     private static function raw(string $bytes, string $mime): string

@@ -13,6 +13,9 @@ class QuotePartsRfq extends Model
 {
     protected $table = 'quoteparts_rfqs';
 
+    /** @var list<string> файлы, не ушедшие с запросом (QuotePartsRfqService::send) — не в базе, для сообщения автору */
+    public array $skippedFiles = [];
+
     protected $fillable = [
         'remote_id',
         'tag',
