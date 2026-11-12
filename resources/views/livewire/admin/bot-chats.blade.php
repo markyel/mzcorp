@@ -156,8 +156,8 @@
                         <div class="text-[12.5px]" style="color: var(--emerald-700)">
                             ● Чат ведёт {{ $s->takenBy?->name ?? 'сотрудник' }} с {{ $s->taken_at?->format('H:i') }} — бот молчит
                             @if((int) $s->taken_by_user_id === (int) auth()->id())<span class="text-fg-3">· переписка — в окне живого чата</span>@endif
-                            <button type="button" wire:click="releaseChat" wire:confirm="Вернуть чат боту? Клиенту придёт, что разговор с менеджером завершён."
-                                    class="btn btn-xs" style="margin-left: 8px">Вернуть боту</button>
+                            <button type="button" wire:click="releaseChat" class="btn btn-xs" style="margin-left: 8px"
+                                    title="Клиенту придёт, что разговор с менеджером завершён; дальше отвечает бот">Вернуть боту</button>
                         </div>
                     @elseif(! $s->blocked_at)
                         <textarea wire:model="text" rows="2" maxlength="{{ \App\Services\Bot\BotLiveChatService::MAX_TEXT }}" placeholder="Сообщение клиенту от имени бота…"

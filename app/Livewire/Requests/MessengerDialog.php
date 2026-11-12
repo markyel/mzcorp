@@ -56,6 +56,21 @@ class MessengerDialog extends Component
         unset($this->messages);
     }
 
+    /** Кнопка «Написать в Telegram/MAX» в карточке (12.11.2026): сразу живой чат — бот замолкает. */
+    #[On('take-messenger-live')]
+    public function takeFromCard(?int $requestId = null): void
+    {
+        if ($requestId !== null && $requestId !== $this->requestId) {
+            return;
+        }
+        if (! $this->canWrite()) {
+            $this->show($requestId);
+
+            return;
+        }
+        $this->takeLive();
+    }
+
     public function close(): void
     {
         $this->open = false;
@@ -131,7 +146,10 @@ class MessengerDialog extends Component
         }
         $res = app(\App\Services\Bot\BotLiveChatService::class)->take($chat, auth()->user(), $this->request);
         if (! $res['ok']) {
+            // Взять нельзя (ведёт коллега, клиент отключил бота) — окно переписки с причиной: написать можно и так.
+            $this->open = true;
             $this->error = $res['message'];
+            unset($this->messages, $this->presence);
 
             return;
         }

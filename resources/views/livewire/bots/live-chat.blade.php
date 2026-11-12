@@ -71,8 +71,8 @@
                 </div>
                 <button type="button" @pointerdown.stop x-on:click="min = !min; persist()" style="padding: 2px 7px; line-height: 1; font-size: 13px; color: var(--fg-3);"
                         :title="min ? 'Развернуть окно' : 'Свернуть в строку'"><span x-show="!min">▁</span><span x-show="min" x-cloak>▢</span></button>
-                <button type="button" @pointerdown.stop wire:click="release" wire:confirm="Вернуть чат боту? Клиенту придёт, что разговор с менеджером завершён."
-                        class="btn btn-xs" title="Закончить разговор — дальше отвечает бот">Вернуть боту</button>
+                <button type="button" @pointerdown.stop wire:click="release"
+                        class="btn btn-xs" title="Закончить разговор: клиенту придёт, что разговор завершён, дальше отвечает бот">Вернуть боту</button>
             </div>
 
             {{-- Лента: последние сообщения чата; новые подтягиваются сами. --}}

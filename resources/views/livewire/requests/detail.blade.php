@@ -1328,9 +1328,10 @@
                 <div class="flex gap-1.5">
                     @if($req->messenger_chat_id)
                         {{-- Заявка из бота: клиент пришёл из мессенджера — пишем ему там же. --}}
+                        {{-- Сразу живой чат: бот замолкает, окно поверх сайта (BotLiveChatService); история и файлы — «💬 Открыть окно переписки». --}}
                         <button type="button" class="btn btn-primary flex-1"
-                                wire:click="$dispatch('open-messenger', { requestId: {{ $req->id }} })"
-                                title="Окно переписки с клиентом в {{ \App\Enums\MessengerChannel::tryFrom((string) $req->source)?->label() }}">
+                                wire:click="$dispatch('take-messenger-live', { requestId: {{ $req->id }} })"
+                                title="Живой чат с клиентом в {{ \App\Enums\MessengerChannel::tryFrom((string) $req->source)?->label() }}: бот молчит, пока вы ведёте разговор">
                             💬 Написать в {{ \App\Enums\MessengerChannel::tryFrom((string) $req->source)?->label() ?? 'мессенджер' }}</button>
                     @endif
                     @if($canReply)
