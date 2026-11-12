@@ -274,6 +274,17 @@ class QuotePartsClient
         return $response->json();
     }
 
+    /** Показывать поставщику наш внутренний код позиции (M-артикул): кабинет, письма платформы, шаблоны прайсов. */
+    public function setShowInternalCode(string $key, bool $show): array
+    {
+        $response = $this->http()->put('/api/v1/supplier-links/'.rawurlencode($key).'/internal-code', ['show' => $show]);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts internal code: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
     /**
      * Какие группы товаров (cn / ru / eu) поставщик видит в кабинете; null — все.
      *

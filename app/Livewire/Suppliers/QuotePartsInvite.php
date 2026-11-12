@@ -65,6 +65,7 @@ class QuotePartsInvite extends Component
         $this->email = (string) $supplier->email;
         // Язык кабинета — как язык переписки с поставщиком: русский для своих, английский для остальных.
         $this->locale = $supplier->language === 'ru' ? 'ru' : 'en';
+        $this->show_internal_code = (bool) $supplier->quoteparts_show_code;
         // Видит то, что закупаем в его регионе (по «Закупкам 1С»); уже настроенное — как есть.
         $region = $supplier->quoteparts_groups === null ? app(\App\Services\Catalog\SupplyGroupService::class)->regionOf($supplier) : null;
         $this->groups = $supplier->quoteparts_groups ?? ($supplier->quoteparts_link_id === null && $region ? [$region] : []);
@@ -101,6 +102,23 @@ class QuotePartsInvite extends Component
             'supplier_id' => $this->supplier->id, 'agent' => $agent, 'user_id' => auth()->id(),
         ]);
         $this->dispatch('toast', type: 'success', message: $agent ? 'Агент: в каждой цене — реальный поставщик, на позицию несколько цен.' : 'Больше не агент: одна цена на позицию.');
+    }
+
+    /** Всегда показывать поставщику наш M-артикул: в письмах внесистемному, в кабинете и письмах QuoteParts системному. */
+    public function toggleShowCode(QuotePartsSupplierService $service): void
+    {
+        $show = ! $this->supplier->quoteparts_show_code;
+        try {
+            $service->setShowCode($this->supplier, $show);
+        } catch (Throwable $e) {
+            $this->error = mb_substr($e->getMessage(), 0, 400);
+
+            return;
+        }
+        \Illuminate\Support\Facades\Log::info('Supplier show-code flag changed', [
+            'supplier_id' => $this->supplier->id, 'show' => $show, 'user_id' => auth()->id(),
+        ]);
+        $this->dispatch('toast', type: 'success', message: $show ? 'Поставщик видит наш M-артикул в каждом запросе.' : 'M-артикул поставщику больше не показываем.');
     }
 
     public function saveGroups(QuotePartsSupplierService $service): void

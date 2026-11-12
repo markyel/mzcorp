@@ -116,6 +116,7 @@ class SupplierMirrorService
                         'quoteparts_status' => $link['status'] ?? $row->quoteparts_status,
                         'quoteparts_comment' => $link['supplier_comment'] ?? null,
                         'quoteparts_agent' => (bool) ($link['is_agent'] ?? false),
+                        'quoteparts_show_code' => (bool) ($link['show_internal_code'] ?? false),
                         'quoteparts_groups' => $link['visible_groups'] ?? null,
                     ])->save();
                 }
@@ -125,6 +126,7 @@ class SupplierMirrorService
                     'quoteparts_link_id' => $link['id'] ?? null,
                     'quoteparts_status' => $link['status'] ?? null,
                     'quoteparts_agent' => (bool) ($link['is_agent'] ?? false),
+                    'quoteparts_show_code' => (bool) ($link['show_internal_code'] ?? false),
                 ]);
                 // Язык писем выбран нами — всем адресам организации (наши письма mzCorp — ru или en).
                 if (! empty($link['letter_locale'])) {

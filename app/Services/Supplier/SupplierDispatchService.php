@@ -234,6 +234,12 @@ class SupplierDispatchService
         }
         $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
         $rows = $this->itemRows($items, $lang, $edits);
+        // Поставщик с отметкой «всегда показывать M-артикул» — код сматченной позиции перед названием.
+        if ($supplier->quoteparts_show_code) {
+            foreach ($items->values() as $i => $it) {
+                $rows[$i]['name'] = \App\Models\CatalogItem::nameWithCode($rows[$i]['name'], $it->catalog_item_id ? $it->catalogItem?->sku : null);
+            }
+        }
         $greetingTpl = $lang === 'en' ? ($edits['greeting_en'] ?? null) : ($edits['greeting_ru'] ?? null);
         $personalGreeting = $this->personalGreeting($greetingTpl, $supplier, $lang);
         $intro = trim((string) ($lang === 'en' ? ($edits['intro_en'] ?? '') : ($edits['intro_ru'] ?? '')));

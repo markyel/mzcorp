@@ -184,8 +184,9 @@ class SupplierProcurementDispatchService
         $qty = $lang === 'en' ? ($edits['qty_en'] ?? []) : ($edits['qty'] ?? []);
         $greetingTpl = $lang === 'en' ? ($edits['greeting_en'] ?? null) : ($edits['greeting_ru'] ?? null);
 
+        $showCode = (bool) $supplier->quoteparts_show_code;
         $rows = $items->map(fn (CatalogItem $ci) => [
-            'name' => $this->itemName($ci, $names, $lang),
+            'name' => $showCode ? CatalogItem::nameWithCode($this->itemName($ci, $names, $lang), $ci->sku) : $this->itemName($ci, $names, $lang),
             'oem' => $this->itemOem($ci, $oem),
             'brand' => $ci->brand ?: null,
             'qty' => $this->itemQty($ci, $qty),

@@ -36,6 +36,19 @@
             </label>
         @endif
 
+        {{-- Наш M-артикул поставщику: внесистемному — в начале названия позиции в нашем письме, системному — в кабинете и письмах QuoteParts. --}}
+        @unless($open)
+            <label class="flex items-start gap-2 text-[12.5px] cursor-pointer">
+                <input type="checkbox" wire:click="toggleShowCode" @checked($supplier->quoteparts_show_code) class="w-4 h-4 mt-0.5 accent-sky-600">
+                <span>
+                    <span class="font-medium text-fg-1">Всегда показывать наш M-артикул</span>
+                    <span class="block text-fg-3">В каждом запросе цены M-артикул стоит перед названием позиции — для партнёров, которые знают наши коды.
+                        По умолчанию скрыт. Действует на всех сотрудников поставщика.</span>
+                </span>
+            </label>
+            @if($error)<div class="text-red-700 text-[12.5px]">{{ $error }}</div>@endif
+        @endunless
+
         {{-- Агент (UniSystem): ищет поставщиков для нас — в каждой цене реальный поставщик, на позицию несколько цен. --}}
         @if($supplier->quoteparts_link_id)
             <label class="flex items-start gap-2 text-[12.5px] cursor-pointer">

@@ -166,6 +166,9 @@ class QuotePartsSupplierService
             'quoteparts_comment' => $result['supplier_comment'] ?? null,
         ])->save();
         $this->rememberGroups($supplier, $form['groups'] ?? null);
+        Supplier::query()
+            ->when($supplier->supplier_organization_id, fn ($q, $org) => $q->where('supplier_organization_id', $org), fn ($q) => $q->whereKey($supplier->id))
+            ->update(['quoteparts_show_code' => (bool) ($result['show_internal_code'] ?? $form['show_internal_code'] ?? false)]);
 
         return $supplier;
     }
@@ -193,6 +196,21 @@ class QuotePartsSupplierService
             ->when($supplier->supplier_organization_id, fn ($q, $org) => $q->where('supplier_organization_id', $org), fn ($q) => $q->whereKey($supplier->id))
             ->update(['quoteparts_agent' => $agent]);
         $supplier->quoteparts_agent = $agent;
+    }
+
+    /**
+     * Всегда показывать поставщику наш M-артикул (12.11.2026). Признак — у связи в QuoteParts: системный видит код
+     * в кабинете и письмах платформы; копия — у всех адресов организации: внесистемному код ставит письмо mzCorp.
+     * Поставщика, ещё не заведённого в QuoteParts, заводим без приглашения.
+     */
+    public function setShowCode(Supplier $supplier, bool $show): void
+    {
+        $this->ensureRegistered($supplier);
+        $this->client->setShowInternalCode($supplier->quotepartsKey(), $show);
+        Supplier::query()
+            ->when($supplier->supplier_organization_id, fn ($q, $org) => $q->where('supplier_organization_id', $org), fn ($q) => $q->whereKey($supplier->id))
+            ->update(['quoteparts_show_code' => $show]);
+        $supplier->quoteparts_show_code = $show;
     }
 
     /** @param list<string>|null $groups */

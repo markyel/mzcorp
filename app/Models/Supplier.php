@@ -50,6 +50,8 @@ class Supplier extends Model
             'quoteparts_offsystem' => 'boolean',
             // Агент (UniSystem): ищет поставщиков для нас, в каждой его цене — реальный поставщик.
             'quoteparts_agent' => 'boolean',
+            // Показывать поставщику наш M-артикул (копия show_internal_code связи в QuoteParts).
+            'quoteparts_show_code' => 'boolean',
             // Темы контакта в QuoteParts: quoting, finance, logistics, claims, general.
             'contact_topics' => 'array',
         ];

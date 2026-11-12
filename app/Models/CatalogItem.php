@@ -182,6 +182,20 @@ class CatalogItem extends Model
     }
 
     /**
+     * Название позиции с нашим M-артикулом впереди — для поставщика с отметкой «всегда показывать M-артикул»
+     * (Supplier::quoteparts_show_code). Уже стоит (менеджер поставил кнопкой «+») — не дублируем.
+     */
+    public static function nameWithCode(string $name, ?string $sku): string
+    {
+        $sku = trim((string) $sku);
+        if ($sku === '' || preg_match('/^'.preg_quote($sku, '/').'(?![\p{L}\p{N}])/iu', trim($name)) === 1) {
+            return $name;
+        }
+
+        return trim($sku.' '.$name);
+    }
+
+    /**
      * Является ли значение нашим внутренним M-артикулом (нельзя слать наружу/
      * показывать как OEM): равно sku (нормализованно) или похоже на M-код
      * (латинское «M####» / кириллическое «МЗ-…»).
