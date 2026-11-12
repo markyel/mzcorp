@@ -141,10 +141,30 @@ class CatalogSupplierPriceImportService
         return $written;
     }
 
-    /** Реестр поставщиков: нормализованное название (полное и до скобки) → id. */
+    /**
+     * Реестр поставщиков: нормализованное название (полное и до скобки) → id. Сначала организации — по названию
+     * контрагента в 1С и по своему названию (адрес-представитель): после восстановления баз названия из 1С живут
+     * у организаций, а не у адресов (12.11.2026: по адресам сопоставлялось 1 786 цен из 37 803).
+     */
     private function supplierIndex(): array
     {
         $index = [];
+        $orgs = DB::table('supplier_organizations')->get(['id', 'name', 'onec_name']);
+        $reps = [];
+        foreach (['onec_name', 'name'] as $field) {
+            foreach ($orgs as $o) {
+                $name = trim((string) $o->{$field});
+                if ($name === '') {
+                    continue;
+                }
+                $rep = $reps[$o->id] ??= \App\Services\Supplier\SupplierMatchService::representativeId((int) $o->id) ?? 0;
+                if ($rep === 0) {
+                    continue;
+                }
+                $index[self::normalize($name)] ??= $rep;
+                $index[self::normalize(self::head($name))] ??= $rep;
+            }
+        }
         foreach (DB::table('suppliers')->whereNotNull('name')->where('name', '!=', '')->get(['id', 'name']) as $s) {
             $index[self::normalize($s->name)] ??= (int) $s->id;
             $index[self::normalize(self::head($s->name))] ??= (int) $s->id;
