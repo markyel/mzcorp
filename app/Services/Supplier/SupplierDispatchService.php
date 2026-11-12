@@ -312,6 +312,28 @@ class SupplierDispatchService
     }
 
     /**
+     * Позиции, как их спросили у поставщика (QuotePartsRfqService::send, asked): те же строки и тот же
+     * порядок, что в письме (composeLetter) — номер, название по-английски и по-русски, артикул, бренд.
+     * Ответ поставщика сверяется с этим, а не с карточкой каталога (12.11.2026, MZ2026-00125).
+     *
+     * @param  array<int, int>  $itemIds
+     * @return array<int, array{n:int, name:string, name_ru:string, part_number:?string, brand:?string, catalog_item_id:?int}> request_item_id => как спросили
+     */
+    public function askedRows(RequestModel $request, array $itemIds, array $edits = []): array
+    {
+        $items = $this->loadItems($request, $itemIds)->values();
+        $en = $this->itemRows($items, 'en', $edits);
+        $ru = $this->itemRows($items, 'ru', $edits);
+        $out = [];
+        foreach ($items as $i => $it) {
+            $out[(int) $it->id] = ['n' => $i + 1, 'name' => $en[$i]['name'], 'name_ru' => $ru[$i]['name'], 'part_number' => $en[$i]['oem'], 'brand' => $en[$i]['brand'],
+                'catalog_item_id' => $it->catalog_item_id !== null ? (int) $it->catalog_item_id : null];
+        }
+
+        return $out;
+    }
+
+    /**
      * Отображаемые данные позиции для письма: название берём из КАТАЛОГА, если
      * позиция сматчена (M-SKU), иначе формулировку клиента; OEM — артикул.
      *

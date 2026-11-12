@@ -95,6 +95,21 @@ trait ComposesSupplierPriceRequest
     }
 
     /**
+     * Позиции каталога в порядке запроса (как отмечены): письмо поставщику и запрос в QuoteParts — в одном порядке,
+     * иначе «1» в ответе поставщика указывает не на ту позицию (MZ2026-00125, 12.11.2026).
+     *
+     * @param  list<int>  $cids
+     * @return \Illuminate\Support\Collection<int, CatalogItem>
+     */
+    private function catalogInRequestOrder(array $cids): \Illuminate\Support\Collection
+    {
+        $pos = array_flip(array_values(array_map('intval', $cids)));
+
+        return CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article', 'articles'])
+            ->sortBy(fn (CatalogItem $ci) => $pos[(int) $ci->id] ?? PHP_INT_MAX)->values();
+    }
+
+    /**
      * Часть рассылки поставщикам, принявшим приглашение QuoteParts: один запрос через платформу.
      *
      * @param  list<int>  $cids
@@ -122,7 +137,12 @@ trait ComposesSupplierPriceRequest
             $notes = $letters === []
                 ? QuotePartsRfqService::articleNotes(CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'brand_article']), $this->editedOem)
                 : [];
-            $rfq = app(QuotePartsRfqService::class)->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), [], routed: true, files: $files, notes: $notes, letters: $letters, explicitSupplierIds: $explicit);
+            // Как спросили — те же строки и порядок, что в письме: ответ поставщика сверяется с ними (12.11.2026).
+            $asked = [];
+            foreach (app(SupplierProcurementDispatchService::class)->askedRows($this->catalogInRequestOrder($cids), $this->letterEdits()) as $cid => $row) {
+                $asked['c:'.$cid] = $row;
+            }
+            $rfq = app(QuotePartsRfqService::class)->send(null, $quantities, $supplierIds, $this->qpReplyBy ?: null, $this->note, auth()->user(), [], routed: true, files: $files, notes: $notes, letters: $letters, explicitSupplierIds: $explicit, asked: $asked);
         } catch (Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('QuoteParts RFQ refused', ['procurement' => true, 'offsystem' => $letters !== [], 'error' => $e->getMessage()]);
 
@@ -811,7 +831,7 @@ trait ComposesSupplierPriceRequest
         // Внесистемные — наше же письмо через QuoteParts (orders@). Не принял — не отправлено, человек видит
         // причину: письмо с ящика менеджера вместо этого три дня прятало сбой (ключи поставщиков, 06–09.11.2026).
         if ($route['offsystem'] !== []) {
-            $catalog = \App\Models\CatalogItem::query()->whereIn('id', $cids)->get(['id', 'sku', 'name', 'name_en', 'brand', 'brand_article', 'articles']);
+            $catalog = $this->catalogInRequestOrder($cids);
             $letters = [];
             foreach (\App\Models\Supplier::query()->whereIn('id', $route['offsystem'])->get() as $s) {
                 $letters[(int) $s->id] = $dispatcher->composeLetter($catalog, $s, $this->note, $edits);

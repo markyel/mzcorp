@@ -152,6 +152,30 @@ class SupplierProcurementDispatchService
      * @param  \Illuminate\Support\Collection<int, CatalogItem>  $items
      * @return array{lang: string, subject: string, html: string, plain: string}
      */
+    /**
+     * Позиции, как их спросили у поставщика (QuotePartsRfqService::send, asked): номер в письме (порядок
+     * $items — тот же, что у composeLetter), название по-английски и по-русски, артикул, бренд — по тем же
+     * правилам, что строки письма. Ответ поставщика сверяется с этим, а не с карточкой (12.11.2026).
+     *
+     * @param  \Illuminate\Support\Collection<int, CatalogItem>  $items
+     * @return array<int, array{n:int, name:string, name_ru:string, part_number:?string, brand:?string}> catalog_item_id => как спросили
+     */
+    public function askedRows(\Illuminate\Support\Collection $items, array $edits = []): array
+    {
+        $out = [];
+        foreach ($items->values() as $i => $ci) {
+            $out[(int) $ci->id] = [
+                'n' => $i + 1,
+                'name' => $this->itemName($ci, $edits['names_en'] ?? [], 'en'),
+                'name_ru' => $this->itemName($ci, $edits['names_ru'] ?? [], 'ru'),
+                'part_number' => $this->itemOem($ci, $edits['oem'] ?? []),
+                'brand' => $ci->brand ?: null,
+            ];
+        }
+
+        return $out;
+    }
+
     public function composeLetter(\Illuminate\Support\Collection $items, Supplier $supplier, ?string $note, array $edits = []): array
     {
         $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';

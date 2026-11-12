@@ -51,8 +51,12 @@ class QuotePartsRfqService
      *                                               QuoteParts (тема «Расценка»). null — все отмеченные адреса.
      * @param  array{ru?: array<int, string>, en?: array<int, string>}  $draftNames  название предварительных позиций
      *                                               в редакции менеджера (request_item_id => текст), QuotePartsDraftService::ensureDrafts
+     * @param  array<string, array{n?: int, name?: ?string, name_ru?: ?string, part_number?: ?string, brand?: ?string}>  $asked
+     *         позиция, как её спросили у поставщика («c:{catalog_item_id}» / «d:{request_item_id}»): формулировка, артикул,
+     *         бренд и номер в нашем письме. Ответ поставщика QuoteParts сверяет с этим, а не с карточкой каталога
+     *         (12.11.2026, MZ2026-00125); порядок ключей — порядок позиций в запросе, как в письме.
      */
-    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = [], array $letters = [], bool $automatic = false, ?array $explicitSupplierIds = null, array $draftNames = []): QuotePartsRfq
+    public function send(?RequestModel $request, array $quantities, array $supplierIds, ?string $replyBy, ?string $message, User $by, array $draftQuantities = [], bool $routed = false, array $files = [], array $notes = [], array $letters = [], bool $automatic = false, ?array $explicitSupplierIds = null, array $draftNames = [], array $asked = []): QuotePartsRfq
     {
         // routed — поставщики, принявшие приглашение, из обычной рассылки (QuotePartsRouting): у любого сотрудника.
         if ($routed ? ! QuotePartsRouting::enabled() : ! QuotePartsPilot::enabledFor($by)) {
@@ -80,14 +84,15 @@ class QuotePartsRfqService
                 throw new RuntimeException('Позиции не в работе в QuoteParts (на паузе или не переданы): '.$notReady->pluck('sku')->implode(', ').'.');
             }
             foreach ($catalog as $c) {
-                $items[] = ['code' => $c->sku, 'quantity' => $quantities[$c->id] !== null ? max(0.001, (float) $quantities[$c->id]) : null, 'note' => self::note($notes['c:'.$c->id] ?? null)];
+                $items['c:'.$c->id] = ['code' => $c->sku, 'quantity' => $quantities[$c->id] !== null ? max(0.001, (float) $quantities[$c->id]) : null, 'note' => self::note($notes['c:'.$c->id] ?? null)];
             }
         }
         if ($draftQuantities !== []) {
             foreach ($this->drafts->ensureDrafts(array_keys($draftQuantities), $draftNames) as $requestItemId => $code) {
-                $items[] = ['code' => $code, 'quantity' => max(0.001, (float) $draftQuantities[$requestItemId]), 'note' => self::note($notes['d:'.$requestItemId] ?? null)];
+                $items['d:'.$requestItemId] = ['code' => $code, 'quantity' => max(0.001, (float) $draftQuantities[$requestItemId]), 'note' => self::note($notes['d:'.$requestItemId] ?? null)];
             }
         }
+        $items = array_values(self::askedOrder($items, $asked));
 
         $payload = [
             'items' => $items,
@@ -293,6 +298,34 @@ class QuotePartsRfqService
         $note = trim((string) $note);
 
         return $note === '' ? null : mb_substr($note, 0, 500);
+    }
+
+    /**
+     * Позиции запроса в порядке нашего письма (ключи $asked) и с тем, как их спросили (items.*.asked).
+     * Позиции без «как спросили» — следом, в прежнем порядке.
+     *
+     * @param  array<string, array<string, mixed>>  $items  «c:{id}» / «d:{id}» => позиция запроса QuoteParts
+     * @param  array<string, array<string, mixed>>  $asked
+     * @return array<string, array<string, mixed>>
+     */
+    public static function askedOrder(array $items, array $asked): array
+    {
+        $out = [];
+        foreach ($asked as $key => $a) {
+            if (! isset($items[$key]) || isset($out[$key])) {
+                continue;
+            }
+            $clean = array_filter([
+                'n' => isset($a['n']) && (int) $a['n'] > 0 ? (int) $a['n'] : null,
+                'name' => trim((string) ($a['name'] ?? '')) ?: null,
+                'name_ru' => trim((string) ($a['name_ru'] ?? '')) ?: null,
+                'part_number' => trim((string) ($a['part_number'] ?? '')) ?: null,
+                'brand' => trim((string) ($a['brand'] ?? '')) ?: null,
+            ], fn ($v) => $v !== null);
+            $out[$key] = $items[$key] + ($clean !== [] ? ['asked' => $clean] : []);
+        }
+
+        return $out + $items;
     }
 
     /** Единицы длины из заявки — латиницей: примечание читает иностранный поставщик. */

@@ -1332,7 +1332,7 @@ class SupplierDispatchPanel extends Component
         foreach (\App\Models\EmailAttachment::query()->whereIn('id', $reqAttIds)->get() as $a) {
             $qpFiles[] = ['path' => (string) $a->file_path, 'disk' => (string) ($a->disk ?: 'local'), 'name' => (string) $a->filename, 'mime' => (string) ($a->mime_type ?: 'application/octet-stream')];
         }
-        $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($req, $itemIds, $route['quoteparts'], $user, $qpFiles) : null;
+        $qpMsg = $route['quoteparts'] !== [] ? $this->routeToQuoteParts($req, $itemIds, $route['quoteparts'], $user, $qpFiles, [], $edits) : null;
         // Внесистемные — наше же письмо через QuoteParts (orders@). Не принял — не отправлено, человек видит
         // причину: письмо с ящика менеджера вместо этого три дня прятало сбой (ключи поставщиков, 06–09.11.2026).
         if ($route['offsystem'] !== []) {
@@ -1340,7 +1340,7 @@ class SupplierDispatchPanel extends Component
             foreach (Supplier::query()->whereIn('id', $route['offsystem'])->get() as $s) {
                 $letters[(int) $s->id] = $dispatcher->composeLetter($req, $s, $itemIds, $this->note, $edits);
             }
-            $offMsg = $this->routeToQuoteParts($req, $itemIds, $route['offsystem'], $user, $qpFiles, $letters);
+            $offMsg = $this->routeToQuoteParts($req, $itemIds, $route['offsystem'], $user, $qpFiles, $letters, $edits);
             $qpMsg = trim(($qpMsg ?? '').' '.$offMsg);
         }
         } finally {
@@ -1404,12 +1404,17 @@ class SupplierDispatchPanel extends Component
      * @param  list<int>  $itemIds
      * @param  list<int>  $supplierIds
      */
-    private function routeToQuoteParts(RequestModel $req, array $itemIds, array $supplierIds, \App\Models\User $user, array $files = [], array $letters = []): string
+    private function routeToQuoteParts(RequestModel $req, array $itemIds, array $supplierIds, \App\Models\User $user, array $files = [], array $letters = [], array $edits = []): string
     {
         $quantities = [];
         $drafts = [];
         $notes = [];
         $draftNames = ['ru' => [], 'en' => []];
+        // Как спросили — те же строки и порядок, что в письме: ответ поставщика сверяется с ними (12.11.2026).
+        $asked = [];
+        foreach (app(SupplierDispatchService::class)->askedRows($req, $itemIds, $edits) as $requestItemId => $row) {
+            $asked[$row['catalog_item_id'] === null ? 'd:'.$requestItemId : 'c:'.$row['catalog_item_id']] ??= $row;
+        }
         $rows = RequestItem::query()->whereIn('id', $itemIds)->with('catalogItem:id,name,name_en')
             ->get(['id', 'catalog_item_id', 'parsed_qty', 'parsed_length', 'parsed_length_unit']);
         foreach ($rows as $it) {
@@ -1439,7 +1444,7 @@ class SupplierDispatchPanel extends Component
         }
         try {
             $rfq = app(\App\Services\QuoteParts\QuotePartsRfqService::class)->send($req, $quantities, $supplierIds, null, $this->note, $user, $drafts, routed: true, files: $files, notes: $notes, letters: $letters,
-                explicitSupplierIds: $this->explicitAddresses($supplierIds), draftNames: $draftNames);
+                explicitSupplierIds: $this->explicitAddresses($supplierIds), draftNames: $draftNames, asked: $asked);
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('QuoteParts RFQ refused', ['request_id' => $req->id, 'offsystem' => $letters !== [], 'error' => $e->getMessage()]);
 
