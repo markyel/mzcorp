@@ -68,16 +68,16 @@
                     $wn = count($weeks);
                     $bx = fn ($i) => $wn <= 1 ? $bL + ($BW - $bL - 12) / 2 : $bL + $i * ($BW - $bL - 12) / ($wn - 1);
                     $by = fn ($v) => $bT + ($BH - $bT - $bB) * (1 - $v / $maxN);
-                    $lines = ['down' => ['дешевле', 'var(--emerald-600, #059669)'], 'up' => ['дороже', 'var(--red-600, #dc2626)']];
+                    $lines = ['down' => ['цена ниже прошлой', 'var(--emerald-600, #059669)'], 'up' => ['цена выше прошлой', 'var(--red-600, #dc2626)']];
                     $totalDown = array_sum(array_column($weeks, 'down'));
                     $totalUp = array_sum(array_column($weeks, 'up'));
                 @endphp
                 <div style="display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px;">
-                    <div><span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--emerald-600, #059669); margin-right: 6px;"></span>дешевле прошлой цены: <b>{{ $totalDown }}</b></div>
-                    <div><span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--red-600, #dc2626); margin-right: 6px;"></span>дороже: <b>{{ $totalUp }}</b></div>
+                    <div><span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--emerald-600, #059669); margin-right: 6px;"></span>цена ниже прошлой: <b>{{ $totalDown }}</b></div>
+                    <div><span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--red-600, #dc2626); margin-right: 6px;"></span>цена выше прошлой: <b>{{ $totalUp }}</b></div>
                     <div style="color: var(--fg-3);">сколько выгруженных цен за неделю</div>
                 </div>
-                {{-- Две линии по неделям: зелёная — дешевле прошлой цены, красная — дороже. --}}
+                {{-- Две линии по неделям: зелёная — цена ниже прошлой, красная — выше. --}}
                 <svg viewBox="0 0 {{ $BW }} {{ $BH }}" style="width: 100%; max-width: {{ $BW }}px; height: auto;" xmlns="http://www.w3.org/2000/svg">
                     @foreach([0, (int) ceil($maxN / 2), $maxN] as $g)
                         <line x1="{{ $bL }}" x2="{{ $BW - 12 }}" y1="{{ $by($g) }}" y2="{{ $by($g) }}" stroke="var(--border-subtle, #e5e7eb)" />
@@ -96,7 +96,7 @@
                     @endforeach
                 </svg>
 
-                {{-- Тенденция: медиана изменения цены по неделям; ниже нуля — закупки дешевеют, выше — дорожают. --}}
+                {{-- Тенденция: медиана изменения цены по неделям; ниже нуля — цены закупки снижаются, выше — растут. --}}
                 @php
                     $mw = array_values(array_filter($weeks, fn ($w) => $w['n'] > 0));
                     $MW = 760; $MH = 150; $mL = 40; $mT = 12; $mB = 24;
@@ -107,7 +107,7 @@
                     $my = fn ($v) => $mT + ($MH - $mT - $mB) * (1 - ($v + $amp) / (2 * $amp));
                 @endphp
                 @if($mn > 0)
-                    <div class="text-[12.5px] text-fg-2" style="margin-top: 4px;">Тенденция: медиана изменения цены закупки по неделям <span class="text-fg-3">— ниже нуля закупки дешевеют, выше — дорожают</span></div>
+                    <div class="text-[12.5px] text-fg-2" style="margin-top: 4px;">Тенденция: медиана изменения цены закупки по неделям <span class="text-fg-3">— ниже нуля цены закупки снижаются, выше — растут</span></div>
                     <svg viewBox="0 0 {{ $MW }} {{ $MH }}" style="width: 100%; max-width: {{ $MW }}px; height: auto;" xmlns="http://www.w3.org/2000/svg">
                         <rect x="{{ $mL }}" y="{{ $mT }}" width="{{ $MW - $mL - 12 }}" height="{{ $my(0) - $mT }}" fill="rgba(220, 38, 38, 0.05)" />
                         <rect x="{{ $mL }}" y="{{ $my(0) }}" width="{{ $MW - $mL - 12 }}" height="{{ $MH - $mB - $my(0) }}" fill="rgba(5, 150, 105, 0.06)" />
@@ -128,8 +128,8 @@
 
                 <table style="width: 100%; max-width: 760px; font-size: 12.5px; border-collapse: collapse;">
                     <thead><tr style="color: var(--fg-3); text-align: right;">
-                        <th style="text-align: left; padding: 4px 6px;">Неделя</th><th style="padding: 4px 6px;">Сравнили</th><th style="padding: 4px 6px;">Дешевле</th>
-                        <th style="padding: 4px 6px;">Дороже</th><th style="padding: 4px 6px;">Так же</th><th style="padding: 4px 6px;">Медиана</th>
+                        <th style="text-align: left; padding: 4px 6px;">Неделя</th><th style="padding: 4px 6px;">Сравнили</th><th style="padding: 4px 6px;">Цена ниже</th>
+                        <th style="padding: 4px 6px;">Цена выше</th><th style="padding: 4px 6px;">Без изменений</th><th style="padding: 4px 6px;">Медиана</th>
                         <th style="padding: 4px 6px;" title="Сравнили с нашим прошлым решением, а не с закупкой 1С">Против нашей цены</th><th style="padding: 4px 6px;">Без прошлой цены</th></tr></thead>
                     <tbody>
                         @foreach(array_reverse($weeks) as $w)

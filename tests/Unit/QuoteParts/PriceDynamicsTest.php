@@ -58,7 +58,7 @@ class PriceDynamicsTest extends TestCase
         Livewire::test(Results::class)
             ->assertSee('16,0%')
             ->assertSee('5 010 из 31 320')
-            ->assertSee('дешевле прошлой цены')
+            ->assertSee('цена ниже прошлой')
             ->assertSee('-7,5%')
             ->assertSeeHtml('<polyline');
     }
