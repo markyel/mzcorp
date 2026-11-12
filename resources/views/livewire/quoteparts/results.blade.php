@@ -65,29 +65,34 @@
                 @php
                     $BW = 760; $BH = 200; $bL = 40; $bB = 34; $bT = 16;
                     $maxN = max(1, ...array_map(fn ($w) => max($w['up'], $w['down']), $weeks));
-                    $slot = ($BW - $bL - 12) / max(1, count($weeks));
-                    $bar = min(26, $slot / 3);
+                    $wn = count($weeks);
+                    $bx = fn ($i) => $wn <= 1 ? $bL + ($BW - $bL - 12) / 2 : $bL + $i * ($BW - $bL - 12) / ($wn - 1);
                     $by = fn ($v) => $bT + ($BH - $bT - $bB) * (1 - $v / $maxN);
+                    $lines = ['down' => ['дешевле', 'var(--emerald-600, #059669)'], 'up' => ['дороже', 'var(--red-600, #dc2626)']];
                     $totalDown = array_sum(array_column($weeks, 'down'));
                     $totalUp = array_sum(array_column($weeks, 'up'));
                 @endphp
                 <div style="display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px;">
                     <div><span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--emerald-600, #059669); margin-right: 6px;"></span>дешевле прошлой цены: <b>{{ $totalDown }}</b></div>
                     <div><span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--red-600, #dc2626); margin-right: 6px;"></span>дороже: <b>{{ $totalUp }}</b></div>
-                    <div style="color: var(--fg-3);">над столбцами — медиана изменения цены за неделю</div>
+                    <div style="color: var(--fg-3);">сколько выгруженных цен за неделю</div>
                 </div>
+                {{-- Две линии по неделям: зелёная — дешевле прошлой цены, красная — дороже. --}}
                 <svg viewBox="0 0 {{ $BW }} {{ $BH }}" style="width: 100%; max-width: {{ $BW }}px; height: auto;" xmlns="http://www.w3.org/2000/svg">
-                    <line x1="{{ $bL }}" x2="{{ $BW - 12 }}" y1="{{ $BH - $bB }}" y2="{{ $BH - $bB }}" stroke="var(--border, #d1d5db)" />
-                    <text x="{{ $bL - 6 }}" y="{{ $by($maxN) + 4 }}" text-anchor="end" font-size="11" fill="var(--fg-3, #6b7280)">{{ $maxN }}</text>
-                    @foreach($weeks as $i => $w)
-                        @php $cx = $bL + $slot * ($i + 0.5); @endphp
-                        <rect x="{{ $cx - $bar - 1 }}" y="{{ $by($w['down']) }}" width="{{ $bar }}" height="{{ max(0, $BH - $bB - $by($w['down'])) }}" fill="var(--emerald-600, #059669)"><title>дешевле: {{ $w['down'] }}</title></rect>
-                        <rect x="{{ $cx + 1 }}" y="{{ $by($w['up']) }}" width="{{ $bar }}" height="{{ max(0, $BH - $bB - $by($w['up'])) }}" fill="var(--red-600, #dc2626)"><title>дороже: {{ $w['up'] }}</title></rect>
-                        @if($w['n'] > 0)
-                            <text x="{{ $cx }}" y="{{ min($by($w['down']), $by($w['up'])) - 4 }}" text-anchor="middle" font-size="11" font-weight="600"
-                                  fill="{{ $w['median'] < 0 ? 'var(--emerald-700, #047857)' : ($w['median'] > 0 ? 'var(--red-700, #b91c1c)' : 'var(--fg-3, #6b7280)') }}">{{ $w['median'] > 0 ? '+' : '' }}{{ number_format($w['median'], 1, ',', '') }}%</text>
+                    @foreach([0, (int) ceil($maxN / 2), $maxN] as $g)
+                        <line x1="{{ $bL }}" x2="{{ $BW - 12 }}" y1="{{ $by($g) }}" y2="{{ $by($g) }}" stroke="var(--border-subtle, #e5e7eb)" />
+                        <text x="{{ $bL - 6 }}" y="{{ $by($g) + 4 }}" text-anchor="end" font-size="11" fill="var(--fg-3, #6b7280)">{{ $g }}</text>
+                    @endforeach
+                    @foreach($lines as $key => [$label, $color])
+                        @if($wn > 1)
+                            <polyline fill="none" stroke="{{ $color }}" stroke-width="2.5" points="{{ collect($weeks)->map(fn ($w, $i) => round($bx($i), 1).','.round($by($w[$key]), 1))->implode(' ') }}" />
                         @endif
-                        <text x="{{ $cx }}" y="{{ $BH - $bB + 16 }}" text-anchor="middle" font-size="11" fill="var(--fg-3, #6b7280)">{{ \Illuminate\Support\Carbon::parse($w['week'])->format('d.m') }}</text>
+                        @foreach($weeks as $i => $w)
+                            <circle cx="{{ $bx($i) }}" cy="{{ $by($w[$key]) }}" r="3.5" fill="{{ $color }}"><title>{{ $label }} · неделя с {{ \Illuminate\Support\Carbon::parse($w['week'])->format('d.m.Y') }}: {{ $w[$key] }}</title></circle>
+                        @endforeach
+                    @endforeach
+                    @foreach($weeks as $i => $w)
+                        <text x="{{ $bx($i) }}" y="{{ $BH - $bB + 16 }}" text-anchor="middle" font-size="11" fill="var(--fg-3, #6b7280)">{{ \Illuminate\Support\Carbon::parse($w['week'])->format('d.m') }}</text>
                     @endforeach
                 </svg>
 
