@@ -781,7 +781,7 @@ class PriceOffers extends Component
             ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))
             ->get()->pipe(fn (Collection $offers) => self::rowsOf($offers));
 
-        return $this->byAuthor($this->itemsFrom($rows)
+        return $this->byAuthor($this->itemsFrom($rows, $this->allDeclines->whereIn('sku', $closed->keys()->all()))
             ->filter(fn ($it) => $it['offers']->contains(fn ($r) => $r['created'] && $r['created']->gt($closed[$it['sku']]->closed_at)))
             ->values());
     }
@@ -837,7 +837,10 @@ class PriceOffers extends Component
             ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))
             ->get()->pipe(fn (Collection $offers) => self::rowsOf($offers));
 
-        return $this->byAuthor($this->itemsFrom($rows)->reject(fn ($it) => in_array($it['sku'], $shown, true))->values());
+        // С отказами, как в «Готово»: «ответили 2 из 3 · отказ 1» без строки отказа сбивало с толку (M23123).
+        $declines = $this->allDeclines->whereIn('sku', $closed->keys()->all());
+
+        return $this->byAuthor($this->itemsFrom($rows, $declines)->reject(fn ($it) => in_array($it['sku'], $shown, true))->values());
     }
 
     /** «Вернуть в работу»: позиция с завершённым сбором цен снова в «Готово» / «Ждём». */
