@@ -56,11 +56,11 @@
     </div>
 
     <div class="ds-card">
-        <div class="ds-card-header"><h3>Цены закупки: выбранная цена поставщика против прошлой закупки</h3>
-            <span class="text-[12px] text-fg-3 ml-2">«Закупаем здесь» против последней закупки позиции по истории цен 1С в той же валюте · по неделям выбора</span></div>
+        <div class="ds-card-header"><h3>Цены закупки: решение против прошлой цены позиции</h3>
+            <span class="text-[12px] text-fg-3 ml-2">цена «Закупаем здесь», выгруженная в 1С с завершением сбора цен, против последней известной цены в той же валюте: нашего прошлого решения или закупки по истории цен 1С — что новее · по неделям</span></div>
         <div class="ds-card-body" style="display: flex; flex-direction: column; gap: 10px;">
             @if($weeks === [])
-                <div class="text-[13px] text-fg-3">Выбранных цен пока нет.</div>
+                <div class="text-[13px] text-fg-3">Закупочных решений пока нет: они появляются при «Выгрузить и завершить сбор цен».</div>
             @else
                 @php
                     $BW = 760; $BH = 200; $bL = 40; $bB = 34; $bT = 16;
@@ -72,7 +72,7 @@
                     $totalUp = array_sum(array_column($weeks, 'up'));
                 @endphp
                 <div style="display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px;">
-                    <div><span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--emerald-600, #059669); margin-right: 6px;"></span>дешевле прошлой закупки: <b>{{ $totalDown }}</b></div>
+                    <div><span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--emerald-600, #059669); margin-right: 6px;"></span>дешевле прошлой цены: <b>{{ $totalDown }}</b></div>
                     <div><span style="display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--red-600, #dc2626); margin-right: 6px;"></span>дороже: <b>{{ $totalUp }}</b></div>
                     <div style="color: var(--fg-3);">над столбцами — медиана изменения цены за неделю</div>
                 </div>
@@ -93,7 +93,8 @@
                 <table style="width: 100%; max-width: 760px; font-size: 12.5px; border-collapse: collapse;">
                     <thead><tr style="color: var(--fg-3); text-align: right;">
                         <th style="text-align: left; padding: 4px 6px;">Неделя</th><th style="padding: 4px 6px;">Сравнили</th><th style="padding: 4px 6px;">Дешевле</th>
-                        <th style="padding: 4px 6px;">Дороже</th><th style="padding: 4px 6px;">Так же</th><th style="padding: 4px 6px;">Медиана</th><th style="padding: 4px 6px;">Без прошлой закупки</th></tr></thead>
+                        <th style="padding: 4px 6px;">Дороже</th><th style="padding: 4px 6px;">Так же</th><th style="padding: 4px 6px;">Медиана</th>
+                        <th style="padding: 4px 6px;" title="Сравнили с нашим прошлым решением, а не с закупкой 1С">Против нашей цены</th><th style="padding: 4px 6px;">Без прошлой цены</th></tr></thead>
                     <tbody>
                         @foreach(array_reverse($weeks) as $w)
                             <tr style="border-top: 1px solid var(--border-subtle); text-align: right;">
@@ -101,7 +102,8 @@
                                 <td style="padding: 4px 6px;">{{ $w['n'] }}</td><td style="padding: 4px 6px; color: var(--emerald-700, #047857);">{{ $w['down'] }}</td>
                                 <td style="padding: 4px 6px; color: var(--red-700, #b91c1c);">{{ $w['up'] }}</td><td style="padding: 4px 6px;">{{ $w['flat'] }}</td>
                                 <td style="padding: 4px 6px; font-weight: 600;">{{ $w['n'] ? ($w['median'] > 0 ? '+' : '').number_format($w['median'], 1, ',', '').'%' : '—' }}</td>
-                                <td style="padding: 4px 6px; color: var(--fg-3);" title="Другая валюта или закупок позиции в истории 1С нет">{{ $w['unmatched'] }}</td>
+                                <td style="padding: 4px 6px;">{{ $w['vs_own'] ?? 0 }}</td>
+                                <td style="padding: 4px 6px; color: var(--fg-3);" title="Другая валюта или прежних цен позиции нет">{{ $w['unmatched'] }}</td>
                             </tr>
                         @endforeach
                     </tbody>

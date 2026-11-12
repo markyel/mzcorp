@@ -159,12 +159,33 @@ class PriceActualizationService
                             'price' => $c->price !== null ? (float) $c->price : null, 'currency' => $c->currency,
                         ] : null,
                     ]);
+                    self::recordDecision((int) $p->catalog_item_id, (string) $p->sku, $c, $export, $by);
                 }
                 $p->save();
             }
         });
 
         return $export;
+    }
+
+    /**
+     * Закупочное решение (12.11.2026): цена «Закупаем здесь», выгруженная в 1С с завершением сбора цен, — в журнал.
+     * Следующая цена позиции сравнивается с ним («Результаты» раздела QuoteParts).
+     */
+    public static function recordDecision(int $catalogItemId, string $sku, ?object $choice, ?PriceExport $export, User $by): void
+    {
+        if ($choice === null || $choice->price === null || (float) $choice->price <= 0
+            || ! \Illuminate\Support\Facades\Schema::hasTable('price_purchase_decisions')) {
+            return;
+        }
+        DB::table('price_purchase_decisions')->insert([
+            'catalog_item_id' => $catalogItemId, 'sku' => $sku,
+            'supplier_key' => $choice->supplier_key, 'supplier_name' => $choice->supplier_name,
+            'price' => (float) $choice->price, 'currency' => $choice->currency,
+            'source' => $choice->source, 'offer_ref' => $choice->offer_ref !== null ? (int) $choice->offer_ref : null,
+            'price_export_id' => $export?->id, 'decided_by_user_id' => $by->id,
+            'decided_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+        ]);
     }
 
     /**
@@ -192,6 +213,10 @@ class PriceActualizationService
                         'price' => $c->price !== null ? (float) $c->price : null, 'currency' => $c->currency,
                     ] : null,
                 ] + ($export ? ['exported_at' => now(), 'price_export_id' => $export->id] : []));
+                // Завершили с выгрузкой в 1С — закупочное решение; без выгрузки цена в 1С не ушла.
+                if ($export !== null) {
+                    self::recordDecision((int) $cid, (string) $sku, $c, $export, $by);
+                }
             }
         });
 

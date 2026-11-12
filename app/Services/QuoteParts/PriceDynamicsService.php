@@ -60,39 +60,57 @@ class PriceDynamicsService
     }
 
     /**
-     * Куда идут цены закупки (решение заказчика 12.11.2026): выбранная цена поставщика («Закупаем здесь») против
-     * последней закупки этой позиции по выгрузке истории цен 1С — в той же валюте, закупка раньше выбора. Закупочная
-     * цена каталога не годится: в ней логистика и таможня. По неделям выбора: сколько дешевле прошлой закупки,
-     * сколько дороже, медиана изменения; выборы без сопоставимой закупки (другая валюта, закупок не было) — отдельно.
+     * Куда идут цены закупки (решение заказчика 12.11.2026). Событие — закупочное решение: цена «Закупаем здесь»,
+     * выгруженная в 1С с завершением сбора цен (price_purchase_decisions). Сравнение — с последней известной ценой
+     * позиции в той же валюте до решения: прошлым решением или закупкой по выгрузке истории цен 1С, что новее.
+     * Закупочная цена каталога не годится: в ней логистика и таможня. По неделям решения: сколько дешевле, сколько
+     * дороже, медиана изменения; решения без сопоставимой прошлой цены — отдельно.
      *
-     * @return list<array{week: string, n: int, up: int, down: int, flat: int, median: float, unmatched: int}>
+     * @return list<array{week: string, n: int, up: int, down: int, flat: int, median: float, unmatched: int, vs_own: int}>
      */
     public function purchaseTrend(int $weeks = 26): array
     {
-        $choices = DB::table('catalog_item_supplier_choices')->where('chosen_at', '>=', now()->subWeeks($weeks)->startOfWeek())
-            ->whereNotNull('price')->where('price', '>', 0)->get(['catalog_item_id', 'price', 'currency', 'chosen_at']);
-        if ($choices->isEmpty()) {
+        $since = now()->subWeeks($weeks)->startOfWeek();
+        $decisions = DB::table('price_purchase_decisions')->where('decided_at', '>=', $since)
+            ->get(['catalog_item_id', 'price', 'currency', 'decided_at']);
+        if ($decisions->isEmpty()) {
             return [];
         }
-        $purchases = DB::table('catalog_supplier_prices')->whereIn('catalog_item_id', $choices->pluck('catalog_item_id')->unique())
-            ->where('price', '>', 0)->whereNotNull('priced_at')->get(['catalog_item_id', 'price', 'currency', 'priced_at'])
-            ->groupBy('catalog_item_id');
+        $items = $decisions->pluck('catalog_item_id')->unique();
+        $earlier = DB::table('price_purchase_decisions')->whereIn('catalog_item_id', $items)
+            ->get(['catalog_item_id', 'price', 'currency', 'decided_at as at'])->map(fn ($r) => (object) ((array) $r + ['own' => true]));
+        $purchases = DB::table('catalog_supplier_prices')->whereIn('catalog_item_id', $items)->where('price', '>', 0)->whereNotNull('priced_at')
+            ->get(['catalog_item_id', 'price', 'currency', 'priced_at as at'])->map(fn ($r) => (object) ((array) $r + ['own' => false]));
 
-        return $choices->groupBy(fn ($c) => Carbon::parse($c->chosen_at)->startOfWeek()->toDateString())->sortKeys()
-            ->map(function ($group, $week) use ($purchases) {
+        return self::trend($decisions, $earlier->concat($purchases)->groupBy('catalog_item_id'));
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, object>  $decisions  catalog_item_id, price, currency, decided_at
+     * @param  \Illuminate\Support\Collection<int|string, \Illuminate\Support\Collection<int, object>>  $known  по позиции: прошлые цены (at, own)
+     * @return list<array{week: string, n: int, up: int, down: int, flat: int, median: float, unmatched: int, vs_own: int}>
+     */
+    public static function trend(\Illuminate\Support\Collection $decisions, \Illuminate\Support\Collection $known): array
+    {
+        return $decisions->groupBy(fn ($d) => Carbon::parse($d->decided_at)->startOfWeek()->toDateString())->sortKeys()
+            ->map(function ($group, $week) use ($known) {
                 $changes = [];
                 $unmatched = 0;
-                foreach ($group as $c) {
-                    $currency = self::currency($c->currency);
-                    $last = ($purchases[$c->catalog_item_id] ?? collect())
-                        ->filter(fn ($p) => self::currency($p->currency) === $currency && Carbon::parse($p->priced_at)->lt(Carbon::parse($c->chosen_at)))
-                        ->sortByDesc('priced_at')->first();
-                    if ($last === null) {
+                $vsOwn = 0;
+                foreach ($group as $d) {
+                    $at = Carbon::parse($d->decided_at);
+                    $currency = self::currency($d->currency);
+                    // Последняя известная цена до решения: прошлое решение или закупка 1С — что новее.
+                    $prev = ($known[$d->catalog_item_id] ?? collect())
+                        ->filter(fn ($p) => self::currency($p->currency) === $currency && (float) $p->price > 0 && Carbon::parse($p->at)->lt($at))
+                        ->sortByDesc(fn ($p) => Carbon::parse($p->at)->getTimestamp())->first();
+                    if ($prev === null) {
                         $unmatched++;
 
                         continue;
                     }
-                    $changes[] = (float) $c->price / (float) $last->price - 1;
+                    $vsOwn += $prev->own ? 1 : 0;
+                    $changes[] = (float) $d->price / (float) $prev->price - 1;
                 }
                 $changes = collect($changes);
 
@@ -104,6 +122,7 @@ class PriceDynamicsService
                     'flat' => $changes->filter(fn ($x) => abs($x) <= self::FLAT)->count(),
                     'median' => round(self::median($changes->all()) * 100, 1),
                     'unmatched' => $unmatched,
+                    'vs_own' => $vsOwn,
                 ];
             })->values()->all();
     }
