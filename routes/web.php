@@ -476,6 +476,11 @@ Route::middleware('auth')->group(function () {
         ->whereNumber(['offer', 'index'])
         ->name('quoteparts.offer-photo');
 
+    // Вложение письма, не привязанного QuoteParts к запросу (вкладка «Письма без запроса»).
+    Route::get('/dashboard/quoteparts/letters/{letter}/files/{index}', \App\Http\Controllers\QuoteParts\InboundLetterFileController::class)
+        ->whereNumber(['letter', 'index'])
+        ->name('quoteparts.letter-file');
+
     // Файл из переписки по запросу через QuoteParts (письмо поставщика, вопрос из кабинета).
     Route::get('/dashboard/quoteparts/rfqs/{rfq}/messages/{message}/files/{index}', \App\Http\Controllers\QuoteParts\RfqFileController::class)
         ->whereNumber(['rfq', 'message', 'index'])

@@ -48,6 +48,7 @@
                                 'quoteparts_ready' => '✅',
                                 'quoteparts_conversation' => '🗂',
                                 'quoteparts_price_list' => '📋',
+                                'quoteparts_letter' => '📭',
                                 default => '🔔',
                             };
                             $title = match($kind) {
@@ -64,6 +65,7 @@
                                 'quoteparts_question' => 'Поставщик спрашивает · ' . ($data['tag'] ?? 'QuoteParts') . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
                                 'quoteparts_ready' => 'Цены собраны, можно выбирать · ' . ($data['tag'] ?? 'QuoteParts') . (! empty($data['internal_code']) ? ' · ' . $data['internal_code'] : ''),
                                 'quoteparts_price_list' => 'Прайс поставщика' . (! empty($data['supplier']) ? ' · ' . $data['supplier'] : ''),
+                                'quoteparts_letter' => 'Письмо поставщика без запроса' . (! empty($data['from']) ? ' · ' . $data['from'] : ''),
                                 'quoteparts_conversation' => ($data['topic'] ?? '') === 'support' ? 'Письмо в поддержку QuoteParts: ' . ($data['subject'] ?? '') : (($data['started_by'] ?? '') === 'supplier' ? 'Поставщик написал: ' . ($data['subject'] ?? '') : 'Ответ в обращении: ' . ($data['subject'] ?? '')),
                                 default => 'Уведомление',
                             };
@@ -79,6 +81,7 @@
                                 'bot_message' => ($data['client_name'] ?? '') . ' · ' . ($data['preview'] ?? ''),
                                 'quoteparts_price_list' => 'цен записано: ' . ($data['offers'] ?? 0) . ' · на проверку: ' . ($data['check'] ?? 0) . ' · не найдено: ' . ($data['none'] ?? 0),
                                 'quoteparts_ready' => ! empty($data['request_id']) ? 'выберите предложение во вкладке «Поставщики»' : 'выберите предложение в «Актуализации цен»',
+                                'quoteparts_letter' => ($data['subject'] ?? '') . ' · привяжите к запросу в QuoteParts → «Письма без запроса»',
                                 'quoteparts_reply', 'quoteparts_question', 'quoteparts_conversation' => ($data['supplier'] ?? 'поставщик') . (! empty($data['preview']) ? ' · ' . $data['preview'] : ''),
                                 default => '',
                             };
@@ -95,6 +98,7 @@
                                 'quoteparts_reply', 'quoteparts_ready' => \App\Models\QuotePartsRfq::authorUrl($data['request_id'] ?? null, $data['tag'] ?? null, 'offers'),
                                 'quoteparts_question' => \App\Models\QuotePartsRfq::authorUrl($data['request_id'] ?? null, $data['tag'] ?? null, 'question'),
                                 'quoteparts_price_list' => route('procurement.index', ['tab' => 'pricelists', 'pl' => $data['price_list_id'] ?? null]),
+                                'quoteparts_letter' => route('quoteparts.index', ['tab' => 'letters']),
                                 'quoteparts_conversation' => ($data['topic'] ?? '') === 'support' ? route('quoteparts.index', ['tab' => 'support']) : (! empty($data['supplier_id']) ? route('suppliers.registry-edit', $data['supplier_id']) : route('procurement.index')),
                                 'organization_link_pending' => isset($data['link_request_id']) ? route('clients.link-requests.show', $data['link_request_id']) : '#',
                                 default => $reqId ? route('requests.show', $reqId) : '#',

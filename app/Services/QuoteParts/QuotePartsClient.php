@@ -590,6 +590,73 @@ class QuotePartsClient
         return $response->json('declines', []);
     }
 
+    /**
+     * Письма, которые QuoteParts не привязал к запросу сам («Не разобрано», 12.11.2026): отправитель, тема,
+     * начало текста, поставщики отправителя, метки [QP-…] из темы, вложения.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function inboundLetters(): array
+    {
+        $response = $this->http()->get('/api/v1/inbound-letters');
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts inbound letters: HTTP '.$response->status());
+        }
+
+        return $response->json('letters', []);
+    }
+
+    /** Письмо целиком (text). @return array<string, mixed> */
+    public function inboundLetter(int $id): array
+    {
+        $response = $this->http()->get('/api/v1/inbound-letters/'.$id);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts inbound letter: HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
+    /** Вложение письма: [содержимое, имя, тип]. @return array{0:string, 1:string, 2:string} */
+    public function inboundLetterFile(int $id, int $index): array
+    {
+        $response = $this->http()->get('/api/v1/inbound-letters/'.$id.'/attachments/'.$index);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts inbound letter file: HTTP '.$response->status());
+        }
+        $name = 'file';
+        if (preg_match('/filename\*?=(?:UTF-8\'\')?"?([^";]+)"?/i', (string) $response->header('Content-Disposition'), $m)) {
+            $name = rawurldecode($m[1]);
+        }
+
+        return [$response->body(), $name, (string) ($response->header('Content-Type') ?: 'application/octet-stream')];
+    }
+
+    /** Привязать письмо к поставщику запроса: дальше QuoteParts разбирает его как обычный ответ. @return array<string, mixed> */
+    public function assignInboundLetter(int $id, int $rfqRemoteId, string $supplierKey): array
+    {
+        $response = $this->http()->post('/api/v1/inbound-letters/'.$id.'/assign', ['rfq_id' => $rfqRemoteId, 'supplier' => $supplierKey]);
+        if ($response->status() === 422) {
+            throw new RuntimeException(collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял привязку.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts assign letter: HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
+    /** @return array<string, mixed> */
+    public function ignoreInboundLetter(int $id): array
+    {
+        $response = $this->http()->post('/api/v1/inbound-letters/'.$id.'/ignore');
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts ignore letter: HTTP '.$response->status());
+        }
+
+        return $response->json();
+    }
+
     /** @return list<array<string, mixed>> */
     public function priceLists(): array
     {

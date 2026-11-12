@@ -48,7 +48,7 @@ class Index extends Component
 
     public function setTab(string $tab): void
     {
-        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'questions', 'support', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
+        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'questions', 'letters', 'support', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
         $this->perPage = self::PER_PAGE;
         $this->resetPage('sp');
     }
@@ -154,6 +154,31 @@ class Index extends Component
      * Письма на support@, ждущие ответа, — счётчик вкладки «Поддержка». Из QuoteParts, поэтому на пару
      * минут в кэш (раздел перерисовывается на каждый клик); QuoteParts не ответил — без счётчика.
      */
+    /** Ключ кэша счётчика «Письма без запроса» (сбрасывается после привязки/отклонения). */
+    public const LETTERS_CACHE = 'qp-unmatched-letters-count';
+
+    /** Письма, которые QuoteParts не привязал к запросу сам (вкладка «Письма без запроса»); null — QuoteParts не ответил. */
+    #[Computed]
+    public function lettersCount(): ?int
+    {
+        $n = \Illuminate\Support\Facades\Cache::remember(self::LETTERS_CACHE, 60, function () {
+            try {
+                return count(app(\App\Services\QuoteParts\QuotePartsClient::class)->inboundLetters());
+            } catch (\Throwable) {
+                return -1;
+            }
+        });
+
+        return $n >= 0 ? $n : null;
+    }
+
+    #[\Livewire\Attributes\On('qp-letters-changed')]
+    public function lettersChanged(): void
+    {
+        \Illuminate\Support\Facades\Cache::forget(self::LETTERS_CACHE);
+        unset($this->lettersCount);
+    }
+
     #[Computed]
     public function supportWaitingCount(): ?int
     {

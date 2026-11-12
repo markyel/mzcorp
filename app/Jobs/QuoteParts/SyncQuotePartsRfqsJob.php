@@ -71,6 +71,12 @@ class SyncQuotePartsRfqsJob implements ShouldBeUnique, ShouldQueue
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\Log::warning('QuoteParts ready notifications failed', ['error' => $e->getMessage()]);
             }
+            // Письма поставщиков, которые QuoteParts не привязал к запросу сам, — снабжению в колокольчик.
+            try {
+                app(\App\Services\QuoteParts\QuotePartsInboundLetterNotifier::class)->notifyNew();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('QuoteParts unmatched letters check failed', ['error' => $e->getMessage()]);
+            }
         } finally {
             $lock->release();
         }

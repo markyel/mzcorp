@@ -8,6 +8,7 @@
             'suppliers' => ['Поставщики', $this->invitedGroupsCount, null, null],
             'offers' => ['Актуализация цен', $this->freshOffersCount, null, null],
             'questions' => ['Вопросы поставщиков', null, $this->openQuestionsCount > 0 ? $this->openQuestionsCount : null, 'red'],
+            'letters' => ['Письма без запроса', null, $this->lettersCount ?: null, 'red'],
             'support' => ['Поддержка', null, $this->supportWaitingCount ?: null, 'red'],
             'prices' => ['Закупки 1С', null, null, null],
             'groups' => ['Группы товаров', null, null, null],
@@ -25,7 +26,9 @@
                     ? 'Ответы поставщиков на запросы цен. Решите по каждой позиции — закупаем, уточняем или игнорируем — и выгрузите решения в 1С.'
                     : ($tab === 'support'
                         ? 'Письма на support@quoteparts.net — от поставщиков и от тех, кого среди них нет. Ответ уходит письмом от «QuoteParts Support».'
-                        : 'Тестирование. Передаём группы позиций из пула «К актуализации».') }}</div>
+                        : ($tab === 'letters'
+                            ? 'Письма поставщиков, которые QuoteParts не смог привязать к запросу сам. Привяжите к запросу или отклоните.'
+                            : 'Тестирование. Передаём группы позиций из пула «К актуализации».')) }}</div>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap">
                 @if($tab === 'offers')
@@ -311,6 +314,10 @@
 
     @if($tab === 'questions')
         <livewire:quote-parts.supplier-questions :search="$search" />
+    @endif
+
+    @if($tab === 'letters')
+        <livewire:quote-parts.inbound-letters />
     @endif
 
     @if($tab === 'support')
