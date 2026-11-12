@@ -55,6 +55,23 @@ class PriceActualizationService
     }
 
     /**
+     * «Закупаем здесь» по цене из письма мимо QuoteParts (строка MailPriceOffers): выбор с источником email,
+     * как в старой «Актуализации» снабжения. Позиция, уже выгруженная, снова ждёт выгрузки.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    public function chooseMail(array $row, User $by): void
+    {
+        DB::transaction(function () use ($row, $by) {
+            $this->choices->choose((int) $row['cid'], (string) $row['key'], [
+                'supplier' => (string) $row['supplier'], 'price' => (float) $row['price'], 'currency' => $row['currency'],
+                'source' => 'email', 'ref' => (int) $row['id'],
+            ], $by);
+            PricePosition::query()->where('catalog_item_id', $row['cid'])->whereNotNull('exported_at')->update(['exported_at' => null]);
+        });
+    }
+
+    /**
      * «+ В выгрузку» — только когда снабженец выбрал, где закупаем: в выгрузку идут все цены
      * позиции, выбранная — с отметкой «закупаем здесь». Сами за него не выбираем.
      *
@@ -64,10 +81,12 @@ class PriceActualizationService
      *
      * @param  Collection<int, QuotePartsOffer>  $offers  действующие предложения позиции на экране
      */
-    public function add(string $sku, int $catalogItemId, Collection $offers, User $by): ?string
+    public function add(string $sku, int $catalogItemId, Collection $offers, User $by, array $mailOfferIds = []): ?string
     {
         $chosen = $this->choices->forItems([$catalogItemId])->get($catalogItemId);
-        if (! ($chosen && $chosen->source === 'quoteparts' && $offers->contains('id', (int) $chosen->offer_ref))) {
+        $picked = $chosen && (($chosen->source === 'quoteparts' && $offers->contains('id', (int) $chosen->offer_ref))
+            || ($chosen->source === 'email' && in_array((int) $chosen->offer_ref, array_map('intval', $mailOfferIds), true)));
+        if (! $picked) {
             throw new \DomainException('Сначала выберите предложение — «Закупаем здесь».');
         }
 
@@ -114,10 +133,13 @@ class PriceActualizationService
         $offers = QuotePartsOffer::query()->with('catalogItem:id,sku,name')->whereIn('catalog_item_id', $cids)
             ->where('superseded', false)->whereIn('status', ['active', 'expiring'])->whereNull('ignored_at')->get();
 
-        $export = $this->exports->exportOffers($offers, $by);
+        // Цены из писем мимо QuoteParts по этим позициям — в тот же файл (12.11.2026).
+        $mail = collect(app(MailPriceOffers::class)->bySku())->only($positions->pluck('sku')->all())->flatMap(fn ($m) => $m['offers'])->values();
+
+        $export = $this->exports->exportOffers($offers, $by, $mail);
         // Сопроводительный файл: что покупаем здесь и у кого. Не вышел — файл для 1С всё равно отдаём.
         try {
-            $export->forceFill(['companion_path' => $this->exports->writeCompanion($offers, $by)])->save();
+            $export->forceFill(['companion_path' => $this->exports->writeCompanion($offers, $by, $mail)])->save();
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('Price export companion file failed', ['price_export_id' => $export->id, 'error' => $e->getMessage()]);
         }

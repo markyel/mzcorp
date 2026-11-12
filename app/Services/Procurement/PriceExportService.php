@@ -56,20 +56,35 @@ class PriceExportService
      * строка: выбранное предложение, иначе оригинал, иначе последнее (копию 3 USD рядом с
      * оригиналом 6 USD того же поставщика в 1С не грузим, пока её не выбрали).
      *
+     * Цены из писем мимо QuoteParts ($mail, строки MailPriceOffers) — тем поставщикам, у кого по позиции нет
+     * предложения QuoteParts, или когда выбрана именно цена из письма; аналог из письма — только выбранный.
+     *
      * @param  Collection<int, QuotePartsOffer>  $offers
+     * @param  Collection<int, array<string, mixed>>  $mail
      */
-    public function exportOffers(Collection $offers, ?User $by): PriceExport
+    public function exportOffers(Collection $offers, ?User $by, ?Collection $mail = null): PriceExport
     {
+        $mail ??= collect();
         $offers = $offers->filter(fn (QuotePartsOffer $o) => $o->catalogItem !== null && (float) $o->price > 0 && $o->countsAsItemPrice());
-        $chosen = app(SupplierChoiceService::class)->forItems($offers->pluck('catalog_item_id')->unique()->values()->all())
-            ->filter(fn ($c) => $c->source === 'quoteparts')->map(fn ($c) => (int) $c->offer_ref);
+        $choices = app(SupplierChoiceService::class)->forItems($offers->pluck('catalog_item_id')->merge($mail->pluck('cid'))->unique()->values()->all());
+        $chosen = $choices->filter(fn ($c) => $c->source === 'quoteparts')->map(fn ($c) => (int) $c->offer_ref);
+        $chosenMail = $choices->filter(fn ($c) => $c->source === 'email')->map(fn ($c) => (int) $c->offer_ref);
 
         $prices = $offers->groupBy(fn (QuotePartsOffer $o) => $o->catalog_item_id.'|'.$o->supplier_key)
             ->map(fn (Collection $g) => $g->first(fn ($o) => ($chosen[$o->catalog_item_id] ?? null) === (int) $o->id)
                 ?? $g->where('kind', 'original')->sortByDesc('remote_updated_at')->first()
                 ?? $g->sortByDesc('remote_updated_at')->first())
-            ->map(fn (QuotePartsOffer $o) => self::quotePartsPrice($o))
-            ->values();
+            ->map(fn (QuotePartsOffer $o) => self::quotePartsPrice($o));
+        foreach ($mail as $m) {
+            $isChosen = ($chosenMail[$m['cid']] ?? null) === (int) $m['id'];
+            $slot = $m['cid'].'|'.$m['key'];
+            if ((! $isChosen && ($prices->has($slot) || $m['deviation']))) {
+                continue;
+            }
+            $prices->put($slot, ['cid' => (int) $m['cid'], 'sku' => (string) $m['sku'], 'key' => $m['key'], 'fallback' => (string) $m['supplier'],
+                'price' => (float) $m['price'], 'currency' => $m['currency'], 'date' => Carbon::parse($m['at']), 'comment' => $m['comment']]);
+        }
+        $prices = $prices->values();
 
         $from = $prices->min('date');
 
@@ -84,10 +99,11 @@ class PriceExportService
      * @param  Collection<int, QuotePartsOffer>  $offers  действующие предложения позиций списка
      * @return string путь файла на диске выгрузок
      */
-    public function writeCompanion(Collection $offers, ?User $by): string
+    public function writeCompanion(Collection $offers, ?User $by, ?Collection $mail = null): string
     {
-        $choices = app(SupplierChoiceService::class)->forItems($offers->pluck('catalog_item_id')->filter()->unique()->values()->all());
-        $rows = self::companionRows($offers, $choices, $this->names1c($offers->pluck('supplier_key')->filter()->unique()->values()->all()));
+        $mail ??= collect();
+        $choices = app(SupplierChoiceService::class)->forItems($offers->pluck('catalog_item_id')->merge($mail->pluck('cid'))->filter()->unique()->values()->all());
+        $rows = self::companionRows($offers, $choices, $this->names1c($offers->pluck('supplier_key')->merge($mail->pluck('key'))->filter()->unique()->values()->all()), $mail);
 
         $book = new Spreadsheet;
         $sheet = $book->getActiveSheet();
@@ -127,10 +143,17 @@ class PriceExportService
      * @param  array<string, string>  $names  ключ поставщика => название в 1С
      * @return list<array{sku:string, name:string, price:float, currency:?string, supplier:string, comment:?string}>
      */
-    public static function companionRows(Collection $offers, Collection $choices, array $names): array
+    public static function companionRows(Collection $offers, Collection $choices, array $names, ?Collection $mail = null): array
     {
         $rows = [];
         foreach ($choices as $cid => $c) {
+            // Выбрана цена из письма мимо QuoteParts (MailPriceOffers).
+            if (($c->source ?? null) === 'email' && ($m = ($mail ?? collect())->first(fn ($m) => (int) $m['id'] === (int) $c->offer_ref && (int) $m['cid'] === (int) $cid)) !== null) {
+                $rows[] = ['sku' => (string) $m['sku'], 'name' => (string) ($m['name'] ?? ''), 'price' => (float) $m['price'], 'currency' => $m['currency'],
+                    'supplier' => (string) ($names[(string) $m['key']] ?? $m['supplier']), 'comment' => $m['comment']];
+
+                continue;
+            }
             if (($c->source ?? null) !== 'quoteparts') {
                 continue;
             }
@@ -372,6 +395,12 @@ class PriceExportService
         }
 
         return $parts === [] ? null : mb_substr(implode('; ', $parts), 0, 1000);
+    }
+
+    /** Ответ письмом предлагает не оригинал (аналог, копию, совместимое…) — в выгрузку периода такая цена не идёт. */
+    public static function isDeviation(string $quote): bool
+    {
+        return (bool) preg_match(self::DEVIATION_WORDS, $quote);
     }
 
     /** Комментарий к ответу письмом: фрагмент письма с ценой (срок действия цены — нет). */

@@ -102,6 +102,18 @@ class PriceOffers extends Component
         $this->forget();
     }
 
+    /** «Закупаем здесь» по цене из письма мимо QuoteParts (MailPriceOffers). */
+    public function chooseMail(string $sku, int $mailOfferId, PriceActualizationService $service): void
+    {
+        $row = ($this->mailBySku[$sku]['offers'] ?? collect())->firstWhere('id', $mailOfferId);
+        if ($row === null) {
+            return;
+        }
+        $service->chooseMail($row, auth()->user());
+        $this->exportNote = null;
+        $this->forget();
+    }
+
     /** «+ В выгрузку»: позиция с выбранным предложением — в список выгрузки 1С. */
     public function addToExport(string $sku, PriceActualizationService $service): void
     {
@@ -110,7 +122,7 @@ class PriceOffers extends Component
             return;
         }
         try {
-            $from = $service->add($sku, (int) $it['cid'], self::liveOffers($it), auth()->user());
+            $from = $service->add($sku, (int) $it['cid'], self::liveOffers($it), auth()->user(), ($it['mail'] ?? collect())->pluck('id')->all());
         } catch (\DomainException $e) {
             $this->dispatch('toast', type: 'error', message: $e->getMessage());
 
@@ -134,7 +146,7 @@ class PriceOffers extends Component
     public function addAllChosen(PriceActualizationService $service): void
     {
         foreach ($this->bar['addable'] as $it) {
-            $service->add($it['sku'], (int) $it['cid'], self::liveOffers($it), auth()->user());
+            $service->add($it['sku'], (int) $it['cid'], self::liveOffers($it), auth()->user(), ($it['mail'] ?? collect())->pluck('id')->all());
         }
         $this->exportNote = null;
         $this->forget();
@@ -181,7 +193,7 @@ class PriceOffers extends Component
     /** Сбросить посчитанное: решения, список выгрузки, разделы. */
     private function forget(): void
     {
-        unset($this->rows, $this->readyRows, $this->readyItems, $this->items, $this->groups, $this->choices, $this->bestIds,
+        unset($this->rows, $this->readyRows, $this->readyItems, $this->items, $this->groups, $this->choices, $this->bestIds, $this->closedItems,
             $this->positions, $this->newItems, $this->readyList, $this->waitItems, $this->bar, $this->clarifications);
     }
 
@@ -375,6 +387,41 @@ class PriceOffers extends Component
         }
 
         return $rows->sortByDesc(fn ($r) => $r['at']?->getTimestamp() ?? 0)->values();
+    }
+
+    /**
+     * Цены и отказы из писем мимо QuoteParts за окно запросов (MailPriceOffers): артикул => сводка.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    #[Computed]
+    public function mailBySku(): array
+    {
+        return app(\App\Services\QuoteParts\MailPriceOffers::class)->bySku();
+    }
+
+    /**
+     * Позиции, по которым ответили только письмом, — заготовки для «Ждём ответа» (их строки дорисует itemsFrom
+     * из mailBySku), в периоде и по поиску.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function mailOnlySeeds(\Illuminate\Support\Carbon $since): Collection
+    {
+        $seeds = collect();
+        foreach ($this->mailBySku as $sku => $m) {
+            $answers = $m['offers']->merge($m['declines']);
+            $last = $answers->max('at');
+            if ($last === null || $last->lt($since)) {
+                continue;
+            }
+            $first = $answers->sortByDesc('at')->first();
+            $seeds->push(['id' => 'mail-'.$sku, 'at' => $last, 'request_id' => $first['request_id'], 'request' => null, 'rfq_tag' => null,
+                'rfq_remote_id' => null, 'sku' => (string) $sku, 'line_name' => null, 'supplier' => $answers->pluck('supplier')->implode(' '),
+                'key' => null, 'postponed_until' => null, 'postpone_note' => null]);
+        }
+
+        return $this->withCatalog($seeds, fn ($r) => [$this->mailBySku[$r['sku']]['offers']->pluck('request_code')->implode(' ')]);
     }
 
     /** Запросы QuoteParts за окно запросов. */
@@ -649,13 +696,16 @@ class PriceOffers extends Component
         $declines = $this->declines->reject(fn ($r) => in_array($r['sku'], $ready, true));
 
         // «в т.ч. без ответов»: запрошенные за период позиции, где ни цены, ни отказа.
+        $since = now()->subDays(in_array($this->days, self::DAYS, true) ? $this->days : 7);
+        $answered = array_merge($ready, $rows->pluck('sku')->all(), $declines->pluck('sku')->all());
         $unanswered = collect();
         if ($this->withUnanswered) {
-            $since = now()->subDays(in_array($this->days, self::DAYS, true) ? $this->days : 7);
-            $answered = array_merge($ready, $rows->pluck('sku')->all(), $declines->pluck('sku')->all());
             $unanswered = $this->allPending->filter(fn ($r) => $r['at'] && $r['at']->gte($since))
                 ->reject(fn ($r) => in_array($r['sku'], $answered, true));
         }
+        // Ответили только письмом мимо QuoteParts — позиция тоже здесь, со строками писем (12.11.2026, M15073).
+        $unanswered = $unanswered->merge($this->mailOnlySeeds($since)->reject(fn ($r) => in_array($r['sku'], $answered, true)
+            || $unanswered->contains('sku', $r['sku'])));
 
         return $this->itemsFrom($rows->reject(fn ($r) => in_array($r['sku'], $ready, true)), $declines, $unanswered)->values();
     }
@@ -690,6 +740,21 @@ class PriceOffers extends Component
                 $st = $this->readiness[$sku] ?? null;
                 // Сначала оригиналы, потом копии и аналоги; внутри — дешевле выше.
                 $sorted = $offers->sortBy(fn ($r) => [($r['kind'] ?? 'original') === 'original' ? 0 : 1, $r['rub'] ?? PHP_FLOAT_MAX])->values();
+                // Цены и отказы из писем мимо QuoteParts (MailPriceOffers): в счёт «ответили N из M» — по поставщику один раз.
+                $mail = $this->mailBySku[$sku] ?? null;
+                $mailOffers = $mail['offers'] ?? collect();
+                $mailDeclines = ($mail['declines'] ?? collect())->reject(fn ($d) => $offers->contains('key', $d['key']));
+                $count = function (string $what) use ($st, $mail, $offers) {
+                    if ($st === null && $mail === null) {
+                        return null;
+                    }
+                    $keys = array_unique(array_merge($st[$what] ?? [], $mail[$what] ?? []));
+                    if ($what === 'declined') {
+                        $keys = array_diff($keys, $st['offered'] ?? [], $mail['offered'] ?? [], $offers->pluck('key')->filter()->all());
+                    }
+
+                    return count($keys);
+                };
 
                 return [
                     'sku' => $first['sku'],
@@ -701,17 +766,19 @@ class PriceOffers extends Component
                     'offers' => $sorted,
                     'declines' => $itemDeclines,
                     'best' => $sorted->first(fn ($r) => $r['rub'] !== null && ! $r['stale'] && $r['counts']),
-                    'asked' => $st ? count($st['asked']) : null,
-                    'offered' => $st ? count($st['offered']) : null,
-                    'declined' => $st ? count($st['declined']) : null,
-                    'requested_at' => $st['requested_at'] ?? null,
+                    'mail' => $mailOffers,
+                    'mail_declines' => $mailDeclines->values(),
+                    'asked' => $count('asked'),
+                    'offered' => $count('offered'),
+                    'declined' => $count('declined'),
+                    'requested_at' => $st['requested_at'] ?? $mail['requested_at'] ?? null,
                     'wait_until' => $st ? $checker->waitUntil($st['requested_at']) : null,
                     'rfqs' => $st['rfqs'] ?? [],
                     // Спросили, а он ни цены, ни отказа: строка «ждём ответ».
                     'waiting' => $st ? array_values(array_map(fn ($k) => $this->supplierNames[$k] ?? $k,
-                        array_diff($st['asked'], $st['offered'], $st['declined'], $offers->pluck('key')->filter()->all()))) : [],
+                        array_diff($st['asked'], $st['offered'], $st['declined'], $offers->pluck('key')->filter()->all(), $mail['offered'] ?? [], $mail['declined'] ?? []))) : [],
                     'postponed' => $postponed->get($sku, []),
-                    'at' => $offers->merge($itemDeclines)->max('at') ?? $unansweredBySku->get($sku)?->max('at'),
+                    'at' => $offers->merge($itemDeclines)->merge($mailOffers)->max('at') ?? $unansweredBySku->get($sku)?->max('at'),
                 ];
             })
             ->sortByDesc(fn ($i) => $i['at']?->getTimestamp() ?? 0);
@@ -898,6 +965,10 @@ class PriceOffers extends Component
         $choice = $it['cid'] ? $this->choices->get($it['cid']) : null;
         $ids = $it['offers']->pluck('id')->all();
         $chosen = $choice && $choice->source === 'quoteparts' && in_array((int) $choice->offer_ref, $ids, true) ? (int) $choice->offer_ref : null;
+        // Выбрана цена из письма (MailPriceOffers): «m{id}» — не путается с номерами предложений QuoteParts.
+        if ($chosen === null && $choice && $choice->source === 'email' && ($it['mail'] ?? collect())->contains('id', (int) $choice->offer_ref)) {
+            $chosen = 'm'.(int) $choice->offer_ref;
+        }
         $live = $it['offers']->reject(fn ($r) => $r['stale']);
 
         return ['chosen' => $chosen, 'state' => match (true) {

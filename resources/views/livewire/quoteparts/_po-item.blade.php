@@ -14,7 +14,8 @@
     $best = $originals->count() > 1 ? $originals->sortBy('rub')->first()['id'] : null;
     $only = $live->count() === 1;
     $suppliers = $it['offers']->pluck('key')->filter()->unique()->count();
-    $refusedAll = $it['offers']->isEmpty() && $it['declines']->isNotEmpty() && ($it['waiting'] ?? []) === [];
+    $refusedAll = $it['offers']->isEmpty() && ($it['mail'] ?? collect())->isEmpty()
+        && ($it['declines']->isNotEmpty() || ($it['mail_declines'] ?? collect())->isNotEmpty()) && ($it['waiting'] ?? []) === [];
     $status = match (true) {
         $section === 'new' => 'new',
         $section === 'ready' => 'ready',
@@ -47,7 +48,8 @@
             </span>
         </div>
         <div class="pa-head-side">
-            @if(! in_array($section, ['wait', 'closed'], true) && $it['cid'])
+            {{-- В «Ждём» — только когда выбрана цена из письма: такая позиция в «Готово» не попадает (готовность считает QuoteParts). --}}
+            @if((! in_array($section, ['wait', 'closed'], true) || ($section === 'wait' && is_string($chosen))) && $it['cid'])
                 @if($pos?->inExportOf(auth()->id()))
                     <span class="pa-export is-in">
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{ $pos->exported_at ? 'выгружено '.$pos->exported_at->timezone($tz)->format('d.m H:i') : 'в выгрузке 1С' }}</span>
@@ -85,6 +87,26 @@
 
     @foreach($it['offers'] as $r)
         @include('livewire.quoteparts._po-offer', ['r' => $r, 'it' => $it, 'chosen' => $chosen, 'best' => $best, 'only' => $only, 'pos' => $pos, 'reopened' => $section === 'new'])
+    @endforeach
+
+    {{-- Цены и отказы из писем мимо QuoteParts (MailPriceOffers): переписка — в заявке. --}}
+    @foreach(($it['mail'] ?? []) as $m)
+        @include('livewire.quoteparts._po-mail-offer', ['m' => $m, 'it' => $it, 'chosen' => $chosen, 'pos' => $pos])
+    @endforeach
+    @foreach(($it['mail_declines'] ?? []) as $d)
+        <div wire:key="po-mail-d-{{ $d['id'] }}" class="pa-offer">
+            <div class="pa-grid pa-row">
+                <div class="pa-col">
+                    <div class="pa-who"><span class="pa-sup">{{ $d['supplier'] }}</span><span class="pa-pill pa-pill-over">отказ</span><span class="pa-pill pa-pill-neutral">письмом</span></div>
+                    <span class="pa-meta">{{ $d['at']?->timezone($tz)->format('d.m H:i') }} · {{ $d['email'] }}</span>
+                    @if($d['request_id'])<a href="{{ route('requests.show', ['request' => $d['request_id'], 'tab' => 'suppliers']) }}" target="_blank" rel="noopener" class="pa-link">▸ переписка · {{ $d['request_code'] }}</a>@endif
+                </div>
+                <div class="pa-col pa-price"><span class="pa-meta" style="font-size: 13px">цену не дал</span></div>
+                <div class="pa-col"></div>
+                <div class="pa-col">@if($d['reason'])<span class="pa-note">Поставщик: «{{ $d['reason'] }}»</span>@endif</div>
+                <div class="pa-col pa-decide"></div>
+            </div>
+        </div>
     @endforeach
 
     {{-- Отказы: цены не дал — с причиной; переписка по запросу. --}}

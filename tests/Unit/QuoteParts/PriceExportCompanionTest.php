@@ -46,6 +46,19 @@ class PriceExportCompanionTest extends TestCase
         $this->assertSame(['Артикул', 'Название', 'Цена', 'Валюта', 'Поставщик', 'Комментарий'], PriceExportService::COMPANION_HEADER);
     }
 
+    /** M15073: EVE ответила письмом мимо QuoteParts (27 USD) — выбранная, она в «Покупаем здесь» тоже (12.11.2026). */
+    public function test_a_chosen_price_from_a_letter_goes_to_the_companion_file(): void
+    {
+        $mail = collect([['id' => 2, 'cid' => 30, 'sku' => 'M15073', 'name' => 'Кнопка приказа', 'key' => 'org:7', 'supplier' => 'EVE',
+            'price' => 27.0, 'currency' => 'USD', 'comment' => 'The price is 27usd/pcs.']]);
+        $choices = collect([30 => (object) ['source' => 'email', 'offer_ref' => '2']]);
+
+        $rows = PriceExportService::companionRows(collect(), $choices, ['org:7' => 'EVE Elevator Parts'], $mail);
+
+        $this->assertSame([['sku' => 'M15073', 'name' => 'Кнопка приказа', 'price' => 27.0, 'currency' => 'USD', 'supplier' => 'EVE Elevator Parts',
+            'comment' => 'The price is 27usd/pcs.']], $rows);
+    }
+
     public function test_a_chosen_offer_no_longer_live_is_left_out(): void
     {
         // Выбранное предложение отмечено «Игнорировать» или устарело — в списке действующих его нет.
