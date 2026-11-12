@@ -7,6 +7,7 @@
             'pool' => ['В QuoteParts', array_sum($counts), ($counts['error'] ?? 0) > 0 ? 'ошибка '.$counts['error'] : (($counts['paused'] ?? 0) > 0 ? 'пауза '.$counts['paused'] : null), ($counts['error'] ?? 0) > 0 ? 'red' : 'attn'],
             'suppliers' => ['Поставщики', $this->invitedGroupsCount, null, null],
             'offers' => ['Актуализация цен', $this->freshOffersCount, null, null],
+            'results' => ['Результаты', null, null, null],
             'questions' => ['Вопросы поставщиков', null, $this->openQuestionsCount > 0 ? $this->openQuestionsCount : null, 'red'],
             'letters' => ['Письма без запроса', null, $this->lettersCount ?: null, 'red'],
             'support' => ['Поддержка', null, $this->supportWaitingCount ?: null, 'red'],
@@ -28,7 +29,9 @@
                         ? 'Письма на support@quoteparts.net — от поставщиков и от тех, кого среди них нет. Ответ уходит письмом от «QuoteParts Support».'
                         : ($tab === 'letters'
                             ? 'Письма поставщиков, которые QuoteParts не смог привязать к запросу сам. Привяжите к запросу или отклоните.'
-                            : 'Тестирование. Передаём группы позиций из пула «К актуализации».')) }}</div>
+                            : ($tab === 'results'
+                                ? 'Растёт ли доля позиций прайса с актуальной ценой и куда идут цены закупки: выбранные цены поставщиков против прошлых закупок по 1С.'
+                                : 'Тестирование. Передаём группы позиций из пула «К актуализации».'))) }}</div>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap">
                 @if($tab === 'offers')
@@ -310,6 +313,10 @@
 
     @if($tab === 'offers')
         <livewire:quote-parts.price-offers />
+    @endif
+
+    @if($tab === 'results')
+        <livewire:quote-parts.results />
     @endif
 
     @if($tab === 'questions')

@@ -23,8 +23,9 @@ class Index extends Component
 
     public const PER_PAGE = 50;
 
-    #[Url(except: 'candidates')]
-    public string $tab = 'candidates';
+    // По умолчанию — «Актуализация цен» (решение заказчика 12.11.2026): там ежедневная работа снабжения.
+    #[Url(except: 'offers')]
+    public string $tab = 'offers';
 
     #[Url(as: 'q', except: '')]
     public string $search = '';
@@ -48,7 +49,7 @@ class Index extends Component
 
     public function setTab(string $tab): void
     {
-        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'questions', 'letters', 'support', 'prices', 'groups', 'pilot'], true) ? $tab : 'candidates';
+        $this->tab = in_array($tab, ['candidates', 'pool', 'suppliers', 'offers', 'results', 'questions', 'letters', 'support', 'prices', 'groups', 'pilot'], true) ? $tab : 'offers';
         $this->perPage = self::PER_PAGE;
         $this->resetPage('sp');
     }

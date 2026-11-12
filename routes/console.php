@@ -530,6 +530,15 @@ Schedule::command('bot:chat-digest')
     ->onOneServer()
     ->runInBackground();
 
+// «Результаты» раздела QuoteParts: доля позиций прайса с актуальной ценой — снимок раз в сутки после последней
+// загрузки каталога (PriceDynamicsService).
+Schedule::command('catalog:price-metrics-snapshot')
+    ->dailyAt('23:55')
+    ->timezone('Europe/Moscow')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Живой чат с клиентом бота: тишина вышла — чат обратно боту, клиенту — что разговор закончен (BotLiveChatService).
 Schedule::command('bot:release-idle-chats')
     ->everyMinute()
