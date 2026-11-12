@@ -18,7 +18,13 @@ class MessengerFileController extends Controller
     public function show(Request $http, MessengerMessage $message, int $index): StreamedResponse
     {
         $request = $message->request;
-        abort_unless($request !== null && $request->isViewableBy($http->user()), 403);
+        $user = $http->user();
+        // Живой чат без заявки (взят из раздела «Боты»): файлы видит тот, кто ведёт чат, и руководство.
+        $allowed = $request !== null
+            ? $request->isViewableBy($user)
+            : ((int) $message->chat?->taken_by_user_id === (int) $user->id
+                || $user->hasAnyRole([\App\Enums\Role::HeadOfSales->value, \App\Enums\Role::Director->value, \App\Enums\Role::Admin->value]));
+        abort_unless($allowed, 403);
         $att = BotThreadService::attachment($message, $index);
         abort_if($att === null, 404);
 

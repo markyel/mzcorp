@@ -17,6 +17,7 @@ class MessengerChat extends Model
         'channel', 'external_user_id', 'chat_id', 'username', 'first_name', 'last_name',
         'email', 'email_verified_at', 'contact_name', 'phone', 'company_name', 'inn',
         'organization_id', 'state', 'messages_count', 'requests_count', 'last_message_at', 'blocked_at',
+        'taken_by_user_id', 'taken_at', 'taken_activity_at',
     ];
 
     protected $casts = [
@@ -25,7 +26,15 @@ class MessengerChat extends Model
         'last_message_at' => 'datetime',
         'blocked_at' => 'datetime',
         'state' => 'array',
+        // Чат ведёт менеджер (BotLiveChatService): бот молчит.
+        'taken_at' => 'datetime',
+        'taken_activity_at' => 'datetime',
     ];
+
+    public function takenBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'taken_by_user_id');
+    }
 
     public function organization(): BelongsTo
     {

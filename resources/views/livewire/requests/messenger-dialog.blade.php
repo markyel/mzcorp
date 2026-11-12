@@ -98,6 +98,14 @@
                         <span class="text-fg-4"> · онлайн-статус мессенджер боту не сообщает</span>
                     </div>
                 </div>
+                @if($chat && $this->canWrite() && ! ($p && $p['blocked']))
+                    @if(\App\Services\Bot\BotLiveChatService::isTaken($chat))
+                        <span class="text-[11px]" style="color: var(--emerald-700); white-space: nowrap;" title="Пока чат ведёт сотрудник, бот молчит">● живой чат: {{ $chat->takenBy?->name }}</span>
+                    @else
+                        <button type="button" @pointerdown.stop wire:click="takeLive" class="btn btn-xs"
+                                title="Живой чат: окно поверх сайта, бот молчит; {{ \App\Services\Bot\BotLiveChatService::IDLE_MINUTES }} мин тишины — чат вернётся боту">⚡ Взять чат на себя</button>
+                    @endif
+                @endif
                 <button type="button" @pointerdown.stop x-on:click="min = !min"
                         class="text-fg-3 hover:text-fg-1 text-[13px]" style="padding: 2px 7px; line-height: 1;"
                         :title="min ? 'Развернуть окно' : 'Свернуть в строку'">
@@ -118,6 +126,7 @@
                             'request' => 'Клиент · заявка',
                             'client' => 'Клиент',
                             'manager' => $m->author?->name ?? 'Менеджер',
+                            'live' => ($m->author?->name ?? 'Менеджер').' · живой чат',
                             'notify' => 'Бот · уведомление',
                             default => $in ? 'Клиент' : 'Бот',
                         };

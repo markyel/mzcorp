@@ -99,6 +99,8 @@
             @if(auth()->user()->hasAnyRole(['manager', 'head_of_sales', 'admin', 'director']))
                 {{-- Окно адресной книги для полей адресатов обоих композеров. --}}
                 <x-mail.address-book-modal />
+                {{-- Живой чат с клиентом бота: менеджер взял чат на себя — окно на любой странице (BotLiveChatService). --}}
+                <livewire:bots.live-chat wire:key="live-chat-{{ auth()->id() }}" />
             @endif
         @endauth
 

@@ -530,6 +530,13 @@ Schedule::command('bot:chat-digest')
     ->onOneServer()
     ->runInBackground();
 
+// Живой чат с клиентом бота: тишина вышла — чат обратно боту, клиенту — что разговор закончен (BotLiveChatService).
+Schedule::command('bot:release-idle-chats')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // QuoteParts: досылка пула после загрузок каталога (их 6 в день) — только позиции,
 // у которых изменилась передаваемая часть карточки или закупки; заодно подтягиваются
 // статусы позиций, по которым в QuoteParts приняли решение. Без ключа API — пропуск.

@@ -117,7 +117,9 @@
                                 'client' => 'менеджеру · ' . ($m->request?->internal_code ?? ''),
                                 'manager' => 'менеджер ' . ($m->author?->name ?? '') . ' · ' . ($m->request?->internal_code ?? ''),
                                 'notify' => 'уведомление · ' . ($m->request?->internal_code ?? ''),
-                                'bot' => 'бот',
+                                'live' => (($m->meta ?? [])['event'] ?? null) === 'start' ? 'живой чат: взял ' . ($m->author?->name ?? '')
+                                    : ((($m->meta ?? [])['event'] ?? null) === 'end' ? 'живой чат: вернулся боту' : 'живой чат · ' . ($m->author?->name ?? '')),
+                                'bot' => $m->author ? 'от имени бота · ' . $m->author->name : 'бот',
                                 default => $in ? 'клиент' : 'бот',
                             };
                             $text = $in ? (string) $m->text : html_entity_decode(strip_tags((string) $m->text));
@@ -146,6 +148,28 @@
                     @empty
                         <div class="text-[12.5px] text-fg-3">Сообщений нет.</div>
                     @endforelse
+                </div>
+
+                {{-- Написать клиенту: от имени бота или взять чат на себя (живой чат, бот молчит). --}}
+                <div class="px-[18px] py-3 border-t border-[var(--border-subtle)] flex flex-col gap-2">
+                    @if(\App\Services\Bot\BotLiveChatService::isTaken($s))
+                        <div class="text-[12.5px]" style="color: var(--emerald-700)">
+                            ● Чат ведёт {{ $s->takenBy?->name ?? 'сотрудник' }} с {{ $s->taken_at?->format('H:i') }} — бот молчит
+                            @if((int) $s->taken_by_user_id === (int) auth()->id())<span class="text-fg-3">· переписка — в окне живого чата</span>@endif
+                            <button type="button" wire:click="releaseChat" wire:confirm="Вернуть чат боту? Клиенту придёт, что разговор с менеджером завершён."
+                                    class="btn btn-xs" style="margin-left: 8px">Вернуть боту</button>
+                        </div>
+                    @elseif(! $s->blocked_at)
+                        <textarea wire:model="text" rows="2" maxlength="{{ \App\Services\Bot\BotLiveChatService::MAX_TEXT }}" placeholder="Сообщение клиенту от имени бота…"
+                                  style="width: 100%; resize: vertical; font-size: 13px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface);"></textarea>
+                        <div class="flex items-center gap-2">
+                            <button type="button" wire:click="sendAsBot" wire:loading.attr="disabled" wire:target="sendAsBot" class="btn btn-sm">Написать от имени бота</button>
+                            <button type="button" wire:click="take" wire:loading.attr="disabled" wire:target="take" class="btn btn-sm btn-primary"
+                                    title="Живой чат: окно поверх сайта, бот молчит; {{ \App\Services\Bot\BotLiveChatService::IDLE_MINUTES }} мин тишины — чат вернётся боту">Взять чат на себя</button>
+                            @if($error)<span class="text-[12px]" style="color: var(--amber-800)">{{ $error }}</span>@endif
+                            @error('text')<span class="text-[12px]" style="color: var(--amber-800)">{{ $message }}</span>@enderror
+                        </div>
+                    @endif
                 </div>
             @else
                 <div class="px-[18px] py-10 text-center text-[12.5px] text-fg-3">Выберите диалог слева.</div>

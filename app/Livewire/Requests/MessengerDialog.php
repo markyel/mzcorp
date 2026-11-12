@@ -118,6 +118,28 @@ class MessengerDialog extends Component
         return $this->request->isAccessibleBy(auth()->user());
     }
 
+    /**
+     * «Взять чат на себя» (12.11.2026): живой разговор в окне поверх сайта, бот молчит; через
+     * BotLiveChatService::IDLE_MINUTES тишины или по кнопке чат вернётся боту.
+     */
+    public function takeLive(): void
+    {
+        abort_unless($this->canWrite(), 403);
+        $chat = $this->request->messengerChat;
+        if ($chat === null) {
+            return;
+        }
+        $res = app(\App\Services\Bot\BotLiveChatService::class)->take($chat, auth()->user(), $this->request);
+        if (! $res['ok']) {
+            $this->error = $res['message'];
+
+            return;
+        }
+        $this->open = false;
+        $this->dispatch('live-chat-opened');
+        $this->dispatch('toast', type: 'success', message: $res['message']);
+    }
+
     public function removeUpload(int $i): void
     {
         unset($this->uploads[$i]);

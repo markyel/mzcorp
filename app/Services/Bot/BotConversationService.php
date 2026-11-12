@@ -82,7 +82,7 @@ class BotConversationService
         $chat->messages_count = (int) $chat->messages_count + 1;
         $chat->save();
 
-        MessengerMessage::create([
+        $in = MessengerMessage::create([
             'messenger_chat_id' => $chat->id,
             'direction' => 'in',
             'kind' => match (true) {
@@ -100,6 +100,21 @@ class BotConversationService
         }
         if ($u->isCallback()) {
             $this->messenger->answerCallback((string) $u->callbackId);
+        }
+        // Чат ведёт менеджер (BotLiveChatService): бот молчит, сообщение видно в его окне. Тишина вышла —
+        // чат возвращается боту, и это сообщение бот разбирает как обычно.
+        if ($chat->taken_by_user_id !== null) {
+            $live = app(BotLiveChatService::class);
+            if (BotLiveChatService::isTaken($chat)) {
+                if ($u->files !== []) {
+                    [$stored] = $this->downloadAll($chat, $u->files, 'bot-thread');
+                    $in->forceFill(['meta' => array_merge((array) $in->meta, ['attachments' => array_values($stored)])])->save();
+                }
+                $live->clientWrote($chat, $in);
+
+                return;
+            }
+            $live->release($chat, 'timeout');
         }
         if ($this->overLimit($chat)) {
             return;

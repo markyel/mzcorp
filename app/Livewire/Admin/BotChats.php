@@ -53,11 +53,56 @@ class BotChats extends Component
     public function open(int $id): void
     {
         $this->chatId = $id;
+        $this->text = '';
+        $this->error = null;
     }
 
     public function more(): void
     {
         $this->limit += self::PER_PAGE;
+    }
+
+    /** Сообщение клиенту в выбранный чат: от имени бота или (если чат взят) — в живой чат. */
+    public string $text = '';
+
+    public ?string $error = null;
+
+    /** «Написать от имени бота»: одно сообщение без захвата чата (12.11.2026). */
+    public function sendAsBot(): void
+    {
+        $this->authorizeAccess();
+        $this->error = null;
+        $this->validate(['text' => ['required', 'string', 'max:'.\App\Services\Bot\BotLiveChatService::MAX_TEXT]], [], ['text' => 'сообщение']);
+        $chat = MessengerChat::findOrFail($this->chatId);
+        $res = app(\App\Services\Bot\BotLiveChatService::class)->sendAsBot($chat, auth()->user(), $this->text);
+        if ($res['ok']) {
+            $this->text = '';
+            $this->dispatch('toast', type: 'success', message: $res['message']);
+        } else {
+            $this->error = $res['message'];
+        }
+        unset($this->messages);
+    }
+
+    /** «Взять чат на себя»: бот молчит, окно живого чата — на любой странице сайта. */
+    public function take(): void
+    {
+        $this->authorizeAccess();
+        $res = app(\App\Services\Bot\BotLiveChatService::class)->take(MessengerChat::findOrFail($this->chatId), auth()->user());
+        $this->dispatch('toast', type: $res['ok'] ? 'success' : 'error', message: $res['message']);
+        if ($res['ok']) {
+            $this->dispatch('live-chat-opened');
+        }
+        unset($this->selected, $this->messages);
+    }
+
+    /** «Вернуть боту» — чат, который ведёт любой сотрудник (руководство разбирает работу ботов). */
+    public function releaseChat(): void
+    {
+        $this->authorizeAccess();
+        app(\App\Services\Bot\BotLiveChatService::class)->release(MessengerChat::findOrFail($this->chatId), 'manual', auth()->user());
+        $this->dispatch('live-chat-opened');
+        unset($this->selected, $this->messages);
     }
 
     public function toggleBlock(int $id): void
@@ -134,7 +179,7 @@ class BotChats extends Component
     #[Computed]
     public function selected(): ?MessengerChat
     {
-        return $this->chatId ? MessengerChat::query()->with('organization:id,name')->find($this->chatId) : null;
+        return $this->chatId ? MessengerChat::query()->with(['organization:id,name', 'takenBy:id,name'])->find($this->chatId) : null;
     }
 
     /** @return Collection<int, MessengerMessage> последние 500 сообщений диалога */
