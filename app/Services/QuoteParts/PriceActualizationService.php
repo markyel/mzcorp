@@ -175,4 +175,21 @@ class PriceActualizationService
 
         return count($positions);
     }
+
+    /**
+     * «Вернуть в работу»: сбор цен по позиции снова открыт — она возвращается в «Готово» / «Ждём» со всеми
+     * предложениями (12.11.2026, M23123: завершили на OSS, а цену YuanQi на аналог хотели пересмотреть).
+     * Отметка о прошлой выгрузке (exported_at, closed_offer) остаётся.
+     */
+    public function reopen(string $sku, User $by): bool
+    {
+        $pos = PricePosition::query()->where('sku', $sku)->whereNotNull('closed_at')->first();
+        if ($pos === null) {
+            return false;
+        }
+        \Illuminate\Support\Facades\Log::info('Price position reopened', ['sku' => $sku, 'closed_at' => (string) $pos->closed_at, 'closed_by' => $pos->closed_by_user_id, 'by' => $by->id]);
+        $pos->forceFill(['closed_at' => null, 'closed_by_user_id' => null])->save();
+
+        return true;
+    }
 }

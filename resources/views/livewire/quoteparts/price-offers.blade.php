@@ -23,6 +23,8 @@
         ['key' => 'wait', 'title' => 'Ждём ответа и отказы', 'chip' => 'attn', 'items' => $wait, 'count' => $wait->count(),
             'hint' => 'Поставщики ещё не ответили или отказали; сюда же — цены из кабинета и прайсов без запроса. За '.$days.' дн.',
             'empty' => $term !== '' ? 'Ничего не найдено.' : 'Нет позиций в ожидании.'],
+        ['key' => 'closed', 'title' => 'Сбор цен завершён', 'chip' => 'ok', 'items' => $this->closedItems, 'count' => $this->closedItems->count(),
+            'hint' => 'Найдены по поиску: выгружены в 1С и сняты с экрана. «Вернуть в работу» — позиция снова в списке со всеми предложениями.', 'empty' => null],
     ];
 @endphp
 <div class="pa">
@@ -157,7 +159,7 @@
     </div>
 
     @foreach($sections as $s)
-        @continue($s['key'] === 'new' && $s['count'] === 0)
+        @continue(in_array($s['key'], ['new', 'closed'], true) && $s['count'] === 0)
         <div class="pa-section" wire:key="pa-sec-{{ $s['key'] }}">
             <div class="pa-sec-head">
                 <div style="display: flex; align-items: center; gap: 8px">

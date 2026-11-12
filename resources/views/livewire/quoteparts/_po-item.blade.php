@@ -47,7 +47,7 @@
             </span>
         </div>
         <div class="pa-head-side">
-            @if($section !== 'wait' && $it['cid'])
+            @if(! in_array($section, ['wait', 'closed'], true) && $it['cid'])
                 @if($pos?->inExportOf(auth()->id()))
                     <span class="pa-export is-in">
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{ $pos->exported_at ? 'выгружено '.$pos->exported_at->timezone($tz)->format('d.m H:i') : 'в выгрузке 1С' }}</span>
@@ -68,6 +68,13 @@
     @if($section === 'new' && $pos?->closed_at)
         @php $co = $pos->closed_offer ?? []; @endphp
         <div class="pa-reopen">Работа завершена {{ $pos->closed_at->timezone($tz)->format('d.m H:i') }}{{ ($co['supplier'] ?? null) ? ', в 1С выгружено: '.$co['supplier'].(isset($co['price']) ? ' · '.number_format((float) $co['price'], 2, ',', ' ').' '.($co['currency'] ?? '') : '') : '' }}. Пришло новое предложение — решите, менять ли поставщика, и выгрузите снова.</div>
+    @endif
+    @if($section === 'closed' && $pos?->closed_at)
+        @php $co = $pos->closed_offer ?? []; @endphp
+        <div class="pa-reopen" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+            <span style="flex: 1; min-width: 240px">Сбор цен завершён {{ $pos->closed_at->timezone($tz)->format('d.m H:i') }}{{ $pos->closed_by_user_id ? ' · '.(\App\Models\User::query()->whereKey($pos->closed_by_user_id)->value('name') ?? '') : '' }}{{ ($co['supplier'] ?? null) ? ', в 1С выгружено: '.$co['supplier'].(isset($co['price']) ? ' · '.number_format((float) $co['price'], 2, ',', ' ').' '.($co['currency'] ?? '') : '') : '' }}.</span>
+            <button type="button" wire:click="reopen('{{ $it['sku'] }}')" wire:loading.attr="disabled" class="pa-btn pa-btn-secondary">Вернуть в работу</button>
+        </div>
     @endif
 
     @if($card)

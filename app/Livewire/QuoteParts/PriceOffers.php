@@ -819,6 +819,37 @@ class PriceOffers extends Component
         return $id === null ? $items : $items->filter(fn ($it) => in_array($id, $this->skuAuthors[(string) $it['sku']] ?? [], true))->values();
     }
 
+    /**
+     * «Сбор цен завершён» — только при поиске: завершённая позиция уходит с экрана, и по артикулу её было не
+     * найти, хотя счётчик предложений её считал (12.11.2026, M23123). Без вернувшихся с новым предложением.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    #[Computed]
+    public function closedItems(): Collection
+    {
+        $closed = $this->positions->filter(fn (PricePosition $p) => $p->closed_at !== null);
+        if (trim($this->q) === '' || $closed->isEmpty()) {
+            return collect();
+        }
+        $shown = $this->newItems->pluck('sku')->all();
+        $rows = $this->query()->whereIn('sku', $closed->keys()->all())
+            ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))
+            ->get()->pipe(fn (Collection $offers) => self::rowsOf($offers));
+
+        return $this->byAuthor($this->itemsFrom($rows)->reject(fn ($it) => in_array($it['sku'], $shown, true))->values());
+    }
+
+    /** «Вернуть в работу»: позиция с завершённым сбором цен снова в «Готово» / «Ждём». */
+    public function reopen(string $sku): void
+    {
+        if (! app(PriceActualizationService::class)->reopen($sku, auth()->user())) {
+            return;
+        }
+        unset($this->positions, $this->newItems, $this->readyList, $this->waitItems, $this->closedItems, $this->bar);
+        $this->dispatch('toast', type: 'success', message: $sku.': сбор цен снова открыт — позиция вернулась в список.');
+    }
+
     /** «Готово к актуализации» без завершённых позиций; фильтр по решению, порядок вида. */
     #[Computed]
     public function readyList(): Collection
