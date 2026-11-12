@@ -90,6 +90,37 @@
                         <text x="{{ $cx }}" y="{{ $BH - $bB + 16 }}" text-anchor="middle" font-size="11" fill="var(--fg-3, #6b7280)">{{ \Illuminate\Support\Carbon::parse($w['week'])->format('d.m') }}</text>
                     @endforeach
                 </svg>
+
+                {{-- Тенденция: медиана изменения цены по неделям; ниже нуля — закупки дешевеют, выше — дорожают. --}}
+                @php
+                    $mw = array_values(array_filter($weeks, fn ($w) => $w['n'] > 0));
+                    $MW = 760; $MH = 150; $mL = 40; $mT = 12; $mB = 24;
+                    $amp = max(5, ...array_map(fn ($w) => abs($w['median']), $mw ?: [['median' => 0]]));
+                    $amp = (int) ceil($amp * 1.2);
+                    $mn = count($mw);
+                    $mx = fn ($i) => $mn <= 1 ? $mL + ($MW - $mL - 12) / 2 : $mL + $i * ($MW - $mL - 12) / ($mn - 1);
+                    $my = fn ($v) => $mT + ($MH - $mT - $mB) * (1 - ($v + $amp) / (2 * $amp));
+                @endphp
+                @if($mn > 0)
+                    <div class="text-[12.5px] text-fg-2" style="margin-top: 4px;">Тенденция: медиана изменения цены закупки по неделям <span class="text-fg-3">— ниже нуля закупки дешевеют, выше — дорожают</span></div>
+                    <svg viewBox="0 0 {{ $MW }} {{ $MH }}" style="width: 100%; max-width: {{ $MW }}px; height: auto;" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="{{ $mL }}" y="{{ $mT }}" width="{{ $MW - $mL - 12 }}" height="{{ $my(0) - $mT }}" fill="rgba(220, 38, 38, 0.05)" />
+                        <rect x="{{ $mL }}" y="{{ $my(0) }}" width="{{ $MW - $mL - 12 }}" height="{{ $MH - $mB - $my(0) }}" fill="rgba(5, 150, 105, 0.06)" />
+                        <line x1="{{ $mL }}" x2="{{ $MW - 12 }}" y1="{{ $my(0) }}" y2="{{ $my(0) }}" stroke="var(--fg-3, #6b7280)" stroke-dasharray="4 3" />
+                        @foreach([$amp, 0, -$amp] as $g)
+                            <text x="{{ $mL - 6 }}" y="{{ $my($g) + 4 }}" text-anchor="end" font-size="11" fill="var(--fg-3, #6b7280)">{{ $g > 0 ? '+' : '' }}{{ $g }}%</text>
+                        @endforeach
+                        @if($mn > 1)
+                            <polyline fill="none" stroke="var(--fg-1, #111827)" stroke-width="2" points="{{ collect($mw)->map(fn ($w, $i) => round($mx($i), 1).','.round($my($w['median']), 1))->implode(' ') }}" />
+                        @endif
+                        @foreach($mw as $i => $w)
+                            <circle cx="{{ $mx($i) }}" cy="{{ $my($w['median']) }}" r="3.5" fill="{{ $w['median'] < 0 ? 'var(--emerald-600, #059669)' : ($w['median'] > 0 ? 'var(--red-600, #dc2626)' : 'var(--fg-3, #6b7280)') }}">
+                                <title>неделя с {{ \Illuminate\Support\Carbon::parse($w['week'])->format('d.m.Y') }}: {{ $w['median'] > 0 ? '+' : '' }}{{ number_format($w['median'], 1, ',', '') }}% · сравнили {{ $w['n'] }}</title></circle>
+                            <text x="{{ $mx($i) }}" y="{{ $MH - 6 }}" text-anchor="middle" font-size="11" fill="var(--fg-3, #6b7280)">{{ \Illuminate\Support\Carbon::parse($w['week'])->format('d.m') }}</text>
+                        @endforeach
+                    </svg>
+                @endif
+
                 <table style="width: 100%; max-width: 760px; font-size: 12.5px; border-collapse: collapse;">
                     <thead><tr style="color: var(--fg-3); text-align: right;">
                         <th style="text-align: left; padding: 4px 6px;">Неделя</th><th style="padding: 4px 6px;">Сравнили</th><th style="padding: 4px 6px;">Дешевле</th>
