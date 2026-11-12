@@ -51,9 +51,9 @@ class OpenAIChatService
 
         try {
             $fallback = app(OpenAIFallbackGateway::class);
-            // Прокси по очереди: не ответил сам прокси — следующий (OpenAIProxyPool).
+            // Маршруты по очереди журнала: не ответил сам маршрут — следующий (OpenAIProxyPool).
             [$response, $connectError] = app(OpenAIProxyPool::class)->request(
-                fn (string $baseUrl) => Http::withHeaders($headers)
+                fn (OpenAIRoute $route) => $route->http($headers)
                     ->timeout(120)
                     ->retry(3, function (int $attempt, $exception) {
                         // Уважаем Retry-After / x-ratelimit-reset (кап 10с), иначе
@@ -73,8 +73,7 @@ class OpenAIChatService
 
                         return false;
                     }, throw: false)
-                    ->post($baseUrl . '/v1/chat/completions', $payload),
-                $fallback->enabled(),
+                    ->post($route->url . '/v1/chat/completions', $payload),
             );
 
             // Основной канал недоступен (нет денег, ключ, перегрузка, нет связи) — резервный шлюз.

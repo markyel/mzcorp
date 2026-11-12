@@ -324,8 +324,11 @@ class OutboundToneAuditService
             $headers['X-Proxy-Key'] = config('services.openai.proxy_key');
         }
 
-        return $req->withHeaders($headers)->timeout(120)
-            ->post(app(\App\Services\AI\OpenAIProxyPool::class)->current().'/v1/chat/completions', [
+        // Первый маршрут очереди журнала (OpenAIProxyPool): прямому — HTTP-прокси, без X-Proxy-Key.
+        $route = app(\App\Services\AI\OpenAIProxyPool::class)->current();
+
+        return $route->apply($req, $headers)->timeout(120)
+            ->post($route->url.'/v1/chat/completions', [
                 'model' => $model,
                 'messages' => $this->messages($system, $batch),
             ] + $this->options());

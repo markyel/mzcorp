@@ -59,10 +59,10 @@ class OpenAIImageService
             return [];
         }
 
-        $responses = Http::pool(function (Pool $pool) use ($images, $prompt, $size, $quality) {
+        $route = app(OpenAIProxyPool::class)->current();
+        $responses = Http::pool(function (Pool $pool) use ($images, $prompt, $size, $quality, $route) {
             foreach ($images as $key => $bytes) {
-                $pool->as((string) $key)
-                    ->withHeaders($this->headers())
+                $route->apply($pool->as((string) $key), $this->headers())
                     ->timeout($this->timeout())
                     ->attach('image[]', $bytes, 'ref.'.self::ext($bytes), ['Content-Type' => self::mime($bytes)])
                     ->post($this->url('edits'), $this->editFields($prompt, $size, $quality));
@@ -108,7 +108,7 @@ class OpenAIImageService
 
     private function http(): \Illuminate\Http\Client\PendingRequest
     {
-        return Http::withHeaders($this->headers())->timeout($this->timeout());
+        return app(OpenAIProxyPool::class)->current()->http($this->headers())->timeout($this->timeout());
     }
 
     /** @return array<string, string> */
@@ -124,8 +124,8 @@ class OpenAIImageService
 
     private function url(string $op): string
     {
-        // Первый живой прокси (OpenAIProxyPool): картинку не повторяем — она долгая и платная.
-        return app(OpenAIProxyPool::class)->current().'/v1/images/'.$op;
+        // Первый маршрут очереди (OpenAIProxyPool): картинку не повторяем — она долгая и платная.
+        return app(OpenAIProxyPool::class)->current()->url.'/v1/images/'.$op;
     }
 
     private function model(): string

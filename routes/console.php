@@ -147,10 +147,10 @@ Schedule::command('quotes:reparse-failed --apply')
     ->onOneServer()
     ->runInBackground();
 
-// Прокси к OpenAI: отказавший пропускается, оживший возвращается в работу
-// (OPENAI_BASE_URLS, см. App\Services\AI\OpenAIProxyPool).
-Schedule::command('ai:proxies --probe')
-    ->everyFiveMinutes()
+// Маршруты к OpenAI: бесплатный опрос в журнал доступности — запросы идут по живым, самый быстрый первым
+// (ТЗ 12.11.2026, см. App\Services\AI\OpenAIRouteJournal). Журнал старше 45 минут — очередь по конфигу.
+Schedule::command('llm:probe-routes')
+    ->everyFifteenMinutes()
     ->withoutOverlapping()
     ->onOneServer()
     ->runInBackground();

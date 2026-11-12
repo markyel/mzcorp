@@ -76,9 +76,9 @@ class OpenAIEmbeddingService
         $fallback = app(OpenAIFallbackGateway::class);
         $hasReserve = $fallback->enabled() && config('services.openai.fallback.embeddings');
 
-        // Прокси по очереди: не ответил сам прокси — следующий (OpenAIProxyPool).
+        // Маршруты по очереди журнала: не ответил сам маршрут — следующий (OpenAIProxyPool).
         [$response, $connectError] = app(OpenAIProxyPool::class)->request(
-            fn (string $baseUrl) => Http::withHeaders($headers)
+            fn (OpenAIRoute $route) => $route->http($headers)
                 ->timeout(60)
                 ->connectTimeout(15)
                 ->retry(3, function (int $attempt, $exception) {
@@ -99,8 +99,7 @@ class OpenAIEmbeddingService
 
                     return false;
                 }, throw: false)
-                ->post($baseUrl . '/v1/embeddings', $payload),
-            $hasReserve,
+                ->post($route->url . '/v1/embeddings', $payload),
         );
 
         if (($response === null || ! $response->successful()) && $hasReserve

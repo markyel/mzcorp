@@ -4,28 +4,24 @@ namespace App\Services\AI;
 
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Перебор прокси к OpenAI. Прокси живут недолго: ai.lazylift.ru, Cloudflare Worker, ai3 —
- * каждый раз падал один адрес из OPENAI_BASE_URL, и до ручной правки .env весь ИИ шёл через
- * платный резерв (09.11.2026: ai3 не отвечал с ночи, ai2 и ai5 при этом работали).
+ * Маршруты к OpenAI. Прокси живут недолго: ai.lazylift.ru, Cloudflare Worker, ai3 — каждый раз
+ * падал один адрес, и до ручной правки .env весь ИИ шёл через платный резерв (09.11.2026).
  *
- * OPENAI_BASE_URLS — адреса через запятую по приоритету, ключ прокси у всех один
- * (OPENAI_PROXY_KEY). Запрос идёт в первый живой; не ответил он сам (нет связи, страница
- * nginx вместо ответа OpenAI, OpenAI не пускает страну выхода) — в следующий, а отказавший
- * пропускается OPENAI_PROXY_COOLDOWN_MINUTES минут. Ошибка самого OpenAI (нет денег, плохой
- * запрос, перегрузка) не переключает: через другой прокси ответ был бы тот же.
- * Отказали все — решает вызывающий: резервный шлюз (OpenAIFallbackGateway) или ошибка.
- *
- * `ai:proxies --probe` раз в 5 минут проверяет каждый прокси и возвращает оживших.
+ * Маршруты — OPENAI_BASE_URLS (прокси с X-Proxy-Key, по приоритету) и OPENAI_DIRECT_PROXIES (прямой
+ * выход на api.openai.com через HTTP-прокси). Очередь — по журналу доступности (OpenAIRouteJournal,
+ * 12.11.2026): живые по скорости, мёртвые не используются, журнал опрашивает llm:probe-routes раз в
+ * 15 минут. Запрос идёт в первый маршрут; не ответил сам маршрут (нет связи, страница прокси вместо
+ * ответа OpenAI, OpenAI не пускает страну выхода) — в следующий, а при обрыве связи или шлюза он сразу
+ * помечается мёртвым. Ошибка самого OpenAI (нет денег, плохой запрос, перегрузка) не переключает:
+ * через другой маршрут ответ был бы тот же. Отказали все — решает вызывающий: резервный шлюз
+ * (OpenAIFallbackGateway) или ошибка.
  */
 class OpenAIProxyPool
 {
-    private const CACHE_DOWN = 'openai:proxy:down:';
+    public function __construct(private readonly OpenAIRouteJournal $journal) {}
 
     /**
      * Адреса прокси по приоритету: OPENAI_BASE_URLS, иначе один OPENAI_BASE_URL.
@@ -50,20 +46,32 @@ class OpenAIProxyPool
     }
 
     /**
-     * Живые прокси по порядку. Отказали все: есть резерв — пусто (сразу в резерв, не ждать
-     * таймаутов каждого), резерва нет — все (лучше попытка, чем гарантированная ошибка).
+     * Все маршруты в порядке конфига: прокси, затем прямые выходы.
      *
-     * @return list<string>
+     * @return list<OpenAIRoute>
      */
-    public function candidates(bool $hasReserve = false): array
+    public function routes(): array
     {
-        $alive = array_values(array_filter($this->urls(), fn (string $url) => ! $this->isDown($url)));
+        $routes = array_map(fn (string $url) => OpenAIRoute::proxy($url), $this->urls());
+        foreach (array_filter(array_map('trim', explode(',', (string) config('services.openai.direct_proxies', '')))) as $proxy) {
+            $routes[] = OpenAIRoute::direct($proxy);
+        }
 
-        return $alive !== [] || $hasReserve ? $alive : $this->urls();
+        return array_values(collect($routes)->unique(fn (OpenAIRoute $r) => $r->key)->all());
     }
 
-    /** Адрес для вызовов без перебора (картинки, проверка тона): первый живой. */
-    public function current(): string
+    /**
+     * Очередь маршрутов для запроса — по журналу (OpenAIRouteJournal::order).
+     *
+     * @return list<OpenAIRoute>
+     */
+    public function candidates(): array
+    {
+        return OpenAIRouteJournal::order($this->routes(), $this->journal->all(), now());
+    }
+
+    /** Маршрут для вызовов без перебора (картинки, проверка тона): первый в очереди. */
+    public function current(): OpenAIRoute
     {
         return $this->candidates()[0];
     }
@@ -83,43 +91,39 @@ class OpenAIProxyPool
     }
 
     /**
-     * Запрос через прокси по очереди до первого, кто ответил сам (успехом или ошибкой OpenAI).
+     * Запрос по маршрутам по очереди до первого, кто ответил сам (успехом или ошибкой OpenAI).
      * Ответ — как у одиночного запроса: [ответ, ошибка соединения] последней попытки.
      *
-     * @param  callable(string): Response  $send  получает адрес прокси без «/» в конце
+     * @param  callable(OpenAIRoute): Response  $send
      * @return array{0: ?Response, 1: ?ConnectionException}
      */
-    public function request(callable $send, bool $hasReserve = false): array
+    public function request(callable $send): array
     {
-        $candidates = $this->candidates($hasReserve);
-        if ($candidates === []) {
-            return [null, new ConnectionException('All OpenAI proxies are marked down')];
-        }
-
         $response = null;
         $error = null;
-        foreach ($candidates as $url) {
+        foreach ($this->candidates() as $route) {
             $response = null;
             $error = null;
             try {
-                $response = $send($url);
+                $response = $send($route);
             } catch (ConnectionException $e) {
                 $error = $e;
             }
 
             if (! self::isProxyFailure($response, $error)) {
-                $this->markUp($url);
-
                 return [$response, null];
             }
-            $this->markDown($url, $response !== null ? $response->status().' '.mb_substr($response->body(), 0, 200) : (string) $error?->getMessage());
+            // Обрыв связи или шлюза — мёртв сразу; таймаут чтения долгого ответа модели — нет (§6 ТЗ).
+            if (OpenAIRouteJournal::failureKillsRoute($response, $error)) {
+                $this->journal->markDead($route, $response !== null ? 'HTTP '.$response->status().' '.$response->body() : (string) $error?->getMessage());
+            }
         }
 
         return [$response, $error];
     }
 
     /**
-     * Отказал ли сам прокси. Ответ OpenAI об ошибке — JSON с объектом «error»; всё прочее
+     * Отказал ли сам маршрут. Ответ OpenAI об ошибке — JSON с объектом «error»; всё прочее
      * (страница nginx 403/502, «forbidden» прокси) — от прокси. OpenAI 403 «unsupported
      * country» — тоже прокси: не пускают его страну выхода (Cloudflare Worker, 30.07.2026).
      */
@@ -140,65 +144,26 @@ class OpenAIProxyPool
     }
 
     /**
-     * Проверка прокси эмбеддингом слова в 8 измерениях (доли цента в сутки). Не список моделей:
-     * ai2 пропускает только рабочие пути, /v1/models у него 404.
+     * Бесплатная проверка маршрута (§2 ТЗ): чат с пустым списком сообщений — OpenAI отвечает 400 empty_array,
+     * токены не тратятся. Результат — в журнал.
      *
-     * @return array{ok: bool, detail: string, ms: int}
+     * @return array{ok: bool, ms: ?int, error: ?string}
      */
-    public function probe(string $url): array
+    public function probe(OpenAIRoute $route): array
     {
         $started = microtime(true);
         $response = null;
         $error = null;
         try {
-            $response = Http::withHeaders($this->headers())->connectTimeout(5)->timeout(15)->post($url.'/v1/embeddings', [
-                'model' => (string) config('services.openai.embedding_model', 'text-embedding-3-small'),
-                'input' => 'ping',
-                'dimensions' => 8,
-            ]);
+            $response = $route->http($this->headers())->connectTimeout(5)->timeout(20)
+                ->post($route->url.'/v1/chat/completions', ['model' => 'gpt-4o-mini', 'messages' => []]);
         } catch (ConnectionException $e) {
             $error = $e;
         }
         $ms = (int) round((microtime(true) - $started) * 1000);
-        $ok = $response !== null && $response->successful();
-        $detail = $response !== null ? 'HTTP '.$response->status() : mb_substr((string) $error?->getMessage(), 0, 160);
+        $result = OpenAIRouteJournal::classify($response, $error);
+        $this->journal->record($route, $result['ok'], $ms, $result['error']);
 
-        if ($ok) {
-            $this->markUp($url);
-        } elseif (self::isProxyFailure($response, $error)) {
-            $this->markDown($url, $detail.($response !== null ? ' '.mb_substr($response->body(), 0, 200) : ''));
-        }
-
-        return ['ok' => $ok, 'detail' => $detail, 'ms' => $ms];
-    }
-
-    public function isDown(string $url): bool
-    {
-        return Cache::has(self::CACHE_DOWN.md5($url));
-    }
-
-    /** @return array{at: string, why: string}|null */
-    public function downInfo(string $url): ?array
-    {
-        $info = Cache::get(self::CACHE_DOWN.md5($url));
-
-        return is_array($info) ? $info : null;
-    }
-
-    public function markDown(string $url, string $why): void
-    {
-        $minutes = max(1, (int) config('services.openai.proxy_cooldown_minutes', 10));
-        $info = ['at' => now()->toIso8601String(), 'why' => mb_substr($why, 0, 300)];
-        if (Cache::add(self::CACHE_DOWN.md5($url), $info, now()->addMinutes($minutes))) {
-            Log::warning('OpenAI proxy unavailable — requests go to the next one', ['proxy' => $url, 'why' => $info['why'], 'skip_minutes' => $minutes]);
-        }
-    }
-
-    public function markUp(string $url): void
-    {
-        if ($this->isDown($url)) {
-            Cache::forget(self::CACHE_DOWN.md5($url));
-            Log::info('OpenAI proxy is back', ['proxy' => $url]);
-        }
+        return ['ok' => $result['ok'], 'ms' => $ms, 'error' => $result['error']];
     }
 }
