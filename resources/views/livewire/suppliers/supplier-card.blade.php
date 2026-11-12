@@ -28,6 +28,9 @@
         @if($org->isArchived())<span class="chip chip-danger" title="Не виден в реестре и не предлагается в запросах цен">в архиве</span>@endif
         @if($p['is_agent'] ?? false)<span class="chip chip-info">агент</span>@endif
         <button type="button" wire:click="toggleAgent" class="btn btn-xs text-fg-3" title="Агент сам ищет поставщиков для нас: в его ценах — реальный поставщик">{{ ($p['is_agent'] ?? false) ? 'не агент' : 'это агент' }}</button>
+        @if($p['show_internal_code'] ?? false)<span class="chip chip-info" title="M-артикул стоит перед названием позиции в каждом запросе цены">видит M-артикул</span>@endif
+        <button type="button" wire:click="toggleShowCode" class="btn btn-xs text-fg-3"
+                title="Всегда показывать наш M-артикул: системному — в кабинете и письмах QuoteParts, внесистемному — перед названием позиции в нашем письме. По умолчанию скрыт.">{{ ($p['show_internal_code'] ?? false) ? 'скрыть M-артикул' : 'показывать M-артикул' }}</button>
         @if($org->qp_synced_at)<span class="text-[12px] text-fg-4 ml-auto">сверено с QuoteParts {{ $org->qp_synced_at->format('d.m H:i') }}</span>@endif
     </div>
     @if($org->onec_name && $org->onec_name !== $org->name)

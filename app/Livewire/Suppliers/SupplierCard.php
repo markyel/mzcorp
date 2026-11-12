@@ -322,6 +322,17 @@ class SupplierCard extends Component
         $this->push(fn (QuotePartsClient $qp) => $qp->setAgent($this->org->qp_key, $agent), $agent ? 'Отмечен как агент.' : 'Больше не агент.');
     }
 
+    /**
+     * Всегда показывать поставщику наш M-артикул: системному — в кабинете и письмах QuoteParts, внесистемному —
+     * перед названием позиции в нашем письме (копия признака у всех адресов — SupplierMirrorService).
+     */
+    public function toggleShowCode(): void
+    {
+        $show = ! (bool) (($this->org->qp_payload ?? [])['show_internal_code'] ?? false);
+        $this->push(fn (QuotePartsClient $qp) => $qp->setShowInternalCode($this->org->qp_key, $show),
+            $show ? 'Поставщик видит наш M-артикул в каждом запросе.' : 'M-артикул поставщику больше не показываем.');
+    }
+
     public function rebuildMatrix(SupplierMatrixBuilder $builder): void
     {
         $rules = (array) (((array) (($this->org->qp_payload ?? [])['assortment_matrix'] ?? []))['rules'] ?? []);
