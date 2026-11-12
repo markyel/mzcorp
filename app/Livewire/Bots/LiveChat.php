@@ -35,7 +35,7 @@ class LiveChat extends Component
     {
         $this->chatId = app(BotLiveChatService::class)->currentFor(auth()->user())?->id;
         $this->error = null;
-        unset($this->chat, $this->messages);
+        unset($this->chat, $this->feed);
     }
 
     #[Computed]
@@ -46,7 +46,7 @@ class LiveChat extends Component
 
     /** @return Collection<int, MessengerMessage> */
     #[Computed]
-    public function messages(): Collection
+    public function feed(): Collection
     {
         if ($this->chatId === null) {
             return collect();
@@ -65,12 +65,12 @@ class LiveChat extends Component
                 app(BotLiveChatService::class)->release($chat, 'timeout');
             }
             $this->chatId = null;
-            unset($this->chat, $this->messages);
+            unset($this->chat, $this->feed);
             $this->dispatch('toast', type: 'info', message: 'Чат вернулся боту — дальше клиенту отвечает бот.');
 
             return;
         }
-        unset($this->messages);
+        unset($this->feed);
     }
 
     public function send(): void
@@ -87,7 +87,7 @@ class LiveChat extends Component
         } else {
             $this->error = $res['message'];
         }
-        unset($this->chat, $this->messages);
+        unset($this->chat, $this->feed);
     }
 
     /** «Вернуть боту». */
@@ -97,7 +97,7 @@ class LiveChat extends Component
             app(BotLiveChatService::class)->release($chat, 'manual', auth()->user());
         }
         $this->chatId = null;
-        unset($this->chat, $this->messages);
+        unset($this->chat, $this->feed);
         $this->dispatch('live-chat-closed');
     }
 

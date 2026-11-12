@@ -155,6 +155,24 @@ class BotLiveChatTest extends TestCase
         $this->assertNull($live->currentFor($olga));
     }
 
+    /** Окно живого чата отправляет сообщение (12.11.2026: computed messages() ронял проверку поля — «This page has expired»). */
+    public function test_the_live_chat_window_sends_a_message(): void
+    {
+        $this->client('/start');
+        $olga = User::create(['name' => 'Ольга']);
+        app(BotLiveChatService::class)->take($this->chat(), $olga);
+        $this->messenger->sent = [];
+
+        \Livewire\Livewire::actingAs($olga)->test(\App\Livewire\Bots\LiveChat::class)
+            ->assertSee('Живой чат')
+            ->set('text', 'Добрый день, ролик есть')
+            ->call('send')
+            ->assertHasNoErrors()
+            ->assertSet('text', '');
+
+        $this->assertSame(['Добрый день, ролик есть'], $this->messenger->sent);
+    }
+
     public function test_a_message_on_behalf_of_the_bot_does_not_take_the_chat(): void
     {
         $this->client('/start');

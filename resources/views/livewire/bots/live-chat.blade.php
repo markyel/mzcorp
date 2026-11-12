@@ -79,7 +79,7 @@
             <div x-show="!min" x-ref="feed"
                  x-init="new MutationObserver(() => scrollDown(false)).observe($el, { childList: true, subtree: true })"
                  style="flex: 1 1 auto; overflow-y: auto; padding: 10px 12px; background: var(--bg-app); display: flex; flex-direction: column; gap: 6px;">
-                @foreach($this->messages as $m)
+                @foreach($this->feed as $m)
                     @php
                         $in = $m->direction === 'in';
                         $event = ($m->meta ?? [])['event'] ?? null;

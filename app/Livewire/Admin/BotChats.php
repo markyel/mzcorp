@@ -72,7 +72,12 @@ class BotChats extends Component
     {
         $this->authorizeAccess();
         $this->error = null;
-        $this->validate(['text' => ['required', 'string', 'max:'.\App\Services\Bot\BotLiveChatService::MAX_TEXT]], [], ['text' => 'сообщение']);
+        // Без $this->validate(): у компонента computed messages() — Livewire принял бы его за тексты ошибок (TypeError → 419).
+        if (trim($this->text) === '' || mb_strlen($this->text) > \App\Services\Bot\BotLiveChatService::MAX_TEXT) {
+            $this->error = trim($this->text) === '' ? 'Напишите сообщение.' : 'Слишком длинное — до '.\App\Services\Bot\BotLiveChatService::MAX_TEXT.' знаков.';
+
+            return;
+        }
         $chat = MessengerChat::findOrFail($this->chatId);
         $res = app(\App\Services\Bot\BotLiveChatService::class)->sendAsBot($chat, auth()->user(), $this->text);
         if ($res['ok']) {
