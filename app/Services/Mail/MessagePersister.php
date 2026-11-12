@@ -124,7 +124,7 @@ class MessagePersister
                 'cc_recipients' => $this->extractAddressList($msg, 'cc'),
                 'sent_at' => $this->extractDate($msg),
                 'body_plain' => $this->bodyPlainWithHtmlFallback($msg),
-                'body_html' => $this->cleanString((string) $msg->getHTMLBody()),
+                'body_html' => \App\Support\EmailHtml::declareUtf8($this->cleanString((string) $msg->getHTMLBody())),
                 'raw_source' => $this->cleanString((string) $msg->getRawBody()),
                 'headers' => $this->extractAllHeaders($msg),
                 'imap_flags' => $this->extractFlags($msg),
@@ -212,7 +212,7 @@ class MessagePersister
         DB::transaction(function () use ($row, $msg) {
             $row->forceFill([
                 'body_plain' => $this->bodyPlainWithHtmlFallback($msg),
-                'body_html' => $this->cleanString((string) $msg->getHTMLBody()),
+                'body_html' => \App\Support\EmailHtml::declareUtf8($this->cleanString((string) $msg->getHTMLBody())),
                 'headers' => $this->extractAllHeaders($msg),
                 'imap_flags' => $this->extractFlags($msg),
                 'body_fetched_at' => now(),

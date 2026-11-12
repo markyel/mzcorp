@@ -307,7 +307,7 @@ class Index extends Component
 
         $messageId = $email->id;
 
-        return \App\Support\EmailHtml::hideLocalImages(preg_replace_callback(
+        return \App\Support\EmailHtml::declareUtf8(\App\Support\EmailHtml::hideLocalImages(preg_replace_callback(
             \App\Support\EmailHtml::CID_ATTR_PATTERN,
             function ($m) use ($messageId) {
                 [$attr, $q, $cid] = \App\Support\EmailHtml::cidParts($m);
@@ -319,7 +319,7 @@ class Index extends Component
                 return $attr . '=' . $q . $url . $q;
             },
             $email->body_html
-        ) ?? $email->body_html);
+        ) ?? $email->body_html));
     }
 
     /* ------------------------------- Helpers -------------------------------- */

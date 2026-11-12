@@ -17,6 +17,20 @@ final class EmailHtml
      * сам файл (M-2026-19436, 14.10.2026): в письме — иконка битой картинки.
      * Подставляем прозрачный пиксель с той же пометкой, что у недошедших cid.
      */
+    /**
+     * HTML письма мы храним и показываем в UTF-8, а Outlook оставляет в нём `<meta … charset=koi8-r>`
+     * (windows-1251, …) — браузер верит мете и читает UTF-8 как KOI8-R: «п╬п╩п╩п╣пЁп╦» вместо
+     * «Коллеги» (Метеор Лифт, MZ2026-01418, 12.11.2026). Кодировку в мете — на utf-8.
+     */
+    public static function declareUtf8(string $html): string
+    {
+        return preg_replace_callback(
+            '/<meta\b[^>]*>/i',
+            fn ($m) => preg_replace('/charset\s*=\s*(["\']?)[\w.:-]+\1/i', 'charset=$1utf-8$1', $m[0]) ?? $m[0],
+            $html,
+        ) ?? $html;
+    }
+
     public static function hideLocalImages(string $html): string
     {
         return preg_replace(

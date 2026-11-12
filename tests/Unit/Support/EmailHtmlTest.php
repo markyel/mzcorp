@@ -42,4 +42,17 @@ class EmailHtmlTest extends TestCase
 
         $this->assertSame('<img src="<_4_165D9E40>" alt=cid:image003.png@01D4 style="b"><img src="<a@b>"><a href=\'<x>\'>l</a>', $out);
     }
+
+    public function test_the_declared_charset_becomes_utf8_only_in_meta(): void
+    {
+        // Outlook у Метеор Лифта (MZ2026-01418): письмо в KOI8-R, мы храним HTML в UTF-8, а мета осталась.
+        $html = '<html><head><meta http-equiv="Content-Type" content="text/html; charset=koi8-r"><META charset="windows-1251">'
+            .'<meta charset=cp1251></head><body>Коллеги, charset=koi8-r в тексте не трогаем</body></html>';
+
+        $this->assertSame(
+            '<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><META charset="utf-8">'
+            .'<meta charset=utf-8></head><body>Коллеги, charset=koi8-r в тексте не трогаем</body></html>',
+            EmailHtml::declareUtf8($html),
+        );
+    }
 }
