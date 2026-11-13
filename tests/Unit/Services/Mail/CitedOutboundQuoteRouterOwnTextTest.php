@@ -110,6 +110,10 @@ class CitedOutboundQuoteRouterOwnTextTest extends TestCase
         $this->assertSame([['360560'], false], $this->candidatesWithSubject('Re: 1399/ 360560', 'пришлите счет на 1 шт Карта 20006175'));
         // Артикул и ссылка в теме вырезаются, как и в теле.
         $this->assertSame([[], false], $this->candidatesWithSubject('Re: Выключатель ВП73-10432', 'ок'));
+        // M-2026-13917 (13.11.2026): код заказа клиента, склеенный с буквами, — не номер нашего КП.
+        $this->assertSame([[], false], $this->candidatesWithSubject('KM365754G01', 'Можно КП на 1 шт'));
+        // Слово-документ вплотную к номеру в теме — по-прежнему ссылка.
+        $this->assertSame([['366118'], false], $this->candidatesWithSubject('Re: КП366118', 'Пришлите счёт'));
 
         $this->assertSame([['364531'], false], $this->candidates('', "Счет во вложении?
 

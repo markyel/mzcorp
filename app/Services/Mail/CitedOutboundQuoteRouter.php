@@ -67,8 +67,13 @@ class CitedOutboundQuoteRouter
     /** «МЗ-10551» / «МЗ 369647» — наш префикс документов (файлы и тело наших писем). */
     private const OUR_PREFIX_RE = '/(?<![\p{L}\d])мз-?\s?(\d{5,8})(?!\d)/iu';
 
-    /** Любое число темы (после scrub: без ссылок, артикулов и наших кодов). */
-    private const SUBJECT_NUMBER_RE = '/(?<!\d)(\d{5,8})(?!\d)/';
+    /**
+     * Число темы (после scrub: без ссылок, артикулов и наших кодов), стоящее отдельно. Число,
+     * склеенное с буквами, — чужой код: «KM365754G01» (заказ клиента, M-2026-13917, 13.11.2026)
+     * привязал новую заявку к нашему КП 365754 трёхмесячной давности. «КП366118» в теме ловит
+     * explicitReferences.
+     */
+    private const SUBJECT_NUMBER_RE = '/(?<![\p{L}\d])(\d{5,8})(?![\p{L}\d])/u';
 
     /** Строка темы в заголовке цитаты/пересылки внутри тела — числа берём из неё целиком. */
     private const QUOTED_SUBJECT_LINE_RE = '/^[\s>]*(?:тема|subject)\s*:([^
@@ -288,7 +293,7 @@ class CitedOutboundQuoteRouter
         $numbers = [];
 
         $subject = $this->scrub((string) $message->subject);
-        $numbers = array_merge($numbers, $this->matchAll(self::SUBJECT_NUMBER_RE, $subject));
+        $numbers = array_merge($numbers, $this->matchAll(self::SUBJECT_NUMBER_RE, $subject), $this->explicitReferences($subject));
 
         $body = $this->scrub((string) $message->body_plain);
         $numbers = array_merge($numbers, $this->explicitReferences($body));
