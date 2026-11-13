@@ -60,16 +60,65 @@ class MailboxConnector
                     'username' => $mailbox->imap_username,
                     'password' => $authPassword,
                     'authentication' => $authentication,
-                    'timeout' => 30,
+                    'timeout' => self::CONNECT_TIMEOUT,
                 ],
             ],
             'default' => $accountKey,
         ]);
 
         $client = new Client($config);
-        $client->connect();
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                $client->connect();
+                break;
+            } catch (ConnectionFailedException $e) {
+                if ($attempt >= self::CONNECT_ATTEMPTS || ! self::isConnectTimeout($e)) {
+                    throw $e;
+                }
+                \Illuminate\Support\Facades\Log::info('MailboxConnector: IMAP connect timed out, retrying', [
+                    'mailbox_id' => $mailbox->id,
+                    'attempt' => $attempt,
+                ]);
+                usleep(500_000 * $attempt);
+            }
+        }
+        // Подключение — короткий таймаут, чтение — прежние 30 с: UID SEARCH по папке
+        // на 100k писем Яндекс считает секунд десять, и короткий таймаут рвал бы его.
+        $stream = $client->getConnection()->stream ?? null;
+        if (is_resource($stream)) {
+            stream_set_timeout($stream, self::READ_TIMEOUT);
+        }
 
         return $client;
+    }
+
+    /**
+     * Подключение к IMAP Яндекса: часть новых соединений с нашего адреса сервер молча отбрасывает
+     * (13.11.2026: 3–7% подключений к imap.yandex.ru:993 зависают, к smtp.yandex.ru и другим хостам —
+     * ни одного). Раньше такое соединение ждало 30 с и роняло задачу (181 «connection failed» за день);
+     * теперь — 8 с и повтор, повторное подключение почти всегда проходит.
+     */
+    private const CONNECT_TIMEOUT = 8;
+
+    private const CONNECT_ATTEMPTS = 3;
+
+    private const READ_TIMEOUT = 30;
+
+    /** Соединение не установилось (таймаут/обрыв TCP или TLS) — в отличие от отказа в авторизации. */
+    public static function isConnectTimeout(\Throwable $e): bool
+    {
+        for ($x = $e; $x !== null; $x = $x->getPrevious()) {
+            if ($x instanceof \Webklex\PHPIMAP\Exceptions\AuthFailedException) {
+                return false;
+            }
+        }
+        for ($x = $e; $x !== null; $x = $x->getPrevious()) {
+            if (preg_match('/timed out|connection failed|connection setup failed|unable to connect|handshake/i', $x->getMessage())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
