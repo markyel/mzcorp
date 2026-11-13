@@ -107,12 +107,12 @@ class RequestStateService
             // если новый этап «старше» текущего peak — обновляем. Это
             // позволяет UI показывать в чипе «дальше всего достигнутый»
             // статус, а не текущий operational (см. Request::displayedStatus).
+            // Переход НА веху назад (ждёт счёт → КП отправлено: клиент отозвал просьбу о счёте, менеджер
+            // вернул руками) откатывает и веху — иначе список так и показывал «ждёт счёт» (MZ2026-01114,
+            // 13.11.2026). Возврат «в работу» на правки (не веха) веху не трогает: КП-то отправлено.
             $toOrder = $to->lifecycleOrder();
-            if ($toOrder >= 0) {
-                $currentPeakOrder = $request->peak_status?->lifecycleOrder() ?? -1;
-                if ($toOrder > $currentPeakOrder) {
-                    $request->peak_status = $to;
-                }
+            if ($toOrder >= 0 && $request->peak_status !== $to) {
+                $request->peak_status = $to;
             }
 
             // Terminal: closed_at + lost-reason if applicable.
