@@ -13,6 +13,7 @@ class CatalogItemSupplierChoice extends Model
 {
     protected $fillable = [
         'catalog_item_id',
+        'draft_code',
         'supplier_key',
         'supplier_name',
         'source',

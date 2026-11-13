@@ -87,6 +87,16 @@ class SyncQuotePartsPoolJob implements ShouldQueue, ShouldBeUniqueUntilProcessin
                 Log::warning('QuoteParts supplier mirror failed', ['error' => $e->getMessage()]);
             }
 
+            // M-артикулы, указанные снабжением у новых позиций (T-…), которые 1С уже выгрузила в каталог, — к карточкам.
+            try {
+                $linked = app(\App\Services\QuoteParts\PriceDraftSkuService::class)->linkPending();
+                if ($linked > 0) {
+                    Log::info('Price draft SKUs linked to catalog', ['count' => $linked]);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Price draft SKU linking failed', ['error' => $e->getMessage()]);
+            }
+
             // Новые товары, получившие M-артикул: предварительные позиции → постоянные.
             try {
                 $promoted = app(\App\Services\QuoteParts\QuotePartsDraftService::class)->promoteMatched($pool);

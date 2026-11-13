@@ -62,19 +62,22 @@ class PriceExportService
      * @param  Collection<int, QuotePartsOffer>  $offers
      * @param  Collection<int, array<string, mixed>>  $mail
      */
-    public function exportOffers(Collection $offers, ?User $by, ?Collection $mail = null): PriceExport
+    public function exportOffers(Collection $offers, ?User $by, ?Collection $mail = null, array $draftSkus = []): PriceExport
     {
         $mail ??= collect();
-        $offers = $offers->filter(fn (QuotePartsOffer $o) => $o->catalogItem !== null && (float) $o->price > 0 && $o->countsAsItemPrice());
-        $choices = app(SupplierChoiceService::class)->forItems($offers->pluck('catalog_item_id')->merge($mail->pluck('cid'))->unique()->values()->all());
+        // $draftSkus: новые позиции без карточки — код T-… => M-артикул (PriceDraftSkuService).
+        $key = fn (QuotePartsOffer $o) => SupplierChoiceService::itemKey($o->catalog_item_id, $o->sku);
+        $offers = $offers->filter(fn (QuotePartsOffer $o) => ($o->catalogItem !== null || isset($draftSkus[(string) $o->sku]))
+            && (float) $o->price > 0 && $o->countsAsItemPrice());
+        $choices = app(SupplierChoiceService::class)->forKeys($offers->map($key)->merge($mail->pluck('cid'))->unique()->values()->all());
         $chosen = $choices->filter(fn ($c) => $c->source === 'quoteparts')->map(fn ($c) => (int) $c->offer_ref);
         $chosenMail = $choices->filter(fn ($c) => $c->source === 'email')->map(fn ($c) => (int) $c->offer_ref);
 
-        $prices = $offers->groupBy(fn (QuotePartsOffer $o) => $o->catalog_item_id.'|'.$o->supplier_key)
-            ->map(fn (Collection $g) => $g->first(fn ($o) => ($chosen[$o->catalog_item_id] ?? null) === (int) $o->id)
+        $prices = $offers->groupBy(fn (QuotePartsOffer $o) => $key($o).'|'.$o->supplier_key)
+            ->map(fn (Collection $g) => $g->first(fn ($o) => ($chosen[$key($o)] ?? null) === (int) $o->id)
                 ?? $g->where('kind', 'original')->sortByDesc('remote_updated_at')->first()
                 ?? $g->sortByDesc('remote_updated_at')->first())
-            ->map(fn (QuotePartsOffer $o) => self::quotePartsPrice($o));
+            ->map(fn (QuotePartsOffer $o) => self::quotePartsPrice($o, $draftSkus));
         foreach ($mail as $m) {
             $isChosen = ($chosenMail[$m['cid']] ?? null) === (int) $m['id'];
             $slot = $m['cid'].'|'.$m['key'];
@@ -99,11 +102,12 @@ class PriceExportService
      * @param  Collection<int, QuotePartsOffer>  $offers  действующие предложения позиций списка
      * @return string путь файла на диске выгрузок
      */
-    public function writeCompanion(Collection $offers, ?User $by, ?Collection $mail = null): string
+    public function writeCompanion(Collection $offers, ?User $by, ?Collection $mail = null, array $draftSkus = []): string
     {
         $mail ??= collect();
-        $choices = app(SupplierChoiceService::class)->forItems($offers->pluck('catalog_item_id')->merge($mail->pluck('cid'))->filter()->unique()->values()->all());
-        $rows = self::companionRows($offers, $choices, $this->names1c($offers->pluck('supplier_key')->merge($mail->pluck('key'))->filter()->unique()->values()->all()), $mail);
+        $keys = $offers->map(fn (QuotePartsOffer $o) => SupplierChoiceService::itemKey($o->catalog_item_id, $o->sku));
+        $choices = app(SupplierChoiceService::class)->forKeys($keys->merge($mail->pluck('cid'))->filter()->unique()->values()->all());
+        $rows = self::companionRows($offers, $choices, $this->names1c($offers->pluck('supplier_key')->merge($mail->pluck('key'))->filter()->unique()->values()->all()), $mail, $draftSkus);
 
         $book = new Spreadsheet;
         $sheet = $book->getActiveSheet();
@@ -143,7 +147,7 @@ class PriceExportService
      * @param  array<string, string>  $names  ключ поставщика => название в 1С
      * @return list<array{sku:string, name:string, price:float, currency:?string, supplier:string, comment:?string}>
      */
-    public static function companionRows(Collection $offers, Collection $choices, array $names, ?Collection $mail = null): array
+    public static function companionRows(Collection $offers, Collection $choices, array $names, ?Collection $mail = null, array $draftSkus = []): array
     {
         $rows = [];
         foreach ($choices as $cid => $c) {
@@ -157,13 +161,16 @@ class PriceExportService
             if (($c->source ?? null) !== 'quoteparts') {
                 continue;
             }
-            $o = $offers->first(fn (QuotePartsOffer $o) => (int) $o->id === (int) $c->offer_ref && (int) $o->catalog_item_id === (int) $cid);
-            if ($o === null || $o->catalogItem === null) {
+            $o = $offers->first(fn (QuotePartsOffer $o) => (int) $o->id === (int) $c->offer_ref
+                && (string) SupplierChoiceService::itemKey($o->catalog_item_id, $o->sku) === (string) $cid);
+            // Новая позиция без карточки — под M-артикулом, указанным снабжением.
+            $draftSku = $o !== null && $o->catalogItem === null ? ($draftSkus[(string) $o->sku] ?? null) : null;
+            if ($o === null || ($o->catalogItem === null && $draftSku === null)) {
                 continue;
             }
             $rows[] = [
-                'sku' => (string) $o->catalogItem->sku,
-                'name' => (string) $o->catalogItem->name,
+                'sku' => (string) ($o->catalogItem?->sku ?? $draftSku),
+                'name' => (string) ($o->catalogItem?->name ?? $o->product_name ?? ''),
                 'price' => (float) $o->price,
                 'currency' => $o->currency,
                 'supplier' => (string) ($names[(string) $o->supplier_key] ?? ($o->supplier_name ?: $o->supplier_key)),
@@ -208,7 +215,7 @@ class PriceExportService
             return $p + ['name' => $name, 'code' => $code];
         })->sortBy('date')->keyBy(fn ($p) => $p['sku'].'|'.($p['key'] ?? 'name:'.$p['name']))->sortBy(fn ($p) => [$p['sku'], $p['name']])->values();
 
-        $choices = app(SupplierChoiceService::class)->forItems($latest->pluck('cid')->unique()->values()->all());
+        $choices = app(SupplierChoiceService::class)->forKeys($latest->pluck('cid')->unique()->values()->all());
 
         $book = new Spreadsheet;
         $sheet = $book->getActiveSheet();
@@ -344,10 +351,12 @@ class PriceExportService
      *
      * @return array{cid:int, sku:string, key:?string, fallback:string, price:float, currency:?string, date:Carbon, comment:?string}
      */
-    private static function quotePartsPrice(QuotePartsOffer $o): array
+    private static function quotePartsPrice(QuotePartsOffer $o, array $draftSkus = []): array
     {
         return [
-            'cid' => (int) $o->catalog_item_id, 'sku' => (string) $o->catalogItem->sku,
+            // Новая позиция без карточки: ключ — код T-…, артикул в файле — указанный снабжением M-артикул.
+            'cid' => $o->catalog_item_id !== null ? (int) $o->catalog_item_id : (string) $o->sku,
+            'sku' => (string) ($o->catalogItem?->sku ?? $draftSkus[(string) $o->sku]),
             'key' => $o->supplier_key, 'fallback' => (string) ($o->supplier_name ?: $o->supplier_key),
             'price' => (float) $o->price, 'currency' => $o->currency,
             'date' => Carbon::parse($o->remote_updated_at ?? $o->created_at),

@@ -40,6 +40,58 @@ class SupplierChoiceService
     }
 
     /**
+     * Выбор у новой позиции без карточки каталога — по коду T-… (см. PriceDraftSkuService).
+     *
+     * @param  array{supplier:string, price:?float, currency:?string, source:?string, ref:?int}  $offer
+     */
+    public function chooseDraft(string $draftCode, string $key, array $offer, User $by): CatalogItemSupplierChoice
+    {
+        return CatalogItemSupplierChoice::query()->updateOrCreate(['draft_code' => $draftCode, 'catalog_item_id' => null], [
+            'supplier_key' => $key,
+            'supplier_name' => mb_substr($offer['supplier'], 0, 255),
+            'source' => $offer['source'] ?? null,
+            'offer_ref' => $offer['ref'] ?? null,
+            'price' => $offer['price'] ?? null,
+            'currency' => $offer['currency'] ?? null,
+            'chosen_by_user_id' => $by->id,
+            'chosen_at' => now(),
+        ]);
+    }
+
+    public function clearDraft(string $draftCode): void
+    {
+        CatalogItemSupplierChoice::query()->where('draft_code', $draftCode)->delete();
+    }
+
+    /**
+     * Выбор по ключам позиций: id карточки каталога (int) или код новой позиции T-… (string).
+     *
+     * @param  iterable<int|string>  $keys
+     * @return Collection<int|string, CatalogItemSupplierChoice> ключ позиции => выбор
+     */
+    public function forKeys(iterable $keys): Collection
+    {
+        $keys = collect($keys)->filter(fn ($k) => $k !== null && $k !== '')->unique();
+        $ids = $keys->filter(fn ($k) => is_int($k) || ctype_digit((string) $k))->map(fn ($k) => (int) $k)->values()->all();
+        $drafts = $keys->reject(fn ($k) => is_int($k) || ctype_digit((string) $k))->map(fn ($k) => (string) $k)->values()->all();
+
+        $out = $ids === [] ? collect() : $this->forItems($ids);
+        if ($drafts !== []) {
+            foreach (CatalogItemSupplierChoice::query()->whereIn('draft_code', $drafts)->whereNull('catalog_item_id')->get() as $c) {
+                $out->put($c->draft_code, $c);
+            }
+        }
+
+        return $out;
+    }
+
+    /** Ключ позиции для выбора: карточка каталога, иначе код новой позиции. */
+    public static function itemKey(?int $catalogItemId, ?string $sku): int|string|null
+    {
+        return $catalogItemId ?? (($sku !== null && str_starts_with($sku, 'T-')) ? $sku : null);
+    }
+
+    /**
      * @param  list<int>  $catalogItemIds
      * @return Collection<int, CatalogItemSupplierChoice> catalog_item_id => выбор
      */

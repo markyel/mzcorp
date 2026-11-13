@@ -34,21 +34,36 @@ class PriceActualizationService
      */
     public function choose(QuotePartsOffer $offer, User $by): void
     {
-        if ($offer->catalog_item_id === null || $offer->supplier_key === null) {
-            throw new \DomainException('Предложение без позиции каталога или поставщика — выбрать нельзя.');
+        // Новая позиция без карточки каталога (T-…) — выбор по коду, когда снабжение указало M-артикул.
+        $draft = $offer->catalog_item_id === null && $offer->sku !== null
+            && \App\Models\PriceDraftSku::unlinkedMap([(string) $offer->sku]) !== [] ? (string) $offer->sku : null;
+        if ($offer->catalog_item_id === null && $draft === null) {
+            throw new \DomainException(str_starts_with((string) $offer->sku, 'T-')
+                ? 'У новой позиции нет M-артикула — укажите его, тогда можно выбрать поставщика.'
+                : 'Предложение без позиции каталога — выбрать нельзя.');
+        }
+        if ($offer->supplier_key === null) {
+            throw new \DomainException('Предложение без поставщика — выбрать нельзя.');
         }
         if ($offer->ignored_at !== null) {
             throw new \DomainException('Предложение отмечено «Игнорировать» — сначала верните его.');
         }
 
-        DB::transaction(function () use ($offer, $by) {
+        DB::transaction(function () use ($offer, $by, $draft) {
             if (($offer->kind ?? 'original') !== 'original' && $offer->review_status !== QuotePartsOffer::REVIEW_ACCEPTED) {
                 $this->prices->review($offer, true, $by);
             }
-            $this->choices->choose((int) $offer->catalog_item_id, (string) $offer->supplier_key, [
+            $choice = [
                 'supplier' => (string) ($offer->supplier_name ?: $offer->supplier_key), 'price' => $offer->price !== null ? (float) $offer->price : null,
                 'currency' => $offer->currency, 'source' => 'quoteparts', 'ref' => $offer->id,
-            ], $by);
+            ];
+            if ($draft !== null) {
+                $this->choices->chooseDraft($draft, (string) $offer->supplier_key, $choice, $by);
+                PricePosition::query()->where('sku', $draft)->whereNotNull('exported_at')->update(['exported_at' => null]);
+
+                return;
+            }
+            $this->choices->choose((int) $offer->catalog_item_id, (string) $offer->supplier_key, $choice, $by);
             PricePosition::query()->where('catalog_item_id', $offer->catalog_item_id)->whereNotNull('exported_at')
                 ->update(['exported_at' => null]);
         });
@@ -81,9 +96,11 @@ class PriceActualizationService
      *
      * @param  Collection<int, QuotePartsOffer>  $offers  действующие предложения позиции на экране
      */
-    public function add(string $sku, int $catalogItemId, Collection $offers, User $by, array $mailOfferIds = []): ?string
+    public function add(string $sku, ?int $catalogItemId, Collection $offers, User $by, array $mailOfferIds = []): ?string
     {
-        $chosen = $this->choices->forItems([$catalogItemId])->get($catalogItemId);
+        // Новая позиция без карточки (T-… с M-артикулом) — выбор по коду позиции.
+        $key = \App\Services\Procurement\SupplierChoiceService::itemKey($catalogItemId, $sku);
+        $chosen = $key === null ? null : $this->choices->forKeys([$key])->get($key);
         $picked = $chosen && (($chosen->source === 'quoteparts' && $offers->contains('id', (int) $chosen->offer_ref))
             || ($chosen->source === 'email' && in_array((int) $chosen->offer_ref, array_map('intval', $mailOfferIds), true)));
         if (! $picked) {
@@ -130,26 +147,30 @@ class PriceActualizationService
     public function export(Collection $positions, bool $finish, User $by): PriceExport
     {
         $cids = $positions->pluck('catalog_item_id')->filter()->unique()->values()->all();
-        $offers = QuotePartsOffer::query()->with('catalogItem:id,sku,name')->whereIn('catalog_item_id', $cids)
+        // Новые позиции без карточки (T-…): предложения — по коду, в файл — под указанным M-артикулом.
+        $draftSkus = \App\Models\PriceDraftSku::unlinkedMap($positions->whereNull('catalog_item_id')->pluck('sku'));
+        $offers = QuotePartsOffer::query()->with('catalogItem:id,sku,name')
+            ->where(fn ($q) => $q->whereIn('catalog_item_id', $cids)
+                ->orWhere(fn ($d) => $d->whereNull('catalog_item_id')->whereIn('sku', array_keys($draftSkus))))
             ->where('superseded', false)->whereIn('status', ['active', 'expiring'])->whereNull('ignored_at')->get();
 
         // Цены из писем мимо QuoteParts по этим позициям — в тот же файл (12.11.2026).
         $mail = collect(app(MailPriceOffers::class)->bySku())->only($positions->pluck('sku')->all())->flatMap(fn ($m) => $m['offers'])->values();
 
-        $export = $this->exports->exportOffers($offers, $by, $mail);
+        $export = $this->exports->exportOffers($offers, $by, $mail, $draftSkus);
         // Сопроводительный файл: что покупаем здесь и у кого. Не вышел — файл для 1С всё равно отдаём.
         try {
-            $export->forceFill(['companion_path' => $this->exports->writeCompanion($offers, $by, $mail)])->save();
+            $export->forceFill(['companion_path' => $this->exports->writeCompanion($offers, $by, $mail, $draftSkus)])->save();
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('Price export companion file failed', ['price_export_id' => $export->id, 'error' => $e->getMessage()]);
         }
-        $choices = $this->choices->forItems($cids);
+        $choices = $this->choices->forKeys($positions->map(fn (PricePosition $p) => SupplierChoiceService::itemKey($p->catalog_item_id, $p->sku)));
 
-        DB::transaction(function () use ($positions, $finish, $export, $choices, $offers, $by) {
+        DB::transaction(function () use ($positions, $finish, $export, $choices, $offers, $by, $draftSkus) {
             foreach ($positions as $p) {
                 $p->forceFill(['exported_at' => now(), 'price_export_id' => $export->id]);
                 if ($finish) {
-                    $c = $choices->get($p->catalog_item_id);
+                    $c = $choices->get(SupplierChoiceService::itemKey($p->catalog_item_id, $p->sku));
                     $o = $c ? $offers->firstWhere('id', (int) $c->offer_ref) : null;
                     $p->forceFill([
                         'closed_at' => now(), 'closed_by_user_id' => $by->id,
@@ -159,7 +180,7 @@ class PriceActualizationService
                             'price' => $c->price !== null ? (float) $c->price : null, 'currency' => $c->currency,
                         ] : null,
                     ]);
-                    self::recordDecision((int) $p->catalog_item_id, (string) $p->sku, $c, $export, $by);
+                    self::recordDecision($p->catalog_item_id !== null ? (int) $p->catalog_item_id : null, (string) ($draftSkus[$p->sku] ?? $p->sku), $c, $export, $by);
                 }
                 $p->save();
             }
@@ -172,7 +193,7 @@ class PriceActualizationService
      * Закупочное решение (12.11.2026): цена «Закупаем здесь», выгруженная в 1С с завершением сбора цен, — в журнал.
      * Следующая цена позиции сравнивается с ним («Результаты» раздела QuoteParts).
      */
-    public static function recordDecision(int $catalogItemId, string $sku, ?object $choice, ?PriceExport $export, User $by): void
+    public static function recordDecision(?int $catalogItemId, string $sku, ?object $choice, ?PriceExport $export, User $by): void
     {
         if ($choice === null || $choice->price === null || (float) $choice->price <= 0
             || ! \Illuminate\Support\Facades\Schema::hasTable('price_purchase_decisions')) {

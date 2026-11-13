@@ -160,6 +160,10 @@ class QuotePartsPriceService
 
         $names = app(QuotePartsRfqService::class)->supplierNames([(object) ['snapshot' => ['suppliers' => collect($offers)->map(fn ($o) => ['external_id' => $o['supplier'] ?? null])->all()]]]);
         $catalog = CatalogItem::query()->whereIn('sku', collect($offers)->pluck('item_code')->filter()->unique())->pluck('id', 'sku');
+        // Новая позиция (T-…), привязанная к карточке по M-артикулу снабжения (PriceDraftSkuService), — к ней же,
+        // пока QuoteParts не перевёл её в постоянную; иначе синк снимал бы привязку.
+        $catalog = $catalog->union(\App\Models\PriceDraftSku::query()->whereIn('draft_code', collect($offers)->pluck('item_code')->filter()->unique())
+            ->whereNotNull('catalog_item_id')->pluck('catalog_item_id', 'draft_code'));
         // Ответ на запрос: заявка — по нашему запросу (quoteparts_rfqs), иначе по коду заявки в external_ref.
         $rfqIds = collect($offers)->pluck('rfq.id')->filter()->unique()->values();
         $requestByRfq = $rfqIds->isEmpty() ? collect() : \App\Models\QuotePartsRfq::query()->whereIn('remote_id', $rfqIds)->whereNotNull('request_id')->pluck('request_id', 'remote_id');
@@ -315,6 +319,10 @@ class QuotePartsPriceService
 
         $names = app(QuotePartsRfqService::class)->supplierNames([(object) ['snapshot' => ['suppliers' => collect($declines)->map(fn ($d) => ['external_id' => $d['supplier'] ?? null])->all()]]]);
         $catalog = CatalogItem::query()->whereIn('sku', collect($declines)->pluck('item_code')->filter()->unique())->pluck('id', 'sku');
+        // Новая позиция (T-…), привязанная к карточке по M-артикулу снабжения (PriceDraftSkuService), — к ней же,
+        // пока QuoteParts не перевёл её в постоянную; иначе синк снимал бы привязку.
+        $catalog = $catalog->union(\App\Models\PriceDraftSku::query()->whereIn('draft_code', collect($declines)->pluck('item_code')->filter()->unique())
+            ->whereNotNull('catalog_item_id')->pluck('catalog_item_id', 'draft_code'));
 
         foreach ($declines as $d) {
             QuotePartsItemDecline::query()->updateOrCreate(['remote_id' => (int) $d['id']], [

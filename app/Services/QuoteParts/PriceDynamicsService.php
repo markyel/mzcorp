@@ -72,6 +72,8 @@ class PriceDynamicsService
     {
         $since = now()->subWeeks($weeks)->startOfWeek();
         $decisions = DB::table('price_purchase_decisions')->where('decided_at', '>=', $since)
+            // Новую позицию без карточки (T-… с M-артикулом) сравнивать не с чем, пока её не привяжут к каталогу.
+            ->whereNotNull('catalog_item_id')
             ->get(['catalog_item_id', 'price', 'currency', 'decided_at']);
         if ($decisions->isEmpty()) {
             return [];

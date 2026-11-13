@@ -89,8 +89,8 @@
             @elseif($cl)
                 <span class="pa-note" style="color: var(--fg-3)">На уточнение не ответил за рабочий день.</span>
             @endif
-            @if(! $r['cid'])
-                <span class="pa-note" style="color: var(--status-attn-fg)">Нет в каталоге 1С — закупку отметите после создания позиции.</span>
+            @if(! ($it['ckey'] ?? $r['cid']))
+                <span class="pa-note" style="color: var(--status-attn-fg)">Нет в каталоге 1С — укажите M-артикул в шапке позиции, когда он станет известен.</span>
             @else
                 {{-- Комментарий в выгрузке 1С: собран из предложения, снабжение может поправить (сохраняется при уходе из поля). --}}
                 <div x-data="{ v: @js((string) ($r['export_comment'] ?? '')), saved: @js((string) ($r['export_comment'] ?? '')) }" class="pa-col" style="gap: 2px">
@@ -109,12 +109,12 @@
                 <button type="button" wire:click="ignore({{ $r['id'] }}, false)" class="pa-btn pa-btn-link">вернуть</button>
             @elseif($isChosen)
                 <span class="pa-state is-ok"><span class="dot"></span>{{ $wasBought ? 'закупали · выгружено '.$pos->closed_at->timezone($tz)->format('d.m H:i') : ($pos?->in_export_at && $pos?->exported_at ? 'закупаем · выгружено' : 'закупаем') }}</span>
-                <button type="button" wire:click="clearChoice({{ $r['cid'] }})" class="pa-btn pa-btn-link" title="Снять выбор поставщика">вернуть</button>
+                <button type="button" wire:click="clearChoice(@js($it['ckey'] ?? $r['cid']))" class="pa-btn pa-btn-link" title="Снять выбор поставщика">вернуть</button>
             @elseif($clWaiting)
                 <span class="pa-state is-info"><span class="dot"></span>запрошено уточнение</span>
                 <button type="button" wire:click="clearClarification({{ $r['id'] }})" class="pa-btn pa-btn-link" title="Снять ожидание ответа и решить сейчас">вернуть</button>
             @else
-                @if($r['cid'] && $r['key'] && ! $r['stale'])
+                @if(($it['ckey'] ?? $r['cid']) && $r['key'] && ! $r['stale'])
                     <button type="button" wire:click="choose({{ $r['id'] }})" class="pa-btn pa-btn-secondary"
                             title="Закупаем у этого поставщика — идёт в выгрузку 1С как выбранный{{ $kind !== 'original' ? '; '.mb_strtolower(\App\Models\QuotePartsOffer::kindLabel($kind)).' — как цена позиции, с примечанием' : '' }}">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Закупаем здесь</button>

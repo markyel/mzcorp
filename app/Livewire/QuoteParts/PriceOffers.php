@@ -118,11 +118,11 @@ class PriceOffers extends Component
     public function addToExport(string $sku, PriceActualizationService $service): void
     {
         $it = $this->screenItems()->firstWhere('sku', $sku);
-        if ($it === null || ! $it['cid']) {
+        if ($it === null || ! ($it['ckey'] ?? $it['cid'])) {
             return;
         }
         try {
-            $from = $service->add($sku, (int) $it['cid'], self::liveOffers($it), auth()->user(), ($it['mail'] ?? collect())->pluck('id')->all());
+            $from = $service->add($sku, $it['cid'] ? (int) $it['cid'] : null, self::liveOffers($it), auth()->user(), ($it['mail'] ?? collect())->pluck('id')->all());
         } catch (\DomainException $e) {
             $this->dispatch('toast', type: 'error', message: $e->getMessage());
 
@@ -146,7 +146,7 @@ class PriceOffers extends Component
     public function addAllChosen(PriceActualizationService $service): void
     {
         foreach ($this->bar['addable'] as $it) {
-            $service->add($it['sku'], (int) $it['cid'], self::liveOffers($it), auth()->user(), ($it['mail'] ?? collect())->pluck('id')->all());
+            $service->add($it['sku'], $it['cid'] ? (int) $it['cid'] : null, self::liveOffers($it), auth()->user(), ($it['mail'] ?? collect())->pluck('id')->all());
         }
         $this->exportNote = null;
         $this->forget();
@@ -197,8 +197,17 @@ class PriceOffers extends Component
             $this->positions, $this->newItems, $this->readyList, $this->waitItems, $this->bar, $this->clarifications);
     }
 
-    public function clearChoice(int $catalogItemId, SupplierChoiceService $choices): void
+    /** @param  int|string  $key  карточка каталога или код новой позиции T-… */
+    public function clearChoice(int|string $key, SupplierChoiceService $choices): void
     {
+        if (is_string($key) && ! ctype_digit($key)) {
+            $choices->clearDraft($key);
+            PricePosition::query()->where('sku', $key)->update(['in_export_at' => null, 'in_export_by_user_id' => null, 'exported_at' => null]);
+            $this->forget();
+
+            return;
+        }
+        $catalogItemId = (int) $key;
         $choices->clear($catalogItemId);
         // Поставщик снят — в выгрузке позиции без него делать нечего.
         PricePosition::query()->where('catalog_item_id', $catalogItemId)
@@ -573,13 +582,54 @@ class PriceOffers extends Component
             ->values()->all();
     }
 
-    /** Выбранные поставщики позиций на экране (catalog_item_id => выбор). */
+    /** Выбранные поставщики позиций на экране (ключ позиции — catalog_item_id или код T-… => выбор). */
     #[Computed]
     public function choices(): Collection
     {
-        $ids = $this->rows->pluck('cid')->merge($this->readyItems->pluck('cid'))->merge($this->newItems->pluck('cid'))->filter()->unique()->values()->all();
+        $keys = $this->rows->pluck('cid')->merge($this->readyItems->pluck('ckey'))->merge($this->newItems->pluck('ckey'))
+            ->merge(array_keys($this->draftSkus))->filter()->unique()->values()->all();
 
-        return app(SupplierChoiceService::class)->forItems($ids);
+        return app(SupplierChoiceService::class)->forKeys($keys);
+    }
+
+    /**
+     * M-артикулы новых позиций, которых ещё нет в каталоге (код T-… => M-артикул). Таблица маленькая:
+     * привязанные к карточке сюда не входят.
+     *
+     * @return array<string, string>
+     */
+    #[Computed]
+    public function draftSkus(): array
+    {
+        return \App\Models\PriceDraftSku::query()->whereNull('catalog_item_id')->pluck('sku', 'draft_code')->all();
+    }
+
+    /** M-артикул новой позиции (T-…): есть в каталоге — позиция привязывается к карточке, нет — выгружается под ним. */
+    public function setDraftSku(string $draftCode, string $sku, \App\Services\QuoteParts\PriceDraftSkuService $drafts): void
+    {
+        try {
+            $res = $drafts->assign($draftCode, $sku, auth()->user());
+        } catch (\DomainException $e) {
+            $this->dispatch('toast', type: 'error', message: $e->getMessage());
+
+            return;
+        }
+        $this->dispatch('toast', type: 'success', message: $res['catalog_item_id'] !== null
+            ? $draftCode.' → '.$res['sku'].': позиция есть в каталоге, привязана к карточке.'
+            : $draftCode.' → '.$res['sku'].': в каталоге пока нет — цены выгрузятся под этим артикулом, к карточке привяжется сама.');
+        unset($this->draftSkus);
+        $this->forget();
+    }
+
+    public function clearDraftSku(string $draftCode, \App\Services\QuoteParts\PriceDraftSkuService $drafts, SupplierChoiceService $choices): void
+    {
+        $drafts->clear($draftCode);
+        // Без M-артикула позиция выгружаться не может — выбор и место в выгрузке снимаем.
+        $choices->clearDraft($draftCode);
+        PricePosition::query()->where('sku', $draftCode)->whereNull('closed_at')
+            ->update(['in_export_at' => null, 'in_export_by_user_id' => null, 'exported_at' => null]);
+        unset($this->draftSkus);
+        $this->forget();
     }
 
     /** Последняя закупка из 1С (цена, поставщик, дата) по позициям на экране. */
@@ -756,9 +806,15 @@ class PriceOffers extends Component
                     return count($keys);
                 };
 
+                // Новая позиция (T-…) с M-артикулом от снабжения: выбор и выгрузка — по коду T-…, в 1С — под M-артикулом.
+                $draftSku = $first['cid'] === null && str_starts_with((string) $first['sku'], 'T-') ? ($this->draftSkus[$first['sku']] ?? null) : null;
+
                 return [
                     'sku' => $first['sku'],
                     'cid' => $first['cid'],
+                    'draft_sku' => $draftSku,
+                    // Ключ выбора «Закупаем здесь»: карточка каталога, иначе код T-… (когда указан M-артикул).
+                    'ckey' => $first['cid'] ?? ($draftSku !== null ? $first['sku'] : null),
                     'name' => $first['name'],
                     'purchase' => $first['purchase'],
                     'sale' => $first['sale'],
@@ -962,7 +1018,8 @@ class PriceOffers extends Component
      */
     public function stateOf(array $it): array
     {
-        $choice = $it['cid'] ? $this->choices->get($it['cid']) : null;
+        $key = $it['ckey'] ?? $it['cid'];
+        $choice = $key ? $this->choices->get($key) : null;
         $ids = $it['offers']->pluck('id')->all();
         $chosen = $choice && $choice->source === 'quoteparts' && in_array((int) $choice->offer_ref, $ids, true) ? (int) $choice->offer_ref : null;
         // Выбрана цена из письма (MailPriceOffers): «m{id}» — не путается с номерами предложений QuoteParts.
@@ -990,9 +1047,9 @@ class PriceOffers extends Component
     {
         $ready = $this->readyList;
         $list = $this->positions->filter(fn (PricePosition $p) => $p->inExportOf(auth()->id()));
-        $choices = app(SupplierChoiceService::class)->forItems($list->pluck('catalog_item_id')->filter()->values()->all());
+        $choices = app(SupplierChoiceService::class)->forKeys($list->map(fn (PricePosition $p) => SupplierChoiceService::itemKey($p->catalog_item_id, $p->sku)));
         $sum = $list->sum(function (PricePosition $p) use ($choices) {
-            $c = $choices->get($p->catalog_item_id);
+            $c = $choices->get(SupplierChoiceService::itemKey($p->catalog_item_id, $p->sku));
             $rub = $c ? IqotCurrencyConverter::toRub($c->price !== null ? (float) $c->price : null, $c->currency) : null;
 
             return $rub && $rub['known'] ? (float) $rub['rub'] : 0.0;
@@ -1004,7 +1061,7 @@ class PriceOffers extends Component
             'inList' => $list->count(),
             'sum' => $sum,
             'addable' => $this->newItems->merge($ready)
-                ->filter(fn ($it) => $it['cid'] && $this->stateOf($it)['chosen'] !== null && ! ($this->positions->get($it['sku'])?->in_export_at))
+                ->filter(fn ($it) => ($it['ckey'] ?? $it['cid']) && $this->stateOf($it)['chosen'] !== null && ! ($this->positions->get($it['sku'])?->in_export_at))
                 ->values(),
         ];
     }

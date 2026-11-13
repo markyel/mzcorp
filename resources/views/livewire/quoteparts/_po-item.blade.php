@@ -37,6 +37,24 @@
                 <span class="pa-sku" style="cursor: default">{{ $it['sku'] ?: '—' }}</span>
             @endif
             @if($it['name'])<span class="pa-name">{{ $it['name'] }}</span>@endif
+            {{-- Новая позиция (T-…): M-артикул, когда он стал известен. Есть в каталоге — привяжется к карточке,
+                 нет — цены выгрузятся под ним, к карточке позиция привяжется, когда 1С выгрузит товар. --}}
+            @if(! $it['cid'] && str_starts_with((string) $it['sku'], 'T-') && $section !== 'closed')
+                @if($it['draft_sku'] ?? null)
+                    <span style="display: inline-flex; align-items: center; gap: 6px; white-space: nowrap" title="M-артикул указан снабжением; в каталоге 1С пока нет — цены выгрузятся под ним">
+                        <span class="pa-dim">→</span><b class="mono" style="font-weight: 600">{{ $it['draft_sku'] }}</b>
+                        <span class="pa-dim" style="font-size: 12px">новый, в каталоге пока нет</span>
+                        <button type="button" wire:click="clearDraftSku(@js($it['sku']))" class="pa-btn pa-btn-link" style="height: 20px">снять</button>
+                    </span>
+                @else
+                    <span x-data="{ v: '' }" style="display: inline-flex; align-items: center; gap: 4px">
+                        <input type="text" x-model="v" placeholder="M-артикул" class="pa-input" style="width: 110px; height: 26px"
+                               title="Когда M-артикул станет известен: есть в каталоге — позиция привяжется к карточке, нет — цены выгрузятся под ним"
+                               x-on:keydown.enter="if (v.trim()) $wire.setDraftSku(@js($it['sku']), v.trim())">
+                        <button type="button" x-on:click="if (v.trim()) $wire.setDraftSku(@js($it['sku']), v.trim())" class="pa-btn pa-btn-secondary" style="height: 26px">Указать</button>
+                    </span>
+                @endif
+            @endif
             <span class="pa-answered">{{ $answered }}</span>
             @if($it['requested_at'])<span class="pa-dim">запрос {{ $it['requested_at']->timezone($tz)->format('d.m H:i') }}</span>@endif
             @if($section === 'wait' && $it['wait_until'])<span style="color: var(--status-attn-fg); white-space: nowrap">· ждём до {{ $it['wait_until']->timezone($tz)->format('d.m H:i') }}</span>@endif
@@ -49,7 +67,7 @@
         </div>
         <div class="pa-head-side">
             {{-- В «Ждём» — только когда выбрана цена из письма: такая позиция в «Готово» не попадает (готовность считает QuoteParts). --}}
-            @if((! in_array($section, ['wait', 'closed'], true) || ($section === 'wait' && is_string($chosen))) && $it['cid'])
+            @if((! in_array($section, ['wait', 'closed'], true) || ($section === 'wait' && is_string($chosen))) && ($it['ckey'] ?? $it['cid']))
                 @if($pos?->inExportOf(auth()->id()))
                     <span class="pa-export is-in">
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{ $pos->exported_at ? 'выгружено '.$pos->exported_at->timezone($tz)->format('d.m H:i') : 'в выгрузке 1С' }}</span>
