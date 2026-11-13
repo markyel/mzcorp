@@ -2287,12 +2287,23 @@ PROMPT;
         return $tokens;
     }
 
+    /** «БРО.364.025 ТУ», «НЩО.364.006ТУ», «ГОСТ 12345-78», «ТУ 3428-001-…» — обозначение стандарта. */
+    private static function isStandardDesignation(string $article): bool
+    {
+        return (bool) preg_match('/(?<!\p{L})(?:ТУ|ГОСТ|ОСТ|СТО)(?!\p{L})/u', mb_strtoupper($article));
+    }
+
     private function dedupeWithinList(array $items): array
     {
         $seenIndex = []; // key => index в $result
         $result = [];
         foreach ($items as $item) {
-            $base = $this->normalizeArticle($item['article'] ?? null);
+            // Номер ТУ/ГОСТ — обозначение стандарта, а не артикул: по одному ТУ делают и вилку,
+            // и розетку. «Вилка РП10-7ЛП БРО.364.025 ТУ» и «Розетка РП10-7ЛП БРО.364.025 ТУ»
+            // (MZ2026-01489) слиплись в вилку на 20 шт. Такие позиции сравниваем по названию.
+            $base = self::isStandardDesignation((string) ($item['article'] ?? ''))
+                ? ''
+                : $this->normalizeArticle($item['article'] ?? null);
             if ($base === '') {
                 $base = mb_strtolower(trim($item['name'] ?? ''));
             }
@@ -2681,6 +2692,18 @@ PROMPT;
             }
 
             $existingArticle = $this->normalizeArticle($existing->parsed_article);
+
+            // 0. Номер ТУ/ГОСТ вместо артикула (см. dedupeWithinList): по одному ТУ — и вилка,
+            //    и розетка, а их названия похожи больше чем на 70%. Дубль — только то же название.
+            if (self::isStandardDesignation((string) ($parsed['article'] ?? ''))
+                || self::isStandardDesignation((string) $existing->parsed_article)) {
+                $norm = fn (string $s) => preg_replace('/[\s.\-«»"]+/u', '', mb_strtolower($s));
+                if ($parsedName !== '' && $norm($parsedName) === $norm((string) $existing->parsed_name)) {
+                    return true;
+                }
+
+                continue;
+            }
 
             // 1. Оба артикула заданы — решение строго по артикулу:
             //    равны → дубль; различаются → НЕ дубль (даже если имена похожи).

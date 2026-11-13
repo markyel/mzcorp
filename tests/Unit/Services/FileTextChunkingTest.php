@@ -121,6 +121,43 @@ class FileTextChunkingTest extends TestCase
         $this->assertEquals(24, $roller['__qty_summed']);
     }
 
+    /** 13.11.2026, MZ2026-01489: вилка и розетка по одному ТУ слиплись в вилку на 20 шт. */
+    public function test_a_standard_number_is_not_an_article_for_the_merge(): void
+    {
+        $svc = new RequestItemParsingService(new OpenAIChatService());
+        $items = [
+            ['name' => 'Вилка РП10-7ЛП БРО.364.025. ТУ', 'article' => 'БРО.364.025. ТУ', 'qty' => 10, '__source' => 'email_body'],
+            ['name' => 'Розетка РП10-7ЛП БРО.364.025 ТУ', 'article' => 'БРО.364.025 ТУ', 'qty' => 10, '__source' => 'email_body'],
+            ['name' => 'Вилка ГРПМ 1-31ШУ2-В', 'article' => 'НЩО.364.006ТУ', 'qty' => 10, '__source' => 'email_body'],
+            ['name' => 'Вилка ГРПМ 1-31ШУ2-В', 'article' => 'НЩО.364.006ТУ', 'qty' => 5, '__source' => 'email_body'],
+            // Обычный артикул со словом-фрагментом «ТУ» внутри — по-прежнему артикул.
+            ['name' => 'Кнопка', 'article' => 'ТУБ-12', 'qty' => 1, '__source' => 'email_body'],
+            ['name' => 'Кнопка вызова', 'article' => 'ТУБ-12', 'qty' => 1, '__source' => 'email_body'],
+        ];
+
+        $out = (new \ReflectionMethod($svc, 'dedupeWithinList'))->invoke($svc, $items);
+        $byName = array_column($out, null, 'name');
+
+        $this->assertCount(4, $out);
+        $this->assertEquals(10, $byName['Вилка РП10-7ЛП БРО.364.025. ТУ']['__qty_summed'] ?? $byName['Вилка РП10-7ЛП БРО.364.025. ТУ']['qty']);
+        $this->assertArrayHasKey('Розетка РП10-7ЛП БРО.364.025 ТУ', $byName);
+        // Та же строка дважды — склеивается по названию, как раньше по артикулу.
+        $this->assertEquals(15, $byName['Вилка ГРПМ 1-31ШУ2-В']['__qty_summed']);
+        $this->assertEquals(2, $byName['Кнопка']['__qty_summed']);
+    }
+
+    public function test_a_new_row_with_the_same_standard_number_is_not_taken_for_an_existing_item(): void
+    {
+        $svc = new RequestItemParsingService(new OpenAIChatService());
+        $existing = collect([new \App\Models\RequestItem([
+            'parsed_name' => 'Вилка РП10-7ЛП БРО.364.025. ТУ', 'parsed_article' => 'БРО.364.025. ТУ', 'is_active' => true,
+        ])]);
+        $dup = new \ReflectionMethod($svc, 'isDuplicate');
+
+        $this->assertFalse($dup->invoke($svc, ['name' => 'Розетка РП10-7ЛП БРО.364.025 ТУ', 'article' => 'БРО.364.025 ТУ'], $existing));
+        $this->assertTrue($dup->invoke($svc, ['name' => 'Вилка РП10-7ЛП БРО.364.025 ТУ', 'article' => 'БРО.364.025 ТУ'], $existing));
+    }
+
     private function chunked(RequestItemParsingService $svc, string $text): array
     {
         $m = new \ReflectionMethod($svc, 'parseFileTextInChunks');
