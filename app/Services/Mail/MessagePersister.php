@@ -8,6 +8,7 @@ use App\Models\EmailMessage;
 use App\Models\Mailbox;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Webklex\PHPIMAP\Attachment;
@@ -109,6 +110,7 @@ class MessagePersister
                 return null;
             }
 
+            $bodies = $this->bodies($msg);
             $email = EmailMessage::create([
                 'mailbox_id' => $mailbox->id,
                 'folder' => $folder,
@@ -123,14 +125,14 @@ class MessagePersister
                 'to_recipients' => $this->extractAddressList($msg, 'to'),
                 'cc_recipients' => $this->extractAddressList($msg, 'cc'),
                 'sent_at' => $this->extractDate($msg),
-                'body_plain' => $this->bodyPlainWithHtmlFallback($msg),
-                'body_html' => \App\Support\EmailHtml::declareUtf8($this->cleanString((string) $msg->getHTMLBody())),
+                'body_plain' => $bodies['plain'],
+                'body_html' => \App\Support\EmailHtml::declareUtf8($this->cleanString($bodies['html'])),
                 'raw_source' => $this->cleanString((string) $msg->getRawBody()),
                 'headers' => $this->extractAllHeaders($msg),
                 'imap_flags' => $this->extractFlags($msg),
             ]);
 
-            $this->persistAttachments($msg, $email);
+            $this->persistAttachments($msg, $email, $bodies['consumed']);
 
             return $email;
         });
@@ -147,13 +149,19 @@ class MessagePersister
      * ordinal-mapping ненадёжен → каждому атачу передадим null,
      * persistAttachment упадёт на старую resolveRawFilename цепочку.
      */
-    private function persistAttachments(Message $msg, EmailMessage $email): void
+    /**
+     * @param  list<int>  $skip  вложения, которые на деле тело письма (см. bodies())
+     */
+    private function persistAttachments(Message $msg, EmailMessage $email, array $skip = []): void
     {
         $attachments = $msg->getAttachments();
         $rawBodyFilenames = self::extractFilenamesFromRawBody((string) $msg->getRawBody());
         $useRawBodyNames = (count($rawBodyFilenames) === count($attachments));
 
         foreach ($attachments as $i => $att) {
+            if (in_array($i, $skip, true)) {
+                continue;
+            }
             $rawNameFromBody = $useRawBodyNames ? ($rawBodyFilenames[$i] ?? null) : null;
             $this->persistAttachment($att, $email, $rawNameFromBody !== '' ? $rawNameFromBody : null);
         }
@@ -210,16 +218,17 @@ class MessagePersister
     public function hydrateBody(EmailMessage $row, Message $msg): void
     {
         DB::transaction(function () use ($row, $msg) {
+            $bodies = $this->bodies($msg);
             $row->forceFill([
-                'body_plain' => $this->bodyPlainWithHtmlFallback($msg),
-                'body_html' => \App\Support\EmailHtml::declareUtf8($this->cleanString((string) $msg->getHTMLBody())),
+                'body_plain' => $bodies['plain'],
+                'body_html' => \App\Support\EmailHtml::declareUtf8($this->cleanString($bodies['html'])),
                 'headers' => $this->extractAllHeaders($msg),
                 'imap_flags' => $this->extractFlags($msg),
                 'body_fetched_at' => now(),
             ])->saveQuietly();
 
             if (! $row->attachments()->exists()) {
-                $this->persistAttachments($msg, $row);
+                $this->persistAttachments($msg, $row, $bodies['consumed']);
             }
         });
     }
@@ -1164,15 +1173,48 @@ class MessagePersister
     }
 
     /**
+     * Тело письма: text/plain и HTML, а у писем, где webklex не раскрыл вложенный
+     * multipart с одной частью, — из этого «вложения» (см. NestedMimePart). Такое
+     * вложение не сохраняем: его номер — в consumed.
+     *
+     * @return array{plain: string, html: string, consumed: list<int>}
+     */
+    private function bodies($msg): array
+    {
+        $plain = (string) $msg->getTextBody();
+        $html = (string) $msg->getHTMLBody();
+        $consumed = [];
+
+        if (trim($plain) === '' && trim($html) === '') {
+            foreach ($msg->getAttachments() as $i => $att) {
+                $found = \App\Support\NestedMimePart::bodies((string) $att->getContent());
+                if ($found === null) {
+                    continue;
+                }
+                $consumed[] = $i;
+                $plain = $plain !== '' ? $plain : $found['plain'];
+                $html = $html !== '' ? $html : $found['html'];
+            }
+            if ($consumed !== []) {
+                Log::info('MessagePersister: body recovered from an unparsed nested multipart', [
+                    'subject' => $this->truncate($this->decodeMimeHeader($this->stringify($msg->getSubject())), 200),
+                    'parts' => count($consumed),
+                ]);
+            }
+        }
+
+        return ['plain' => $this->plainWithHtmlFallback($plain, $html), 'html' => $html, 'consumed' => $consumed];
+    }
+
+    /**
      * body_plain: text/plain часть письма; если её нет (html-only письмо) —
      * html→text, чтобы содержимое всё равно попало в body_plain. Нужно для
      * поиска по телу («Почта», trgm-индекс) и для парсеров, которые читают
      * body_plain. Раньше body_plain у html-only писем оставался пустым (18% всех).
      */
-    private function bodyPlainWithHtmlFallback($msg): string
+    private function plainWithHtmlFallback(string $plain, string $html): string
     {
-        $plain = $this->cleanString((string) $msg->getTextBody());
-        $html = (string) $msg->getHTMLBody();
+        $plain = $this->cleanString($plain);
 
         // Текстовая часть бывает мусорной: отправитель делает её наивным
         // стриппингом тегов, и в неё попадает содержимое <style>. Письмо
