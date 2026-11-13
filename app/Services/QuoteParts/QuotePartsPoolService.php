@@ -219,11 +219,16 @@ class QuotePartsPoolService
             'weight_kg' => $item->weight !== null && (float) $item->weight > 0 ? (float) $item->weight : null,
             'specs' => $specs,
             'photo_url' => $item->photo_url ?: null,
-            'purchase_prices' => $purchasePrices->map(fn (CatalogSupplierPrice $p) => [
+            // Цена с мусором вместо валюты (13.11.2026: «6 683,19» — файл не того формата) — не цена:
+            // не отправляем, иначе QuoteParts отвечает 422 на всю пачку. Пустая валюта — RUB, как раньше.
+            'purchase_prices' => $purchasePrices
+                ->filter(fn (CatalogSupplierPrice $p) => trim((string) $p->currency) === ''
+                    || \App\Services\Catalog\CatalogSupplierPriceImportService::currency($p->currency) !== null)
+                ->map(fn (CatalogSupplierPrice $p) => [
                 'kind' => $p->kind,
                 'supplier_name' => $p->supplier_name_1c,
                 'price' => (float) $p->price,
-                'currency' => $p->currency ?: 'RUB',
+                'currency' => \App\Services\Catalog\CatalogSupplierPriceImportService::currency($p->currency) ?? 'RUB',
                 'purchased_at' => $p->priced_at?->toDateString(),
             ])->values()->all(),
             // Группы Китай / Россия / Европа: какие поставщики видят позицию в своём кабинете.

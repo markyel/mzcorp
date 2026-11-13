@@ -36,6 +36,11 @@ class CatalogSupplierPriceImportService
         if (mb_strtolower(trim((string) ($header[0] ?? ''))) !== 'артикул') {
             throw new \RuntimeException('Не похоже на выгрузку «Номенклатура (история цен)»: первая колонка не «Артикул».');
         }
+        // «Артикул» первым есть и в выгрузке ручной синхронизации каталога (цены продажи): 13.11.2026
+        // её загрузили сюда, и закупочная цена встала поставщиком, а цена продажи — валютой.
+        if (! str_contains(mb_strtolower((string) ($header[self::COLUMNS[CatalogSupplierPrice::KIND_FIRST]['supplier']] ?? '')), 'поставщик')) {
+            throw new \RuntimeException('Не похоже на выгрузку «Номенклатура (история цен)»: в колонке C нет «Поставщик». Выгрузка с ценами продажи загружается в «Синхронизации каталога».');
+        }
 
         $catalog = DB::table('catalog_items')->pluck('id', 'sku')->all();
         $suppliers = $this->supplierIndex();
@@ -74,7 +79,7 @@ class CatalogSupplierPriceImportService
                     'supplier_id' => $supplierId,
                     'priced_at' => self::date($line[$c['date']] ?? null),
                     'price' => round($price, 4),
-                    'currency' => ($cur = trim((string) ($line[$c['currency']] ?? ''))) !== '' ? mb_substr($cur, 0, 8) : null,
+                    'currency' => self::currency($line[$c['currency']] ?? null),
                 ];
             }
         }
@@ -184,6 +189,14 @@ class CatalogSupplierPriceImportService
     public static function normalize(string $name): string
     {
         return trim(preg_replace('/\s+/u', ' ', mb_strtolower($name)) ?? '');
+    }
+
+    /** Код валюты ISO (USD, EUR, RUB); что-то другое в колонке валюты — не валюта, а сдвиг колонок. */
+    public static function currency(mixed $value): ?string
+    {
+        $cur = mb_strtoupper(trim((string) $value));
+
+        return preg_match('/^[A-Z]{3}$/', $cur) ? $cur : null;
     }
 
     private static function date(mixed $value): ?string
