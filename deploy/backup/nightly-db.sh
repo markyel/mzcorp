@@ -8,7 +8,7 @@
 # Файлы (storage/app обоих приложений) сюда не входят: их раз в неделю забирает на рабочий
 # компьютер deploy/backup/pull-files.sh; полная копия с файлами — deploy/backup/full-backup.sh.
 # Проверка: pg_restore --list по архиву и контрольные суммы. Хранится KEEP_DAYS дней.
-# Скачать на рабочий компьютер: deploy/backup/pull-backup.sh nightly/<дата>.
+# Скачать на рабочий компьютер: deploy/backup/pull-backup.sh nightly/<дата>. Вне сервера — s3-push.sh.
 set -uo pipefail
 
 APP=/var/www/mzcorp
@@ -59,3 +59,6 @@ tar -C "$APP" -czf "$OUT/retro-index-and-env.tgz" storage/app/retro .env
 log "готово: $(du -sh "$OUT" | cut -f1), заявок $(grep '^requests|' "$OUT/counts.txt" | cut -d'|' -f2)"
 
 find "$ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" -print -exec rm -rf {} + | sed 's/^/удалена старая копия: /'
+
+# Копия вне сервера: ночная копия и новые файлы — в бакет Yandex Object Storage (если ключ задан).
+bash "$(dirname "$0")/s3-push.sh" "$OUT"
