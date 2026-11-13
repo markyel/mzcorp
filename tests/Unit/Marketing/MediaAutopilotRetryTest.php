@@ -151,11 +151,49 @@ class MediaAutopilotRetryTest extends TestCase
         // Текст длиннее подписи альбома (1024) — уходит отдельным сообщением после альбома.
         $res = app(MediaPublisherService::class)->publish($this->publication([
             'body' => str_repeat('Плата управления лифтом. ', 60),
-            'image_urls' => ['https://mzcorp.test/media/cover/c.jpg'],
+            'image_urls' => ['https://mzcorp.test/media/cover/c.jpg', 'https://mzcorp.test/media/cover/d.jpg'],
         ]));
 
         $this->assertFalse($res['ok']);
         $this->assertFalse($res['retry']);
+    }
+
+    /** 13.11.2026: обложка ушла отдельным постом над длинным текстом — теперь она превью того же сообщения. */
+    public function test_one_cover_with_a_long_text_is_one_message_with_the_cover_above(): void
+    {
+        Http::fake(function (Request $r) {
+            return str_contains($r->url(), 'mzcorp.test')
+                ? Http::response('JPEG', 200, ['Content-Type' => 'image/jpeg', 'Content-Length' => '4'])
+                : Http::response(['ok' => true, 'result' => ['message_id' => 94]]);
+        });
+
+        $res = app(MediaPublisherService::class)->publish($this->publication([
+            'body' => str_repeat('Плата управления лифтом. ', 60),
+            'image_urls' => ['https://mzcorp.test/media/cover/c.jpg'],
+        ]));
+
+        $this->assertTrue($res['ok']);
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), 'sendMediaGroup'));
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), 'sendMessage')
+            && $r['link_preview_options'] === ['url' => 'https://mzcorp.test/media/cover/c.jpg', 'prefer_large_media' => true, 'show_above_text' => true]
+            && mb_strlen($r['text']) > 1024);
+    }
+
+    public function test_a_short_text_with_a_cover_stays_a_photo_with_a_caption(): void
+    {
+        Http::fake(function (Request $r) {
+            return str_contains($r->url(), 'mzcorp.test')
+                ? Http::response('JPEG', 200, ['Content-Type' => 'image/jpeg', 'Content-Length' => '4'])
+                : Http::response(['ok' => true, 'result' => [['message_id' => 95]]]);
+        });
+
+        $res = app(MediaPublisherService::class)->publish($this->publication([
+            'image_urls' => ['https://mzcorp.test/media/cover/c.jpg'],
+        ]));
+
+        $this->assertTrue($res['ok']);
+        Http::assertSent(fn (Request $r) => str_ends_with($r->url(), 'sendMediaGroup'));
+        Http::assertNotSent(fn (Request $r) => str_ends_with($r->url(), 'sendMessage'));
     }
 
     /** 27.10.2026: черновик 112 написан, когда обложки не генерировались, — повтор выпустил его без картинки. */

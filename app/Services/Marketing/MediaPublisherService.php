@@ -831,14 +831,17 @@ class MediaPublisherService
         $mode = $html ? 'HTML' : null;
         // Альбом уже в канале — сбой на тексте следом повторять нельзя: альбом вышел бы дважды.
         $albumSent = false;
+        // Подпись к фото у Telegram — 1024 знака; считаем по видимому тексту: html-разметка ссылок в лимит не идёт.
+        $fits = mb_strlen($html ? strip_tags($text) : $text) <= 1024;
+        // Одна обложка и длинный текст: альбом без подписи и текст следом читатель видит двумя постами
+        // (13.11.2026). Обложку показываем крупным превью ссылки над текстом — одно сообщение до 4096 знаков.
+        // Картинку Telegram забирает с нашего сайта сам.
+        $preview = count($images) === 1 && ! $fits;
 
         try {
-            // С картинками пост уходит альбомом. Подпись у альбома всего 1024
-            // знака — если текст длиннее, шлём альбом без подписи, а текст
-            // отдельным сообщением следом: обрезать материал ради формата нельзя.
-            // Считаем по видимому тексту: html-разметка ссылок в лимит не идёт.
-            if ($images !== []) {
-                $fits = mb_strlen($html ? strip_tags($text) : $text) <= 1024;
+            // С картинками пост уходит альбомом. Если текст длиннее подписи, шлём альбом
+            // без подписи, а текст отдельным сообщением следом: обрезать материал ради формата нельзя.
+            if ($images !== [] && ! $preview) {
                 $media = [];
                 $request = $this->retryConnect(Http::timeout(self::TIMEOUT * 3)->withOptions(\App\Support\TelegramHttp::options()));
 
@@ -888,7 +891,9 @@ class MediaPublisherService
                     'chat_id' => $chatId,
                     'text' => mb_substr($text, 0, 4096),
                     'parse_mode' => $mode,
-                    'disable_web_page_preview' => true,
+                    'link_preview_options' => $preview
+                        ? ['url' => $images[0], 'prefer_large_media' => true, 'show_above_text' => true]
+                        : ['is_disabled' => true],
                 ]))->json();
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => 'Telegram не ответил: '.self::redactSecrets($e->getMessage()), 'url' => null, 'external_id' => null,
