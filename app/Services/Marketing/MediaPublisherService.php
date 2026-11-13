@@ -892,7 +892,7 @@ class MediaPublisherService
                     'text' => mb_substr($text, 0, 4096),
                     'parse_mode' => $mode,
                     'link_preview_options' => $preview
-                        ? ['url' => $images[0], 'prefer_large_media' => true, 'show_above_text' => true]
+                        ? ['url' => self::telegramFetchableUrl($images[0]), 'prefer_large_media' => true, 'show_above_text' => true]
                         : ['is_disabled' => true],
                 ]))->json();
         } catch (\Throwable $e) {
@@ -905,6 +905,21 @@ class MediaPublisherService
         }
 
         return $this->telegramResult($channel, $r['result']['message_id'] ?? null);
+    }
+
+    /**
+     * Адрес картинки, который Telegram сможет скачать сам. С 06.11.2026 Telegram не достаёт
+     * до mzcorp.ru, и превью с нашей обложкой выходило пустым (13.11.2026) — обложку
+     * отдаём через посредника services.telegram.media_relay. Чужие адреса — как есть.
+     */
+    public static function telegramFetchableUrl(string $url): string
+    {
+        $relay = rtrim((string) config('services.telegram.media_relay', ''), '/');
+        $own = rtrim((string) config('app.url'), '/').'/media/cover/';
+
+        return $relay !== '' && str_starts_with($url, $own)
+            ? $relay.'/media/cover/'.substr($url, strlen($own))
+            : $url;
     }
 
     /**

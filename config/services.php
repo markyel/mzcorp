@@ -492,6 +492,9 @@ return [
         // Адрес вебхука бота заявок, если Telegram не достаёт до нашего домена
         // (посредник передаёт запрос в /api/bot/telegram). Пусто — свой маршрут.
         'webhook_url' => env('TELEGRAM_WEBHOOK_URL', ''),
+        // Откуда Telegram берёт обложку для превью поста: адрес посредника вместо нашего домена
+        // перед /media/cover/… (Telegram сам качает картинку, а до mzcorp.ru не достаёт). Пусто — как есть.
+        'media_relay' => env('TELEGRAM_MEDIA_RELAY', ''),
     ],
 
     'max' => [

@@ -179,6 +179,19 @@ class MediaAutopilotRetryTest extends TestCase
             && mb_strlen($r['text']) > 1024);
     }
 
+    /** 13.11.2026: Telegram не достаёт до mzcorp.ru — превью с обложкой вышло пустым; обложку отдаёт посредник. */
+    public function test_the_cover_preview_goes_through_the_relay(): void
+    {
+        config(['app.url' => 'https://mzcorp.ru', 'services.telegram.media_relay' => 'https://quoteparts.net/relay/mzcorp/']);
+
+        $this->assertSame('https://quoteparts.net/relay/mzcorp/media/cover/c.jpg',
+            MediaPublisherService::telegramFetchableUrl('https://mzcorp.ru/media/cover/c.jpg'));
+        $this->assertSame('https://myzip.ru/photo/1.jpg', MediaPublisherService::telegramFetchableUrl('https://myzip.ru/photo/1.jpg'));
+
+        config(['services.telegram.media_relay' => '']);
+        $this->assertSame('https://mzcorp.ru/media/cover/c.jpg', MediaPublisherService::telegramFetchableUrl('https://mzcorp.ru/media/cover/c.jpg'));
+    }
+
     public function test_a_short_text_with_a_cover_stays_a_photo_with_a_caption(): void
     {
         Http::fake(function (Request $r) {
