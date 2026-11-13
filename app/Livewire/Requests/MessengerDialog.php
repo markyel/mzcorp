@@ -158,7 +158,11 @@ class MessengerDialog extends Component
         $this->dispatch('toast', type: 'success', message: $res['message']);
     }
 
-    public function removeUpload(int $i): void
+    /**
+     * Убрать прикреплённый файл. Не removeUpload: так называется встроенное действие
+     * WithFileUploads — Livewire перехватывал клик и падал с «Property [$0] not found» (13.11.2026).
+     */
+    public function dropUpload(int $i): void
     {
         unset($this->uploads[$i]);
         $this->uploads = array_values($this->uploads);

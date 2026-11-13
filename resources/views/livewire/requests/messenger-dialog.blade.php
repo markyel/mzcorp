@@ -178,7 +178,7 @@
                             @foreach($uploads as $i => $u)
                                 <span class="chip text-[11px]" style="background: var(--neutral-100); color: var(--fg-2);" wire:key="up-{{ $i }}">
                                     📎 {{ $u->getClientOriginalName() }}
-                                    <button type="button" wire:click="removeUpload({{ $i }})" class="text-fg-3 hover:text-fg-1" style="margin-left: 4px;">✕</button>
+                                    <button type="button" wire:click="dropUpload({{ $i }})" class="text-fg-3 hover:text-fg-1" style="margin-left: 4px;">✕</button>
                                 </span>
                             @endforeach
                         </div>
