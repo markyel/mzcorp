@@ -33,6 +33,9 @@ enum DetectorType: string
     // расширение. НЕ авто-применяется — только ПОДСКАЗКА менеджеру. apply →
     // spinOffNewRequest (создать новую заявку), а не смена статуса.
     case InboundPossibleNewRequest = 'inbound_possible_new_request';
+    // Клиент попросил счёт, а потом отозвал просьбу («отбой, не надо пока счёт»):
+    // заявка из «ждёт счёт» возвращается в «КП отправлено» (MZ2026-01114, 13.11.2026).
+    case InboundInvoiceWithdrawn = 'inbound_invoice_withdrawn';
     case InboundUnclear = 'inbound_unclear';
 
     public function label(): string
@@ -50,6 +53,7 @@ enum DetectorType: string
             self::InboundClarificationResponse => 'Клиент: ответ на уточнение',
             self::InboundExtension => 'Клиент: добавил позиции',
             self::InboundPossibleNewRequest => 'Клиент: возможно новая заявка',
+            self::InboundInvoiceWithdrawn => 'Клиент: счёт пока не нужен',
             self::InboundUnclear => 'Клиент: непонятно',
         };
     }
@@ -105,6 +109,7 @@ enum DetectorType: string
             self::InboundDecline => RequestStatus::ClosedLost,
             self::InboundClarificationResponse => RequestStatus::InProgress,
             self::InboundExtension => RequestStatus::InProgress,
+            self::InboundInvoiceWithdrawn => RequestStatus::Quoted,
             // apply обрабатывается отдельно (spin-off), не через смену статуса.
             self::InboundPossibleNewRequest => null,
             self::InboundUnclear => null,

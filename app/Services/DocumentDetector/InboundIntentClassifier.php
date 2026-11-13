@@ -197,6 +197,18 @@ class InboundIntentClassifier
 
         $type = $this->intentToDetectorType($intent, $request->status);
 
+        // Клиент отозвал просьбу о счёте («отбой, не надо пока счёт»), а счёт ещё не выставлен: заявка из
+        // «ждёт счёт» — обратно в «КП отправлено». Модель читает это как «отложил» (подсказка, статус не
+        // двигался — MZ2026-01114, 13.11.2026). Явный отказ (decline) главнее — его не перекрываем.
+        if ($request->status === RequestStatus::AwaitingInvoice
+            && $type !== DetectorType::InboundDecline
+            && self::withdrawsInvoiceRequest($this->ownText($message))
+            && ! \App\Models\Invoice::query()->where('request_id', $request->id)->whereNull('cancelled_at')->exists()
+        ) {
+            $type = DetectorType::InboundInvoiceWithdrawn;
+            $confidence = max($confidence, 0.9);
+        }
+
         // new_request не мапится в DetectorType (это не переход статуса, а
         // создание ОТДЕЛЬНОЙ заявки). Пробрасываем сигнал через payload.intent —
         // MailRouter сам разветвит (spin-off). Прочие intent'ы без типа → null.
@@ -315,6 +327,26 @@ class InboundIntentClassifier
 
         // Слабое упоминание счёта — единый владелец понятия InvoiceMentionMatcher.
         return (new \App\Services\Mail\InvoiceMentionMatcher)->mentions($text);
+    }
+
+    /**
+     * Клиент отзывает просьбу о счёте: «отбой, не надо пока счёт», «счёт не нужен», «не выставляйте счёт»,
+     * «отмените счёт». Только по собственному тексту клиента (без цитаты).
+     */
+    public static function withdrawsInvoiceRequest(string $own): bool
+    {
+        if ($own === '') {
+            return false;
+        }
+        // Между отрицанием и «счёт» — только служебные слова: иначе «Выставляйте счёт. Доставки не надо»,
+        // «не отправляем за счёт», «Мне нужен счёт» (в «Мне нужен» — «не нужен») читались как отзыв.
+        // Только «счёт/счёта» (не «в счёте», «по счёту»), вопрос («Обновлять счёт не нужно?») — не отзыв.
+        $fill = '(?:(?:пока|нам|вам|уже|ещё|еще|этот|новый|выставлять|высылать|присылать|делать|пожалуйста)[\s,]+){0,3}';
+        $neg = '(?<!\p{L})(?:не\s+(?:надо|нужно|нужен|требуется|выставля\S*|высыла\S*|присыла\S*|отправля\S*|делайте)|отбой|отмен\S*|отзыва\S*)';
+        $bill = '(?<!\p{L})сч[её]та?(?!\p{L})';
+
+        return (bool) preg_match('/'.$neg.'[\s,.!—-]*'.$fill.$bill.'(?![^.!?\n]*\?)/iu', $own)
+            || (bool) preg_match('/'.$bill.'[\s,]+'.$fill.'(?:не\s+(?:надо|нужно|нужен|требуется)|отменя\S*|отмен\S*)(?![^.!?\n]*\?)/iu', $own);
     }
 
     /**

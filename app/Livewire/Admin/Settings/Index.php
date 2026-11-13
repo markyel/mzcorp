@@ -390,6 +390,13 @@ class Index extends Component
                 'type' => AppSetting::TYPE_BOOL,
                 'default' => false,
             ],
+            'detector.auto_mode.inbound_invoice_withdrawn' => [
+                'group' => 'DocumentDetector · auto-mode',
+                'label' => 'Auto: Клиент отозвал просьбу о счёте → quoted',
+                'help' => '«Отбой, не надо пока счёт», а счёт ещё не выставлен: вернуть заявку из «Ждёт счёт» в «КП отправлено».',
+                'type' => AppSetting::TYPE_BOOL,
+                'default' => false,
+            ],
 
             // ─── QuoteParts · платформа работы с поставщиками ────────────
             'quoteparts.rfq_enabled' => [
