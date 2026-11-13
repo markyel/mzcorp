@@ -9,6 +9,13 @@ DEST=${DEST:-/c/Users/Boag/mzcorp-backups/files}
 PASSES=${PASSES:-3}
 echo "=== $(date '+%F %T')"
 
+# Один запуск за раз: ручной прогон и планировщик не пишут в один файл. Брошенная метка (>12 ч) снимается.
+LOCK="${DEST%/}/.lock-pull-files"
+mkdir -p "$(dirname "$LOCK")"
+find "$LOCK" -maxdepth 0 -mmin +720 -exec rmdir {} \; 2>/dev/null
+mkdir "$LOCK" 2>/dev/null || { echo "уже идёт другой запуск — пропускаю"; exit 0; }
+trap 'rmdir "$LOCK"' EXIT
+
 sync_app() {  # sync_app <имя> <каталог приложения на сервере>
     local name=$1 app=$2 dir="$DEST/$1" pass count
     mkdir -p "$dir"

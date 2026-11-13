@@ -11,6 +11,13 @@ KEEP_DAYS=${KEEP_DAYS:-30}
 RECENT=${RECENT:-3}
 echo "=== $(date '+%F %T')"
 
+# Один запуск за раз: ручной прогон и планировщик не пишут в один файл. Брошенная метка (>12 ч) снимается.
+LOCK="${DEST%/}/.lock-pull-nightly"
+mkdir -p "$(dirname "$LOCK")"
+find "$LOCK" -maxdepth 0 -mmin +720 -exec rmdir {} \; 2>/dev/null
+mkdir "$LOCK" 2>/dev/null || { echo "уже идёт другой запуск — пропускаю"; exit 0; }
+trap 'rmdir "$LOCK"' EXIT
+
 days=$(ssh -n -o BatchMode=yes -o ConnectTimeout=20 mzcorp "ls -1 /root/backups/nightly 2>/dev/null | sort | tail -$RECENT") || { echo "сервер не отвечает"; exit 1; }
 if [ -z "$days" ]; then
     echo "на сервере нет ночных копий"
