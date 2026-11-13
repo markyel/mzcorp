@@ -23,14 +23,14 @@ sync_app() {  # sync_app <имя> <каталог приложения на се
         || { echo "$name: сервер не отвечает"; return 1; }
     for pass in $(seq "$PASSES"); do
         ( cd "$dir" && find storage -type f -printf '%s\t%p\n' 2>/dev/null ) > "$dir/.local-list"
-        awk -F'\t' 'NR == FNR { have[$2] = $1; next } !($2 in have) || have[$2] != $1 { print $2 }' \
+        awk -F'\t' 'FILENAME == ARGV[1] { have[$2] = $1; next } !($2 in have) || have[$2] != $1 { print $2 }' \
             "$dir/.local-list" "$dir/.remote-list" > "$dir/.missing"
         count=$(wc -l < "$dir/.missing")
         if [ "$count" -eq 0 ]; then
             echo "$name: все $(wc -l < "$dir/.remote-list") файлов на месте, $(du -sh "$dir/storage" | cut -f1)"
             return 0
         fi
-        echo "$name: проход $pass — качаю $count файлов ($(awk -F'\t' 'NR == FNR { need[$1]; next } $2 in need { s += $1 } END { printf "%d МБ", s / 1048576 }' "$dir/.missing" "$dir/.remote-list"))"
+        echo "$name: проход $pass — качаю $count файлов ($(awk -F'\t' 'FILENAME == ARGV[1] { need[$1]; next } $2 in need { s += $1 } END { printf "%d МБ", s / 1048576 }' "$dir/.missing" "$dir/.remote-list"))"
         ssh -o BatchMode=yes -o ServerAliveInterval=30 mzcorp "cd $app && tar --ignore-failed-read -cf - -T -" < "$dir/.missing" \
             | tar -xf - -C "$dir" || echo "$name: поток оборвался"
     done
