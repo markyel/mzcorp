@@ -823,7 +823,8 @@ class CatalogImportService
             }
             $caughtUp = ($row['is_price_actual'] ?? false) === true
                 && ! $this->priceDiffers($hold->price, $row['price'] ?? null)
-                && ($hold->price_min === null || ! $this->priceDiffers($hold->price_min, $row['price_min'] ?? null));
+                && ($hold->price_min === null || ! $this->priceDiffers($hold->price_min, $row['price_min'] ?? null))
+                && ($hold->name === null || ! CatalogManualSyncService::nameDiffers($row['name'] ?? '', (string) $hold->name));
             if ($caughtUp || $hold->hold_until->isPast()) {
                 $release[] = $hold->id;
 
@@ -832,6 +833,10 @@ class CatalogImportService
             $row['price'] = $hold->price ?? $row['price'] ?? null;
             $row['price_min'] = $hold->price_min ?? $row['price_min'] ?? null;
             $row['purchase_price'] = $hold->purchase_price ?? $row['purchase_price'] ?? null;
+            // Переименование из 1С: выгрузка mylift ещё отдаёт старое название.
+            if ($hold->name !== null && trim((string) $hold->name) !== '') {
+                $row['name'] = $hold->name;
+            }
             $row['is_price_actual'] = true;
             unset($row['source_hash']);
             $row['source_hash'] = $this->hashRow($row);

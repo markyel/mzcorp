@@ -124,6 +124,8 @@ class CatalogManualSyncService
             $c = $catalog->get($r['sku']);
             $r['catalog_item_id'] = $c?->id;
             $r['catalog_name'] = $c?->name;
+            // 1С переименовала позицию — название из файла заменит каталожное.
+            $r['name_changed'] = $c !== null && self::nameDiffers($c->name, $r['name'] ?? '');
             $r['old'] = $c ? [
                 'price' => $c->price !== null ? (float) $c->price : null,
                 'price_min' => $c->price_min !== null ? (float) $c->price_min : null,
@@ -138,6 +140,7 @@ class CatalogManualSyncService
                     || ($r['price_min'] !== null && self::differs($r['old']['price_min'], $r['price_min']))
                     || ($r['purchase_price'] !== null && self::differs($r['old']['purchase_price'], $r['purchase_price']))
                     || ($r['stock'] ?? null) !== null && $r['stock'] !== $r['old']['stock']
+                    || $r['name_changed']
                     || ! $r['old']['actual'] => CatalogManualSync::ROW_CHANGED,
                 default => CatalogManualSync::ROW_SAME,
             };
@@ -188,9 +191,10 @@ class CatalogManualSyncService
             $holdDays = max(1, (int) config('services.catalog_manual_sync.hold_days', 14));
             $now = Carbon::now();
             $becameActual = [];
+            $renamed = [];
             $updated = 0;
 
-            DB::transaction(function () use ($sync, $by, $valid, $holdDays, $now, &$becameActual, &$updated) {
+            DB::transaction(function () use ($sync, $by, $valid, $holdDays, $now, &$becameActual, &$renamed, &$updated) {
                 $import = CatalogImport::create([
                     'mode' => 'manual',
                     'source' => 'manual_1c_excel',
@@ -205,6 +209,10 @@ class CatalogManualSyncService
                         }
                         if ($r['purchase_price'] !== null) {
                             $fields['purchase_price'] = $r['purchase_price'];
+                        }
+                        if ($r['name_changed'] ?? false) {
+                            $fields['name'] = mb_substr(trim($r['name']), 0, 500);
+                            $renamed[] = $r['sku'];
                         }
                         if (($r['stock'] ?? null) !== null && $r['stock'] !== $old['stock']) {
                             $fields['stock_available'] = $r['stock'];
@@ -232,7 +240,7 @@ class CatalogManualSyncService
                     }
                     // Держим цену и для совпавших: выгрузка mylift могла ещё не догнать 1С.
                     CatalogManualPrice::query()->updateOrCreate(['catalog_item_id' => $r['catalog_item_id']], [
-                        'sku' => $r['sku'], 'price' => $r['price'], 'price_min' => $r['price_min'], 'purchase_price' => $r['purchase_price'],
+                        'sku' => $r['sku'], 'name' => trim((string) ($r['name'] ?? '')) !== '' ? mb_substr(trim($r['name']), 0, 500) : null, 'price' => $r['price'], 'price_min' => $r['price_min'], 'purchase_price' => $r['purchase_price'],
                         'price_date' => $r['price_date'], 'catalog_manual_sync_id' => $sync->id, 'hold_until' => $now->copy()->addDays($holdDays),
                     ]);
                 }
@@ -247,12 +255,24 @@ class CatalogManualSyncService
                 // Заявки, ждущие обновления цены, и рабочие заявки с этими позициями — как после планового импорта.
                 ReconcilePriceRefreshJob::dispatch($becameActual);
             }
-            Log::info('CatalogManualSync: applied', ['sync_id' => $sync->id, 'updated' => $updated, 'became_actual' => count($becameActual), 'by' => $by->id]);
+            if ($renamed !== []) {
+                // Новое название влияет на матчинг — точечный ре-резолв, как у планового импорта.
+                \App\Jobs\Catalog\ResolvePendingFromCatalogJob::dispatch($renamed);
+            }
+            Log::info('CatalogManualSync: applied', ['sync_id' => $sync->id, 'updated' => $updated, 'became_actual' => count($becameActual), 'renamed' => count($renamed), 'by' => $by->id]);
 
             return ['updated' => $updated, 'became_actual' => count($becameActual), 'held' => count($valid)];
         } finally {
             $lock->release();
         }
+    }
+
+    /** Название из файла отличается от каталожного (пустое в файле — не переименование; пробелы не в счёт). */
+    public static function nameDiffers(?string $catalog, string $file): bool
+    {
+        $norm = fn (?string $s) => preg_replace('/\s+/u', ' ', trim((string) $s));
+
+        return $norm($file) !== '' && $norm($file) !== $norm($catalog);
     }
 
     public static function headerKey(string $title): string

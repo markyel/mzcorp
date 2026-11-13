@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 class CatalogManualPrice extends Model
 {
     protected $fillable = [
-        'catalog_item_id', 'sku', 'price', 'price_min', 'purchase_price', 'price_date',
+        'catalog_item_id', 'sku', 'name', 'price', 'price_min', 'purchase_price', 'price_date',
         'catalog_manual_sync_id', 'hold_until',
     ];
 

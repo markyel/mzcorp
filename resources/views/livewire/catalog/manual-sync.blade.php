@@ -116,7 +116,14 @@
                                     <td class="px-2 py-1.5 mono whitespace-nowrap">
                                         @if($r['catalog_item_id'])<a href="{{ route('catalog.search', ['q' => $r['sku']]) }}" target="_blank" class="text-sky-700 hover:underline">{{ $r['sku'] }}</a>@else{{ $r['sku'] }}@endif
                                     </td>
-                                    <td class="px-2 py-1.5 text-fg-2"><div class="max-w-[460px] truncate" title="{{ $r['name'] }}">{{ $r['name'] }}</div></td>
+                                    <td class="px-2 py-1.5 text-fg-2">
+                                        @if($r['name_changed'] ?? false)
+                                            <div class="max-w-[460px] truncate text-fg-4 line-through" title="{{ $r['catalog_name'] }}">{{ $r['catalog_name'] }}</div>
+                                            <div class="max-w-[460px] truncate font-semibold" title="{{ $r['name'] }}">{{ $r['name'] }}</div>
+                                        @else
+                                            <div class="max-w-[460px] truncate" title="{{ $r['name'] }}">{{ $r['name'] }}</div>
+                                        @endif
+                                    </td>
                                     <td class="px-2 py-1.5 text-right mono whitespace-nowrap">
                                         {!! $old ? $cell($old['price'], $r['price']) : e($money($r['price'])) !!}
                                         @if($pct !== null && abs($pct) >= 0.01)<div class="text-[10.5px] {{ $pct > 0 ? 'text-red-700' : 'text-emerald-700' }}">{{ $pct > 0 ? '+' : '' }}{{ number_format($pct, 1, ',', ' ') }}%</div>@endif
