@@ -26,6 +26,7 @@ class LlmCompareParsingCommand extends Command
         {--models=openai,qwen/qwen3.6-27b,google/gemini-3.1-flash-lite : варианты через запятую; openai — текущие модели напрямую}
         {--limit=36 : сколько заявок}
         {--days=30 : из заявок за сколько дней}
+        {--until= : по какую дату (Y-m-d) — выборка не сдвигается между прогонами; по умолчанию сейчас}
         {--seed=16 : выборка повторяема}';
 
     protected $description = 'Сравнить модели на разборе позиций заявок (выборка с КП, эталон — позиции заявки), БД не трогать';
@@ -125,13 +126,19 @@ class LlmCompareParsingCommand extends Command
     {
         return Request::query()
             ->whereNotNull('email_message_id')->whereNull('merged_into_id')
-            ->where('created_at', '>=', now()->subDays((int) $this->option('days')))
+            ->where('created_at', '>=', $this->until()->subDays((int) $this->option('days')))
+            ->where('created_at', '<', $this->until())
             ->whereIn('peak_status', ['quoted', 'under_review', 'awaiting_invoice', 'invoiced', 'paid', 'closed_won'])
             ->whereHas('items', fn ($q) => $q->where('is_active', true), '>=', 1)
             ->whereHas('items', fn ($q) => $q->where('is_active', true), '<=', 25)
             ->orderByRaw('md5(id::text || ?)', [(string) $this->option('seed')])
             ->limit((int) $this->option('limit'))
             ->get(['id', 'internal_code', 'email_message_id']);
+    }
+
+    private function until(): \Illuminate\Support\Carbon
+    {
+        return $this->option('until') ? \Illuminate\Support\Carbon::parse((string) $this->option('until'))->endOfDay() : now();
     }
 
     /** openai — текущие модели напрямую; иначе всё через RouterAI этой моделью, без переключения. */
@@ -151,7 +158,7 @@ class LlmCompareParsingCommand extends Command
     }
 
     /**
-     * Позиции модели против эталона: сначала по артикулу, затем по названию (доля общих слов ≥ 0,5).
+     * Позиции модели против эталона: сначала по артикулу, затем по названию (коэффициент Дайса по словам ≥ 0,45).
      *
      * @param  list<array{name:string, article:?string, qty:float}>  $gold
      * @param  list<array<string, mixed>>  $items
@@ -167,7 +174,8 @@ class LlmCompareParsingCommand extends Command
             $x = $words($a);
             $y = $words($b);
 
-            return $x && $y ? count(array_intersect($x, $y)) / max(count($x), count($y)) : 0.0;
+            // Дайс: длинное название с пояснениями не теряет короткий эталон.
+            return $x && $y ? 2 * count(array_intersect($x, $y)) / (count($x) + count($y)) : 0.0;
         };
 
         $left = array_values($items);
@@ -181,7 +189,7 @@ class LlmCompareParsingCommand extends Command
                     [$best, $bestScore] = [$k, $score];
                 }
             }
-            if ($best === null || $bestScore < 0.5) {
+            if ($best === null || $bestScore < 0.45) {
                 $out['missed'][] = mb_substr($g['name'], 0, 80);
 
                 continue;
