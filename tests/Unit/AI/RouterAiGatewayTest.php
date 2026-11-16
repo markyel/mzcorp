@@ -158,6 +158,14 @@ class RouterAiGatewayTest extends TestCase
         $this->assertEqualsWithDelta(0.75, \App\Console\Commands\LlmCompareCapturedCommand::f1($a, $b), 0.001);
     }
 
+    public function test_article_lists_match_regardless_of_order(): void
+    {
+        $gold = [['name' => 'Контакты для привода MRDS', 'article' => 'LF0940, F02215Z907', 'qty' => 3.0]];
+        $items = [['name' => 'Контакты MRDS Otis', 'article' => 'F02215Z907, LF0940', 'qty' => 3]];
+
+        $this->assertSame(1, LlmCompareParsingCommand::match($gold, $items)['article_ok']);
+    }
+
     public function test_similar_items_are_told_apart_by_numbers(): void
     {
         $gold = [

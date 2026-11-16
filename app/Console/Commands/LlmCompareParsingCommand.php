@@ -185,6 +185,11 @@ class LlmCompareParsingCommand extends Command
             return $x && $y ? 2 * count(array_intersect($x, $y)) / (count($x) + count($y)) : 0.0;
         };
 
+        // Артикулы — набор кодов через «,»/«;»: «LF0940, F02215Z907» и «F02215Z907, LF0940» — одно и то же,
+        // общий код — та же позиция.
+        $codes = fn ($s) => array_values(array_filter(array_map($norm, preg_split('/[,;]+/u', (string) $s) ?: [])));
+        $sameArticle = fn ($a, $b) => array_intersect($codes($a), $codes($b)) !== [];
+
         $left = array_values($items);
         $pairs = [];
         $out = ['matched' => 0, 'qty_ok' => 0, 'article_ok' => 0, 'with_article' => 0, 'missed' => [], 'extra' => []];
@@ -192,7 +197,7 @@ class LlmCompareParsingCommand extends Command
             $best = null;
             $bestScore = 0.0;
             foreach ($left as $k => $it) {
-                $score = $g['article'] && ! empty($it['article']) && $norm($g['article']) === $norm($it['article']) ? 2.0 : $sim($g['name'], $it['name'] ?? '');
+                $score = $g['article'] && ! empty($it['article']) && $sameArticle($g['article'], $it['article']) ? 2.0 : $sim($g['name'], $it['name'] ?? '');
                 if ($score > $bestScore) {
                     [$best, $bestScore] = [$k, $score];
                 }
@@ -209,7 +214,7 @@ class LlmCompareParsingCommand extends Command
             $out['qty_ok'] += abs((float) ($it['qty'] ?? 0) - $g['qty']) < 0.001 ? 1 : 0;
             if ($g['article']) {
                 $out['with_article']++;
-                $out['article_ok'] += ! empty($it['article']) && $norm($g['article']) === $norm($it['article']) ? 1 : 0;
+                $out['article_ok'] += ! empty($it['article']) && $sameArticle($g['article'], $it['article']) ? 1 : 0;
             }
         }
         $out['extra'] = array_values(array_map(fn ($it) => mb_substr((string) ($it['name'] ?? ''), 0, 80), $left));
