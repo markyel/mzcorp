@@ -84,6 +84,8 @@ class LlmCompareParsingCommand extends Command
                     'gold' => count($gold[$r->id]), 'found' => count($items), 'matched' => $m['matched'], 'qty_ok' => $m['qty_ok'],
                     'seconds' => round($sec, 1), 'failed' => $failed,
                     'missed' => $m['missed'], 'extra' => $m['extra'],
+                    // Что модель вернула — для разбора ошибок и правки промпта.
+                    'items' => array_map(fn ($i) => trim(($i['name'] ?? '').' ['.($i['article'] ?? '').'] x'.($i['qty'] ?? '?').(empty($i['note']) ? '' : ' {'.$i['note'].'}')), $items),
                 ];
                 $this->line(sprintf('  [%s] %d/%d %s: эталон %d, найдено %d, совпало %d, кол-во верно %d, %.1f с%s',
                     $variant, $n + 1, $requests->count(), $r->internal_code, count($gold[$r->id]), count($items), $m['matched'], $m['qty_ok'], $sec, $failed ? ' · СБОЙ' : ''));
