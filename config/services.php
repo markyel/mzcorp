@@ -127,7 +127,6 @@ return [
             'deepseek/deepseek-v4.1-flash' => [0.073, 0.29, 0.073],
             'google/gemini-3.5-flash-lite' => [0.39, 3.26, 0.39],
             'google/gemini-3.8-flash' => [0.98, 4.90, 0.98],
-            'qwen/qwen3.6-27b' => [0.33, 2.61, 0.33],
         ],
         // Резервный шлюз (Beget AI Gateway, OpenAI-совместимый): основной канал недоступен —
         // запрос уходит туда. Пустой ключ — резерва нет. См. App\Services\AI\OpenAIFallbackGateway.
