@@ -28,6 +28,40 @@ class OpenAIChatService
      */
     public function chat(array $messages, string $model = 'gpt-4o', array $options = []): array
     {
+        // Основной канал — RouterAI, если включён; не ответил — тот же запрос напрямую в OpenAI (ниже).
+        $router = app(RouterAiGateway::class);
+        if ($router->enabled()) {
+            $routed = array_merge(['model' => $model, 'messages' => $messages], $options);
+            try {
+                $response = $router->post($routed);
+            } catch (\Throwable $e) {
+                $response = null;
+                $why = $e->getMessage();
+            }
+            if (! RouterAiGateway::shouldFallback($response)) {
+                $data = $response->json();
+                AiUsageMeter::record((string) ($data['model'] ?? RouterAiGateway::modelFor($model)), (array) ($data['usage'] ?? []), 'routerai');
+                self::tally((string) ($data['model'] ?? RouterAiGateway::modelFor($model)), (array) ($data['usage'] ?? []));
+
+                return [
+                    'content' => $data['choices'][0]['message']['content'] ?? '',
+                    'usage' => $data['usage'] ?? [],
+                    'raw' => $data,
+                ];
+            }
+            $error = $why ?? ($response !== null ? $response->status().' '.mb_substr($response->body(), 0, 300) : 'no response');
+            // Сравнение моделей (llm:compare-parsing): ответ GPT вместо кандидата смешал бы результаты.
+            if (config('services.routerai.no_fallback')) {
+                self::$errors[] = mb_substr($error, 0, 200);
+                throw new RuntimeException('RouterAI: '.$error);
+            }
+            Log::warning('RouterAI failed, falling back to OpenAI', [
+                'model' => $model,
+                'routed_model' => RouterAiGateway::modelFor($model),
+                'error' => $error,
+            ]);
+        }
+
         $apiKey = config('services.openai.api_key');
         $proxyKey = config('services.openai.proxy_key');
 
@@ -95,6 +129,7 @@ class OpenAIChatService
 
             $data = $response->json();
             AiUsageMeter::record((string) ($data['model'] ?? $model), (array) ($data['usage'] ?? []), isset($viaFallback) ? 'reserve' : 'primary');
+            self::tally((string) ($data['model'] ?? $model), (array) ($data['usage'] ?? []));
 
             return [
                 'content' => $data['choices'][0]['message']['content'] ?? '',
@@ -109,6 +144,25 @@ class OpenAIChatService
             ]);
             throw new RuntimeException('Failed to complete chat: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Токены за время жизни процесса по моделям — для сравнения моделей (llm:compare-parsing).
+     *
+     * @var array<string, array{calls:int, prompt:int, completion:int}>
+     */
+    public static array $tally = [];
+
+    /** @var list<string> ошибки кандидата при сравнении (без переключения на OpenAI) */
+    public static array $errors = [];
+
+    private static function tally(string $model, array $usage): void
+    {
+        $t = self::$tally[$model] ?? ['calls' => 0, 'prompt' => 0, 'completion' => 0];
+        $t['calls']++;
+        $t['prompt'] += (int) ($usage['prompt_tokens'] ?? 0);
+        $t['completion'] += (int) ($usage['completion_tokens'] ?? 0);
+        self::$tally[$model] = $t;
     }
 
     /**

@@ -68,6 +68,22 @@ return [
         'auto_apply_require_target_slot' => (bool) env('CLARIFICATIONS_AUTO_APPLY_REQUIRE_TARGET', true),
     ],
 
+    // RouterAI (routerai.ru, OpenAI-совместимый, оплата в рублях) — основной канал моделей, когда включён:
+    // запрос уходит туда, модель — по замене «наша → у RouterAI»; не ответил или ошибка доступности —
+    // тот же запрос напрямую в OpenAI (services.openai), дальше — резерв. См. App\Services\AI\RouterAiGateway.
+    'routerai' => [
+        'enabled' => (bool) env('ROUTERAI_ENABLED', false),
+        'api_key' => env('ROUTERAI_API_KEY'),
+        'base_url' => env('ROUTERAI_BASE_URL', 'https://routerai.ru/api/v1'),
+        // Замены JSON {"gpt-4o":"google/gemini-3.1-flash-lite", …}; без замены — default_model.
+        'models' => env('ROUTERAI_MODELS', '{}'),
+        'default_model' => env('ROUTERAI_DEFAULT_MODEL', 'google/gemini-3.1-flash-lite'),
+        'timeout' => (int) env('ROUTERAI_TIMEOUT', 120),
+        'min_max_tokens' => (int) env('ROUTERAI_MIN_MAX_TOKENS', 1500),
+        // Только для llm:compare-parsing: сбой кандидата — сбой, без OpenAI.
+        'no_fallback' => false,
+    ],
+
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com'),
@@ -95,6 +111,11 @@ return [
             'qwen-3.8-27b' => [0.24, 2.57, 0.24],
             'qwen-3.8-flash-next' => [0.37, 1.10, 0.37],
             'glm-5.3' => [2.81, 5.39, 2.81],
+            // RouterAI (основной канал с 16.11.2026): ₽ за токен из их /models по 81,79 ₽/$.
+            'qwen/qwen3.6-27b' => [0.33, 2.61, 0.33],
+            'google/gemini-3.1-flash-lite' => [0.33, 1.96, 0.33],
+            'openai/gpt-4o' => [3.26, 13.06, 3.26],
+            'openai/gpt-4o-mini' => [0.20, 0.78, 0.20],
         ],
         // Резервный шлюз (Beget AI Gateway, OpenAI-совместимый): основной канал недоступен —
         // запрос уходит туда. Пустой ключ — резерва нет. См. App\Services\AI\OpenAIFallbackGateway.
