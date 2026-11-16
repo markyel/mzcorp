@@ -112,6 +112,24 @@ class RouterAiGatewayTest extends TestCase
         $this->assertSame(['Лишняя позиция'], $m['extra']);
     }
 
+    public function test_quote_lines_check_price_of_the_matched_line(): void
+    {
+        $gold = [
+            ['name' => 'Ролик направляющий ARO', 'article' => 'M07014', 'qty' => 11.0, 'price' => 9630.31],
+            ['name' => 'Башмак кабины', 'article' => null, 'qty' => 2.0, 'price' => 1500.0],
+        ];
+        $items = [
+            ['name' => 'Башмак кабины', 'article' => null, 'qty' => 2, 'price' => 1250.0],
+            ['name' => 'Ролик ARO', 'article' => 'M07014', 'qty' => 11, 'price' => 9630.31],
+        ];
+
+        $m = \App\Console\Commands\LlmCompareTasksCommand::matchLines($gold, $items);
+
+        $this->assertSame(2, $m['matched']);
+        $this->assertSame(1, $m['price_ok']);
+        $this->assertCount(1, $m['wrong']);
+    }
+
     public function test_similar_items_are_told_apart_by_numbers(): void
     {
         $gold = [

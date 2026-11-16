@@ -32,7 +32,7 @@ class LlmCompareParsingCommand extends Command
     protected $description = 'Сравнить модели на разборе позиций заявок (выборка с КП, эталон — позиции заявки), БД не трогать';
 
     /** ₽ за 1 млн токенов [вход, выход]: RouterAI — по их прайсу, OpenAI — по $ × 81,8. */
-    private const RUB_PER_M = [
+    public const RUB_PER_M = [
         'qwen/qwen3.6-27b' => [26.7, 213.6],
         'google/gemini-3.1-flash-lite' => [26.7, 160.2],
         'gpt-4.1' => [163.6, 654.4],
@@ -165,7 +165,7 @@ class LlmCompareParsingCommand extends Command
      * @param  list<array<string, mixed>>  $items
      * @return array{matched:int, qty_ok:int, article_ok:int, with_article:int, missed:list<string>, extra:list<string>}
      */
-    public static function match(array $gold, array $items): array
+    public static function match(array $gold, array $items, ?array &$pairs = null): array
     {
         // Кириллица-двойник латиницы (М00759 и M00759) — один артикул.
         $norm = fn ($s) => strtr(mb_strtoupper((string) preg_replace('/[^\p{L}\p{N}]/u', '', (string) $s)),
@@ -181,8 +181,9 @@ class LlmCompareParsingCommand extends Command
         };
 
         $left = array_values($items);
+        $pairs = [];
         $out = ['matched' => 0, 'qty_ok' => 0, 'article_ok' => 0, 'with_article' => 0, 'missed' => [], 'extra' => []];
-        foreach ($gold as $g) {
+        foreach (array_values($gold) as $gi => $g) {
             $best = null;
             $bestScore = 0.0;
             foreach ($left as $k => $it) {
@@ -199,6 +200,7 @@ class LlmCompareParsingCommand extends Command
             $it = $left[$best];
             unset($left[$best]);
             $out['matched']++;
+            $pairs[] = [$gi, $best];
             $out['qty_ok'] += abs((float) ($it['qty'] ?? 0) - $g['qty']) < 0.001 ? 1 : 0;
             if ($g['article']) {
                 $out['with_article']++;
