@@ -343,6 +343,24 @@ class QuotePartsClient
     }
 
     /**
+     * Повторить запрос молчащему поставщику сейчас — то же напоминание, что QuoteParts шлёт по расписанию.
+     *
+     * @return array<string, mixed> обновлённый снимок запроса
+     */
+    public function remindSupplier(int $remoteId, string $externalId): array
+    {
+        $response = $this->http()->timeout(60)->post('/api/v1/rfqs/'.$remoteId.'/suppliers/'.rawurlencode($externalId).'/remind');
+        if ($response->status() === 422) {
+            throw new RuntimeException((string) collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не отправил напоминание.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts remind: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * Ответ на группу одинаковых вопросов: каждому спросившему — в его переписку, текст по поставщику.
      *
      * @param  list<array{supplier:string, text:string}>  $answers

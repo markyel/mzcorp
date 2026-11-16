@@ -266,10 +266,35 @@ class PriceOffers extends Component
         }
     }
 
+    /** «Повторить запрос» поставщику, который молчит: напоминание в переписку запроса сейчас. */
+    public function remindSupplier(string $id, QuotePartsRfqService $rfqs): void
+    {
+        $row = $this->allPending->firstWhere('id', $id);
+        $rfq = $row ? QuotePartsRfq::query()->where('remote_id', $row['rfq_remote_id'])->first() : null;
+        if ($rfq === null) {
+            $this->dispatch('toast', type: 'error', message: 'Запрос не найден — обновите страницу.');
+
+            return;
+        }
+        try {
+            $rfqs->remind($rfq, (string) $row['key'], auth()->user());
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 300));
+
+            return;
+        }
+        $this->dispatch('toast', type: 'success', message: 'Запрос повторён: '.$row['supplier'].'.');
+        unset($this->allPending, $this->windowRfqs, $this->declineRfq);
+        $this->forget();
+    }
+
     #[Computed]
     public function declineRfq(): ?QuotePartsRfq
     {
-        $row = $this->declineDialog ? $this->allDeclines->firstWhere('id', $this->declineDialog) : null;
+        // Тот же диалог — у отказа и у «ждём ответ» (16.11.2026: видеть отправленное письмо до ответа).
+        $row = $this->declineDialog
+            ? ($this->allDeclines->firstWhere('id', $this->declineDialog) ?? $this->allPending->firstWhere('id', $this->declineDialog))
+            : null;
 
         return $row ? QuotePartsRfq::query()->where('remote_id', $row['rfq_remote_id'])->first() : null;
     }
@@ -357,6 +382,10 @@ class PriceOffers extends Component
                         'key' => $key,
                         'postponed_until' => ! empty($line['postponed_until']) ? \Illuminate\Support\Carbon::parse($line['postponed_until']) : null,
                         'postpone_note' => $line['postpone_note'] ?? null,
+                        // Наши письма и ответы в переписке, напоминания — для строки «ждём ответ».
+                        'letters' => count($s['letters'] ?? []) + count($s['thread'] ?? []),
+                        'reminders' => (int) ($s['reminders_sent'] ?? 0),
+                        'last_reminder_at' => ! empty($s['last_reminder_at']) ? \Illuminate\Support\Carbon::parse($s['last_reminder_at']) : null,
                     ]);
                 }
             }

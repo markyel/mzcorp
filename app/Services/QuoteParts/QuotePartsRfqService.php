@@ -628,6 +628,19 @@ class QuotePartsRfqService
         return $node;
     }
 
+    /** «Повторить запрос»: напоминание молчащему поставщику сейчас, в переписку запроса (16.11.2026). */
+    public function remind(QuotePartsRfq $rfq, string $supplierKey, User $by): QuotePartsRfq
+    {
+        if (! QuotePartsPilot::canAnswer($by)) {
+            throw new RuntimeException('Повторять запрос поставщикам QuoteParts могут снабжение, руководство и участники пилота.');
+        }
+        $snapshot = $this->russified($this->client->remindSupplier($rfq->remote_id, $supplierKey));
+        $rfq->forceFill(['snapshot' => $snapshot, 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
+        \Illuminate\Support\Facades\Log::info('QuoteParts: request repeated to a supplier', ['rfq' => $rfq->remote_id, 'supplier' => $supplierKey, 'by' => $by->id]);
+
+        return $rfq;
+    }
+
     public function refresh(QuotePartsRfq $rfq): QuotePartsRfq
     {
         $snapshot = $this->russified($this->client->rfq($rfq->remote_id));

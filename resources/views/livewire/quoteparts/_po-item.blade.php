@@ -158,7 +158,11 @@
 
     {{-- Спросили — ни цены, ни отказа. --}}
     @foreach(($it['waiting'] ?? []) as $w)
-        <div wire:key="po-w-{{ $it['sku'] }}-{{ $loop->index }}" class="pa-offer">
+        @php
+            // Строка запроса QuoteParts этого поставщика: переписка (наше письмо видно до ответа) и «Повторить запрос».
+            $pr = $this->allPending->first(fn ($p) => $p['sku'] === $it['sku'] && $p['supplier'] === $w);
+        @endphp
+        <div wire:key="po-w-{{ $it['sku'] }}-{{ $loop->index }}" class="pa-offer {{ $pr && $declineDialog === $pr['id'] ? 'is-open' : '' }}">
             <div class="pa-grid pa-row">
                 <div class="pa-col">
                     @php $pp = $it['postponed'][$w] ?? null; @endphp
@@ -172,10 +176,34 @@
                     </div>
                     @if($pp && filled($pp['note']))<span class="pa-meta">«{{ $pp['note'] }}»</span>@endif
                     @if($it['requested_at'])<span class="pa-meta">запрос {{ $it['requested_at']->timezone($tz)->format('d.m H:i') }}</span>@endif
+                    @if($pr)
+                        <button type="button" wire:click="openDeclineDialog('{{ $pr['id'] }}')" class="pa-link">{{ $declineDialog === $pr['id'] ? '▾' : '▸' }} переписка{{ $pr['letters'] ? ' ('.$pr['letters'].')' : '' }}</button>
+                    @endif
                 </div>
                 <div class="pa-col pa-price"><span class="pa-meta" style="font-size: 13px">—</span></div>
-                <div class="pa-col"></div><div class="pa-col"></div><div class="pa-col"></div>
+                <div class="pa-col"></div>
+                <div class="pa-col">
+                    @if($pr && $pr['reminders'])
+                        <span class="pa-meta">Напоминаний: {{ $pr['reminders'] }}{{ $pr['last_reminder_at'] ? ', последнее '.$pr['last_reminder_at']->timezone($tz)->format('d.m H:i') : '' }}</span>
+                    @endif
+                </div>
+                <div class="pa-col pa-decide">
+                    @if($pr && ! ($pp && $pp['until']->isFuture()))
+                        <button type="button" wire:click="remindSupplier('{{ $pr['id'] }}')" wire:loading.attr="disabled" wire:target="remindSupplier('{{ $pr['id'] }}')" class="pa-btn pa-btn-secondary"
+                                title="Отправить поставщику напоминание в ту же переписку — по позициям, на которые он ещё не ответил">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M8 16H3v5"/></svg>Повторить запрос</button>
+                    @endif
+                </div>
             </div>
+            @if($pr && $declineDialog === $pr['id'])
+                <div class="pa-thread">
+                    @if($rfq = $this->declineRfq)
+                        @include('livewire.quote-parts._rfq-dialog', ['rfq' => $rfq, 'supplierNames' => app(\App\Services\QuoteParts\QuotePartsRfqService::class)->supplierNames([$rfq]), 'refreshAction' => 'refreshQuotePartsRfq', 'onlySupplier' => $pr['key']])
+                    @else
+                        <div class="pa-meta">Запрос не найден.</div>
+                    @endif
+                </div>
+            @endif
         </div>
     @endforeach
 </div>
