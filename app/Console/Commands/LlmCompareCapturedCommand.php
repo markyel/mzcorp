@@ -21,7 +21,8 @@ class LlmCompareCapturedCommand extends Command
     protected $signature = 'llm:compare-captured
         {caller : задача (класс-вызыватель), как в storage/app/llm-capture}
         {--models=openai/gpt-4o,google/gemini-3.5-flash-lite,google/gemini-3.1-flash-lite,deepseek/deepseek-v4.1-flash : кандидаты через RouterAI}
-        {--show=8 : сколько расхождений показать}';
+        {--show=8 : сколько расхождений показать}
+        {--ignore= : ещё поля не сравнивать (регулярка по имени ключа), напр. «label|raw_mention|address»}';
 
     protected $description = 'Прогнать записанные живые запросы на других моделях и сравнить ответы по полям JSON';
 
@@ -63,8 +64,8 @@ class LlmCompareCapturedCommand extends Command
 
                     continue;
                 }
-                $a = self::facts(self::decode((string) $c['content']) ?? []);
-                $b = self::facts($b);
+                $a = self::facts(self::decode((string) $c['content']) ?? [], '', (string) $this->option('ignore'));
+                $b = self::facts($b, '', (string) $this->option('ignore'));
                 $f1 = self::f1($a, $b);
                 $sum['f1'] += $f1;
                 $sum['exact'] += $f1 >= 0.999 ? 1 : 0;
@@ -102,16 +103,16 @@ class LlmCompareCapturedCommand extends Command
      *
      * @return list<string>
      */
-    public static function facts(array $data, string $path = ''): array
+    public static function facts(array $data, string $path = '', string $ignore = ''): array
     {
         $out = [];
         foreach ($data as $key => $value) {
-            if (is_string($key) && preg_match(self::SKIP_KEYS, $key)) {
+            if (is_string($key) && (preg_match(self::SKIP_KEYS, $key) || ($ignore !== '' && preg_match('/'.$ignore.'/i', $key)))) {
                 continue;
             }
             $p = $path.(is_int($key) ? '[]' : '.'.$key);
             if (is_array($value)) {
-                $out = [...$out, ...self::facts($value, $p)];
+                $out = [...$out, ...self::facts($value, $p, $ignore)];
             } elseif ($value !== null && $value !== '' && ! (is_string($value) && mb_strlen($value) > 60)) {
                 $v = is_bool($value) ? ($value ? 'true' : 'false') : mb_strtolower(trim((string) $value));
                 $out[] = $p.'='.$v;
