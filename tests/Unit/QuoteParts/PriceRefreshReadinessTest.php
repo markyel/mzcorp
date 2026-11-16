@@ -45,4 +45,16 @@ class PriceRefreshReadinessTest extends TestCase
     {
         $this->assertFalse(app(PriceRefreshReadiness::class)->isReady($this->stat(3, 0, '2026-09-01 10:00'), Carbon::parse('2026-10-20')));
     }
+
+    /** M03865, 16.11.2026: цену дал 1 из 3, двое отказали — ждать больше некого. */
+    public function test_everyone_answered_with_a_price_or_a_refusal_is_ready_at_once(): void
+    {
+        $r = app(PriceRefreshReadiness::class);
+        $now = Carbon::parse('2026-11-13 10:00');
+        $stat = $this->stat(3, 1, '2026-11-12 16:33') + ['declined' => ['sup:2', 'sup:3']];
+
+        $this->assertTrue($r->isReady($stat, $now));
+        $this->assertFalse($r->isReady(['declined' => ['sup:2']] + $this->stat(3, 1, '2026-11-12 16:33'), $now), 'третий ещё молчит — ждём');
+        $this->assertFalse($r->isReady($this->stat(2, 0, '2026-11-12 16:33') + ['declined' => ['sup:1', 'sup:2']], $now), 'все отказали — цены нет');
+    }
 }
