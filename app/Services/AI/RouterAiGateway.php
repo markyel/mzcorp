@@ -59,7 +59,9 @@ class RouterAiGateway
         $payload['model'] = self::modelFor((string) ($payload['model'] ?? ''));
         // Рассуждения выключены (ROUTERAI_REASONING): Qwen с ними разбирал письмо 20–270 с вместо 2 с,
         // на разборе позиций они не нужны.
-        if (! config('services.routerai.reasoning') && ! isset($payload['reasoning'])) {
+        // GPT (openai/…) параметр не принимает: RouterAI шлёт его как reasoning_effort, OpenAI отвечает 400,
+        // а RouterAI — «200» с ошибкой в теле, и запрос уходил в откат на прямой OpenAI.
+        if (! config('services.routerai.reasoning') && ! isset($payload['reasoning']) && ! str_starts_with($payload['model'], 'openai/')) {
             $payload['reasoning'] = ['enabled' => false];
         }
         // Рассуждающие модели (Qwen) при лимите в 20–200 токенов тратят его на рассуждение и отвечают пусто.

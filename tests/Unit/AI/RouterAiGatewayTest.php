@@ -62,6 +62,16 @@ class RouterAiGatewayTest extends TestCase
         Http::assertSent(fn ($r) => $r['model'] === 'qwen/qwen3.6-27b' && $r['max_tokens'] === 1500 && $r['reasoning'] === ['enabled' => false]);
     }
 
+    public function test_gpt_models_get_no_reasoning_parameter(): void
+    {
+        config(['services.routerai.models' => '{"gpt-4o":"openai/gpt-4o"}']);
+        Http::fake(['router.test/*' => Http::response(['choices' => [['message' => ['content' => 'ок']]], 'usage' => []])]);
+
+        app(OpenAIChatService::class)->chat([['role' => 'user', 'content' => 'да?']], 'gpt-4o');
+
+        Http::assertSent(fn ($r) => $r['model'] === 'openai/gpt-4o' && ! isset($r['reasoning']));
+    }
+
     public function test_router_error_or_empty_answer_falls_back_to_openai(): void
     {
         Http::fake([
