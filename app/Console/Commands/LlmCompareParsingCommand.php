@@ -169,7 +169,8 @@ class LlmCompareParsingCommand extends Command
         // Кириллица-двойник латиницы (М00759 и M00759) — один артикул.
         $norm = fn ($s) => strtr(mb_strtoupper((string) preg_replace('/[^\p{L}\p{N}]/u', '', (string) $s)),
             ['А' => 'A', 'В' => 'B', 'Е' => 'E', 'К' => 'K', 'М' => 'M', 'Н' => 'H', 'О' => 'O', 'Р' => 'P', 'С' => 'C', 'Т' => 'T', 'Х' => 'X']);
-        $words = fn ($s) => array_values(array_unique(array_filter(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower((string) $s)) ?: [], fn ($w) => mb_strlen($w) >= 3)));
+        // Слова от 3 букв и номера от 2 цифр: «РЭП 34-22-11» и «РЭП 34-31-11» — разные реле.
+        $words = fn ($s) => array_values(array_unique(array_filter(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower((string) $s)) ?: [], fn ($w) => mb_strlen($w) >= 3 || (preg_match('/\d/', $w) && mb_strlen($w) >= 2))));
         $sim = function ($a, $b) use ($words) {
             $x = $words($a);
             $y = $words($b);

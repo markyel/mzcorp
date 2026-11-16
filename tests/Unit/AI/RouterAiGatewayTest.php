@@ -98,4 +98,18 @@ class RouterAiGatewayTest extends TestCase
         $this->assertSame(['Тросик ограничителя скорости'], $m['missed']);
         $this->assertSame(['Лишняя позиция'], $m['extra']);
     }
+
+    public function test_similar_items_are_told_apart_by_numbers(): void
+    {
+        $gold = [
+            ['name' => 'Реле промежуточное РЭП 34-22-11 110В', 'article' => null, 'qty' => 9.0],
+            ['name' => 'Реле промежуточное РЭП 34-31-11 110В', 'article' => null, 'qty' => 2.0],
+        ];
+        $items = [
+            ['name' => 'Реле промежуточное электромагнитное РЭП 34-31-11 110В', 'article' => null, 'qty' => 2],
+            ['name' => 'Реле промежуточное электромагнитное РЭП 34-22-11 110В', 'article' => null, 'qty' => 9],
+        ];
+
+        $this->assertSame(2, LlmCompareParsingCommand::match($gold, $items)['qty_ok']);
+    }
 }
