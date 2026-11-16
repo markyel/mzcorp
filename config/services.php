@@ -80,6 +80,8 @@ return [
         'default_model' => env('ROUTERAI_DEFAULT_MODEL', 'google/gemini-3.1-flash-lite'),
         'timeout' => (int) env('ROUTERAI_TIMEOUT', 120),
         'min_max_tokens' => (int) env('ROUTERAI_MIN_MAX_TOKENS', 1500),
+        // false — запросы с reasoning: {enabled: false} (Qwen без рассуждений в 10 раз быстрее).
+        'reasoning' => (bool) env('ROUTERAI_REASONING', false),
         // Только для llm:compare-parsing: сбой кандидата — сбой, без OpenAI.
         'no_fallback' => false,
     ],

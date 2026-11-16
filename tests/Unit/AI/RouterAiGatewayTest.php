@@ -46,7 +46,7 @@ class RouterAiGatewayTest extends TestCase
         $answer = app(OpenAIChatService::class)->chat([['role' => 'user', 'content' => 'да?']], 'gpt-4o', ['max_tokens' => 20]);
 
         $this->assertSame('ок', $answer['content']);
-        Http::assertSent(fn ($r) => $r['model'] === 'qwen/qwen3.6-27b' && $r['max_tokens'] === 1500);
+        Http::assertSent(fn ($r) => $r['model'] === 'qwen/qwen3.6-27b' && $r['max_tokens'] === 1500 && $r['reasoning'] === ['enabled' => false]);
     }
 
     public function test_router_error_or_empty_answer_falls_back_to_openai(): void

@@ -38,6 +38,11 @@ class RouterAiGateway
     public function post(array $payload): Response
     {
         $payload['model'] = self::modelFor((string) ($payload['model'] ?? ''));
+        // Рассуждения выключены (ROUTERAI_REASONING): Qwen с ними разбирал письмо 20–270 с вместо 2 с,
+        // на разборе позиций они не нужны.
+        if (! config('services.routerai.reasoning') && ! isset($payload['reasoning'])) {
+            $payload['reasoning'] = ['enabled' => false];
+        }
         // Рассуждающие модели (Qwen) при лимите в 20–200 токенов тратят его на рассуждение и отвечают пусто.
         $min = (int) config('services.routerai.min_max_tokens', 1500);
         if (isset($payload['max_tokens'])) {
