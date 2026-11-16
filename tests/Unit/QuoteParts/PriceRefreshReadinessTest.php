@@ -7,7 +7,7 @@ use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 /**
- * Готово к актуализации цены: цену дали больше половины спрошенных, или есть хотя бы одно
+ * Готово к актуализации цены: цену дали хотя бы половина спрошенных, или есть хотя бы одно
  * предложение и с запроса прошло больше двух рабочих дней.
  */
 class PriceRefreshReadinessTest extends TestCase
@@ -21,13 +21,14 @@ class PriceRefreshReadinessTest extends TestCase
         ];
     }
 
-    public function test_more_than_half_answered_is_ready_at_once(): void
+    public function test_at_least_half_answered_is_ready_at_once(): void
     {
         $r = app(PriceRefreshReadiness::class);
         $now = Carbon::parse('2026-10-20 10:00');
 
         $this->assertTrue($r->isReady($this->stat(3, 2, '2026-10-20 09:00'), $now));
-        $this->assertFalse($r->isReady($this->stat(4, 2, '2026-10-20 09:00'), $now), 'ровно половина — ещё ждём');
+        $this->assertTrue($r->isReady($this->stat(4, 2, '2026-10-20 09:00'), $now), 'ровно половина — готово (с 16.11.2026)');
+        $this->assertFalse($r->isReady($this->stat(5, 2, '2026-10-20 09:00'), $now), 'меньше половины — ждём');
     }
 
     public function test_one_offer_waits_two_business_days(): void
