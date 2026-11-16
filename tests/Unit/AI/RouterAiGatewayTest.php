@@ -85,7 +85,7 @@ class RouterAiGatewayTest extends TestCase
             ['name' => 'Тросик ограничителя скорости', 'article' => null, 'qty' => 1.0],
         ];
         $items = [
-            ['name' => 'Ролик', 'article' => 'gaa 123', 'qty' => 4],
+            ['name' => 'Ролик', 'article' => 'gаа 123', 'qty' => 4], // «аа» — кириллица
             ['name' => 'кнопка вызова латунная', 'article' => null, 'qty' => 1],
             ['name' => 'Лишняя позиция', 'article' => null, 'qty' => 1],
         ];

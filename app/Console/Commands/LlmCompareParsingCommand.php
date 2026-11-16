@@ -157,7 +157,9 @@ class LlmCompareParsingCommand extends Command
      */
     public static function match(array $gold, array $items): array
     {
-        $norm = fn ($s) => strtoupper((string) preg_replace('/[^\p{L}\p{N}]/u', '', (string) $s));
+        // Кириллица-двойник латиницы (М00759 и M00759) — один артикул.
+        $norm = fn ($s) => strtr(mb_strtoupper((string) preg_replace('/[^\p{L}\p{N}]/u', '', (string) $s)),
+            ['А' => 'A', 'В' => 'B', 'Е' => 'E', 'К' => 'K', 'М' => 'M', 'Н' => 'H', 'О' => 'O', 'Р' => 'P', 'С' => 'C', 'Т' => 'T', 'Х' => 'X']);
         $words = fn ($s) => array_values(array_unique(array_filter(preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower((string) $s)) ?: [], fn ($w) => mb_strlen($w) >= 3)));
         $sim = function ($a, $b) use ($words) {
             $x = $words($a);

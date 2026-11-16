@@ -40,8 +40,9 @@ class OpenAIChatService
             }
             if (! RouterAiGateway::shouldFallback($response)) {
                 $data = $response->json();
-                AiUsageMeter::record((string) ($data['model'] ?? RouterAiGateway::modelFor($model)), (array) ($data['usage'] ?? []), 'routerai');
-                self::tally((string) ($data['model'] ?? RouterAiGateway::modelFor($model)), (array) ($data['usage'] ?? []));
+                // Модель — как запрашивали (google/…): RouterAI отвечает без префикса, а цены — с ним.
+                AiUsageMeter::record(RouterAiGateway::modelFor($model), (array) ($data['usage'] ?? []), 'routerai');
+                self::tally(RouterAiGateway::modelFor($model), (array) ($data['usage'] ?? []));
 
                 return [
                     'content' => $data['choices'][0]['message']['content'] ?? '',
