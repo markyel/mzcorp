@@ -35,6 +35,11 @@ class LlmCompareParsingCommand extends Command
     public const RUB_PER_M = [
         'qwen/qwen3.6-27b' => [26.7, 213.6],
         'google/gemini-3.1-flash-lite' => [26.7, 160.2],
+        'google/gemini-3.5-flash-lite' => [32.0, 267.0],
+        'google/gemini-3.8-flash' => [80.1, 400.5],
+        'deepseek/deepseek-v4.1-flash' => [6.0, 23.8],
+        'openai/gpt-4o' => [267.0, 1068.0],
+        'openai/gpt-4o-mini' => [16.0, 64.1],
         'gpt-4.1' => [163.6, 654.4],
         'gpt-4o' => [204.5, 818.0],
         'gpt-4o-mini' => [12.3, 49.1],
