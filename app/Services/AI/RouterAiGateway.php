@@ -3,21 +3,76 @@
 namespace App\Services\AI;
 
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
  * RouterAI (routerai.ru) — основной канал моделей (16.11.2026): OpenAI-совместимый API с оплатой в рублях,
- * под одним ключом Qwen, Gemini, GPT и др. Модель — см. modelFor(). Не ответил, ответил ошибкой или пустым ответом — OpenAIChatService шлёт тот же
- * запрос напрямую в OpenAI, как раньше.
+ * под одним ключом Qwen, Gemini, GPT и др. Модель — см. modelFor(). Не ответил, ответил ошибкой или пустым
+ * ответом — OpenAIChatService шлёт тот же запрос напрямую в OpenAI, как раньше.
+ *
+ * Предохранитель: RouterAI лежит (нет соединения / таймаут — сразу, 5xx/429 — два раза подряд) — следующие
+ * ROUTERAI_DOWN_MINUTES минут запросы идут сразу в OpenAI, без ожидания; раз в час — ошибка в лог.
+ * Ошибки отдельного запроса (400, пустой ответ модели) предохранитель не трогают.
  *
  * Включается ROUTERAI_ENABLED и ключом ROUTERAI_API_KEY.
  */
 class RouterAiGateway
 {
+    private const DOWN_KEY = 'routerai:down';
+
+    private const FAILURES_KEY = 'routerai:failures';
+
     public function enabled(): bool
     {
         return (bool) config('services.routerai.enabled') && trim((string) config('services.routerai.api_key')) !== '';
+    }
+
+    /** Предохранитель сработал — RouterAI пропускаем до истечения паузы. */
+    public static function isDown(): bool
+    {
+        try {
+            return Cache::has(self::DOWN_KEY);
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    public static function recordSuccess(): void
+    {
+        try {
+            Cache::forget(self::FAILURES_KEY);
+        } catch (Throwable) {
+        }
+    }
+
+    /**
+     * Сбой RouterAI: нет ответа (соединение, таймаут) — пауза сразу; 5xx/429 — со второго подряд.
+     * Прочие ошибки (400 «модель не принимает параметр», пустой ответ) — проблема запроса, не канала.
+     */
+    public static function recordFailure(?Response $response, string $why): void
+    {
+        try {
+            if ($response !== null && ! ($response->serverError() || $response->status() === 429)) {
+                return;
+            }
+            if ($response !== null) {
+                $failures = (int) Cache::get(self::FAILURES_KEY, 0) + 1;
+                Cache::put(self::FAILURES_KEY, $failures, now()->addMinutes(10));
+                if ($failures < 2) {
+                    return;
+                }
+            }
+            $minutes = max(1, (int) config('services.routerai.down_minutes', 5));
+            Cache::put(self::DOWN_KEY, now()->toIso8601String(), now()->addMinutes($minutes));
+            Cache::forget(self::FAILURES_KEY);
+            if (Cache::add('routerai:down:noticed', now()->toIso8601String(), now()->addHour())) {
+                Log::error('RouterAI unavailable — requests go straight to OpenAI', ['minutes' => $minutes, 'why' => mb_substr($why, 0, 300)]);
+            }
+        } catch (Throwable) {
+        }
     }
 
     /**
@@ -75,6 +130,8 @@ class RouterAiGateway
 
         return Http::withToken((string) config('services.routerai.api_key'))
             ->acceptJson()
+            // Соединение — быстро: лежащий RouterAI не должен держать запрос; ответ модели — долго (фото — 15 с+).
+            ->connectTimeout(max(1, (int) config('services.routerai.connect_timeout', 5)))
             ->timeout(max(10, (int) config('services.routerai.timeout', 120)))
             ->retry(2, fn (int $attempt, $e) => OpenAIRetry::backoffMs($attempt, $e, 1500, 6000), function ($e) {
                 return $e instanceof \Illuminate\Http\Client\RequestException && in_array($e->response?->status(), [429, 500, 502, 503], true);

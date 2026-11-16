@@ -30,7 +30,9 @@ class OpenAIChatService
     {
         // Основной канал — RouterAI, если включён; не ответил — тот же запрос напрямую в OpenAI (ниже).
         $router = app(RouterAiGateway::class);
-        if ($router->enabled()) {
+        // Сравнение моделей идёт мимо предохранителя: кандидат не должен ни пропускаться, ни отключать RouterAI для прода.
+        $comparing = (bool) config('services.routerai.no_fallback');
+        if ($router->enabled() && ($comparing || ! RouterAiGateway::isDown())) {
             $routed = array_merge(['model' => $model, 'messages' => $messages], $options);
             try {
                 $response = $router->post($routed);
@@ -39,6 +41,7 @@ class OpenAIChatService
                 $why = $e->getMessage();
             }
             if (! RouterAiGateway::shouldFallback($response)) {
+                $comparing || RouterAiGateway::recordSuccess();
                 $data = $response->json();
                 // Модель — как запрашивали (google/…): RouterAI отвечает без префикса, а цены — с ним.
                 AiUsageMeter::record(RouterAiGateway::modelFor($model), (array) ($data['usage'] ?? []), 'routerai');
@@ -53,10 +56,11 @@ class OpenAIChatService
             }
             $error = $why ?? ($response !== null ? $response->status().' '.mb_substr($response->body(), 0, 300) : 'no response');
             // Сравнение моделей (llm:compare-parsing): ответ GPT вместо кандидата смешал бы результаты.
-            if (config('services.routerai.no_fallback')) {
+            if ($comparing) {
                 self::$errors[] = mb_substr($error, 0, 200);
                 throw new RuntimeException('RouterAI: '.$error);
             }
+            RouterAiGateway::recordFailure($response, $error);
             Log::warning('RouterAI failed, falling back to OpenAI', [
                 'model' => $model,
                 'routed_model' => RouterAiGateway::modelFor($model),

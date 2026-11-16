@@ -84,6 +84,51 @@ class RouterAiGatewayTest extends TestCase
         $this->assertSame('от OpenAI', $answer['content']);
     }
 
+    public function test_no_connection_trips_the_breaker_and_next_requests_skip_router(): void
+    {
+        \Illuminate\Support\Facades\Cache::flush();
+        $routerCalls = 0;
+        Http::fake([
+            'router.test/*' => function () use (&$routerCalls) {
+                $routerCalls++;
+                throw new \Illuminate\Http\Client\ConnectionException('Connection timed out');
+            },
+            '*' => Http::response(['model' => 'gpt-4o', 'choices' => [['message' => ['content' => 'от OpenAI']]], 'usage' => []]),
+        ]);
+
+        $chat = app(OpenAIChatService::class);
+        $this->assertSame('от OpenAI', $chat->chat([['role' => 'user', 'content' => 'да?']], 'gpt-4o')['content']);
+        $this->assertTrue(RouterAiGateway::isDown());
+
+        $this->assertSame('от OpenAI', $chat->chat([['role' => 'user', 'content' => 'ещё?']], 'gpt-4o')['content']);
+        $this->assertSame(1, $routerCalls); // второй запрос RouterAI уже не ждал
+    }
+
+    public function test_server_errors_trip_the_breaker_only_on_the_second_in_a_row(): void
+    {
+        \Illuminate\Support\Facades\Cache::flush();
+        Http::fake([
+            'router.test/*' => Http::response('Bad Gateway', 502),
+            '*' => Http::response(['model' => 'gpt-4o', 'choices' => [['message' => ['content' => 'ок']]], 'usage' => []]),
+        ]);
+
+        RouterAiGateway::recordFailure(Http::get('https://router.test/x'), '502');
+        $this->assertFalse(RouterAiGateway::isDown());
+        RouterAiGateway::recordFailure(Http::get('https://router.test/x'), '502');
+        $this->assertTrue(RouterAiGateway::isDown());
+    }
+
+    public function test_request_errors_do_not_trip_the_breaker(): void
+    {
+        \Illuminate\Support\Facades\Cache::flush();
+        Http::fake(['router.test/*' => Http::response(['error' => 'unsupported parameter'], 400)]);
+
+        RouterAiGateway::recordFailure(Http::get('https://router.test/x'), '400');
+        RouterAiGateway::recordFailure(Http::get('https://router.test/x'), '400');
+
+        $this->assertFalse(RouterAiGateway::isDown());
+    }
+
     public function test_comparison_mode_does_not_fall_back(): void
     {
         config(['services.routerai.no_fallback' => true]);

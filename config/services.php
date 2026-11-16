@@ -81,6 +81,9 @@ return [
         'models' => env('ROUTERAI_MODELS', '{}'),
         'default_model' => env('ROUTERAI_DEFAULT_MODEL', ''),
         'timeout' => (int) env('ROUTERAI_TIMEOUT', 120),
+        // Соединение дольше — RouterAI лежит; затем пауза предохранителя (минуты) — сразу в OpenAI.
+        'connect_timeout' => (int) env('ROUTERAI_CONNECT_TIMEOUT', 5),
+        'down_minutes' => (int) env('ROUTERAI_DOWN_MINUTES', 5),
         'min_max_tokens' => (int) env('ROUTERAI_MIN_MAX_TOKENS', 1500),
         // false — запросы с reasoning: {enabled: false} (Qwen без рассуждений в 10 раз быстрее).
         'reasoning' => (bool) env('ROUTERAI_REASONING', false),
