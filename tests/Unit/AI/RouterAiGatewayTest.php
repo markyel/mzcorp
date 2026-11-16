@@ -140,6 +140,24 @@ class RouterAiGatewayTest extends TestCase
         $this->assertCount(1, $m['wrong']);
     }
 
+    public function test_captured_answers_compare_values_not_text_or_order(): void
+    {
+        $gpt = ['assignments' => [
+            ['image_index' => 0, 'slug' => 'nameplate', 'confidence' => 0.9, 'description' => 'шильдик платы крупно'],
+            ['image_index' => 1, 'slug' => 'general_view', 'confidence' => 0.7, 'description' => 'общий вид'],
+        ]];
+        $candidate = ['assignments' => [
+            ['image_index' => 1, 'slug' => 'general_view', 'confidence' => 0.5, 'description' => 'вид сбоку'],
+            ['image_index' => 0, 'slug' => 'connector', 'confidence' => 0.8, 'description' => 'разъём'],
+        ]];
+
+        $a = \App\Console\Commands\LlmCompareCapturedCommand::facts($gpt);
+        $b = \App\Console\Commands\LlmCompareCapturedCommand::facts($candidate);
+
+        $this->assertSame(['.assignments[].image_index=0', '.assignments[].slug=nameplate', '.assignments[].image_index=1', '.assignments[].slug=general_view'], $a);
+        $this->assertEqualsWithDelta(0.75, \App\Console\Commands\LlmCompareCapturedCommand::f1($a, $b), 0.001);
+    }
+
     public function test_similar_items_are_told_apart_by_numbers(): void
     {
         $gold = [

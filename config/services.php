@@ -86,6 +86,9 @@ return [
         'reasoning' => (bool) env('ROUTERAI_REASONING', false),
         // Только для llm:compare-parsing: сбой кандидата — сбой, без OpenAI.
         'no_fallback' => false,
+        // Запись живых запросов задач (через запятую, класс-вызыватель) для llm:compare-captured.
+        'capture' => env('ROUTERAI_CAPTURE', ''),
+        'capture_limit' => (int) env('ROUTERAI_CAPTURE_LIMIT', 40),
     ],
 
     'openai' => [
