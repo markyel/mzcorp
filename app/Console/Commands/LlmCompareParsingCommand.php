@@ -88,11 +88,12 @@ class LlmCompareParsingCommand extends Command
                 $this->line(sprintf('  [%s] %d/%d %s: эталон %d, найдено %d, совпало %d, кол-во верно %d, %.1f с%s',
                     $variant, $n + 1, $requests->count(), $r->internal_code, count($gold[$r->id]), count($items), $m['matched'], $m['qty_ok'], $sec, $failed ? ' · СБОЙ' : ''));
             }
-            $sum['cost_rub'] = round(collect(OpenAIChatService::$tally)->sum(function ($t, $model) {
+            $cost = 0.0;
+            foreach (OpenAIChatService::$tally as $model => $t) {
                 $price = self::RUB_PER_M[$model] ?? self::RUB_PER_M[preg_replace('/-\d{4}-\d{2}-\d{2}$/', '', $model)] ?? [0, 0];
-
-                return ($t['prompt'] * $price[0] + $t['completion'] * $price[1]) / 1_000_000;
-            }), 2);
+                $cost += ($t['prompt'] * $price[0] + $t['completion'] * $price[1]) / 1_000_000;
+            }
+            $sum['cost_rub'] = round($cost, 2);
             $sum['tokens'] = OpenAIChatService::$tally;
             $sum['errors'] = array_slice(OpenAIChatService::$errors, 0, 10);
             $report['summary'][$variant] = $sum;
