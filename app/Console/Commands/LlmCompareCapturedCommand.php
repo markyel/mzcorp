@@ -22,6 +22,8 @@ class LlmCompareCapturedCommand extends Command
         {caller : задача (класс-вызыватель), как в storage/app/llm-capture}
         {--models=openai/gpt-4o,google/gemini-3.5-flash-lite,google/gemini-3.1-flash-lite,deepseek/deepseek-v4.1-flash : кандидаты через RouterAI}
         {--show=8 : сколько расхождений показать}
+        {--system= : подменить системное сообщение текущей версией промпта, «Класс::метод» (проверка правок промпта)}
+        {--reference= : эталон — ответ этой модели заново (с --system), а не записанный ответ}
         {--ignore= : ещё поля не сравнивать (регулярка по имени ключа), напр. «label|raw_mention|address»}';
 
     protected $description = 'Прогнать записанные живые запросы на других моделях и сравнить ответы по полям JSON';
@@ -40,6 +42,29 @@ class LlmCompareCapturedCommand extends Command
         $cases = array_map(fn ($f) => json_decode(File::get($f->getPathname()), true), $files);
         $this->info('Записей: '.count($cases).', модель в записи: '.($cases[0]['model'] ?? '?'));
         config(['services.routerai.by_caller' => '{}', 'services.routerai.models' => '{}']);
+        if ($this->option('system')) {
+            [$class, $method] = explode('::', (string) $this->option('system'));
+            $ref = new \ReflectionMethod($class, $method);
+            $ref->setAccessible(true);
+            $system = (string) $ref->invoke(null);
+            foreach ($cases as &$c) {
+                foreach ($c['messages'] as &$m) {
+                    if (($m['role'] ?? '') === 'system') {
+                        $m['content'] = $system;
+                    }
+                }
+                unset($m);
+            }
+            unset($c);
+        }
+        if ($reference = (string) $this->option('reference')) {
+            config(['services.routerai.default_model' => $reference]);
+            foreach ($cases as $i => $c) {
+                $response = $gateway->post(array_merge($c['options'] ?? [], ['model' => 'x', 'messages' => $c['messages']]));
+                $cases[$i]['content'] = RouterAiGateway::shouldFallback($response) ? '{}' : (string) $response->json('choices.0.message.content');
+            }
+            $this->info("Эталон пересчитан: {$reference}");
+        }
 
         $rows = [];
         $report = [];
