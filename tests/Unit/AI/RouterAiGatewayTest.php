@@ -33,6 +33,19 @@ class RouterAiGatewayTest extends TestCase
         $this->assertSame('google/gemini-3.1-flash-lite', RouterAiGateway::modelFor('gpt-4o-mini'));
     }
 
+    public function test_task_mapping_wins_and_unmapped_models_stay_openai(): void
+    {
+        config([
+            'services.routerai.by_caller' => '{"RequestItemParsingService":"google/gemini-3.1-flash-lite"}',
+            'services.routerai.models' => '{}',
+            'services.routerai.default_model' => '',
+        ]);
+
+        $this->assertSame('google/gemini-3.1-flash-lite', RouterAiGateway::modelFor('gpt-4o', 'RequestItemParsingService'));
+        $this->assertSame('openai/gpt-4o', RouterAiGateway::modelFor('gpt-4o', 'SupplierOfferParser'));
+        $this->assertSame('openai/gpt-4o-mini', RouterAiGateway::modelFor('gpt-4o-mini', 'MailCategoryClassifier'));
+    }
+
     public function test_disabled_without_key(): void
     {
         config(['services.routerai.api_key' => '']);

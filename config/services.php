@@ -75,9 +75,11 @@ return [
         'enabled' => (bool) env('ROUTERAI_ENABLED', false),
         'api_key' => env('ROUTERAI_API_KEY'),
         'base_url' => env('ROUTERAI_BASE_URL', 'https://routerai.ru/api/v1'),
-        // Замены JSON {"gpt-4o":"google/gemini-3.1-flash-lite", …}; без замены — default_model.
+        // Замены JSON по задаче (класс, вызвавший модель): {"RequestItemParsingService":"google/gemini-3.1-flash-lite"}.
+        'by_caller' => env('ROUTERAI_BY_CALLER', '{}'),
+        // Замены JSON по нашей модели {"gpt-4o-mini":"…"}; дальше default_model, пустой — та же модель OpenAI.
         'models' => env('ROUTERAI_MODELS', '{}'),
-        'default_model' => env('ROUTERAI_DEFAULT_MODEL', 'google/gemini-3.1-flash-lite'),
+        'default_model' => env('ROUTERAI_DEFAULT_MODEL', ''),
         'timeout' => (int) env('ROUTERAI_TIMEOUT', 120),
         'min_max_tokens' => (int) env('ROUTERAI_MIN_MAX_TOKENS', 1500),
         // false — запросы с reasoning: {enabled: false} (Qwen без рассуждений в 10 раз быстрее).
@@ -118,6 +120,7 @@ return [
             'google/gemini-3.1-flash-lite' => [0.33, 1.96, 0.33],
             'openai/gpt-4o' => [3.26, 13.06, 3.26],
             'openai/gpt-4o-mini' => [0.20, 0.78, 0.20],
+            'openai/gpt-4.1' => [2.61, 10.45, 2.61],
         ],
         // Резервный шлюз (Beget AI Gateway, OpenAI-совместимый): основной канал недоступен —
         // запрос уходит туда. Пустой ключ — резерва нет. См. App\Services\AI\OpenAIFallbackGateway.

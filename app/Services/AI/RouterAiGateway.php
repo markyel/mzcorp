@@ -8,8 +8,7 @@ use Throwable;
 
 /**
  * RouterAI (routerai.ru) — основной канал моделей (16.11.2026): OpenAI-совместимый API с оплатой в рублях,
- * под одним ключом Qwen, Gemini, GPT и др. Модель — по замене «наша → у RouterAI» (services.routerai.models),
- * иначе модель по умолчанию. Не ответил, ответил ошибкой или пустым ответом — OpenAIChatService шлёт тот же
+ * под одним ключом Qwen, Gemini, GPT и др. Модель — см. modelFor(). Не ответил, ответил ошибкой или пустым ответом — OpenAIChatService шлёт тот же
  * запрос напрямую в OpenAI, как раньше.
  *
  * Включается ROUTERAI_ENABLED и ключом ROUTERAI_API_KEY.
@@ -21,13 +20,33 @@ class RouterAiGateway
         return (bool) config('services.routerai.enabled') && trim((string) config('services.routerai.api_key')) !== '';
     }
 
-    /** Название модели у RouterAI: явная замена, иначе модель по умолчанию. */
-    public static function modelFor(string $model): string
+    /**
+     * Название модели у RouterAI: замена по задаче (класс, вызвавший модель — «RequestItemParsingService»),
+     * затем по нашей модели, затем модель по умолчанию; не задана — та же модель OpenAI (gpt-4o → openai/gpt-4o).
+     * По задаче — потому что одна gpt-4o разбирает и позиции заявки, и цены поставщика.
+     */
+    public static function modelFor(string $model, ?string $caller = null): string
     {
-        $map = config('services.routerai.models');
-        $map = is_array($map) ? $map : (json_decode((string) $map, true) ?: []);
+        $byCaller = self::map('services.routerai.by_caller');
+        $caller ??= AiUsageMeter::caller();
+        if (isset($byCaller[$caller])) {
+            return (string) $byCaller[$caller];
+        }
+        $map = self::map('services.routerai.models');
+        if (isset($map[$model])) {
+            return (string) $map[$model];
+        }
+        $default = trim((string) config('services.routerai.default_model'));
 
-        return (string) ($map[$model] ?? config('services.routerai.default_model', 'google/gemini-3.1-flash-lite'));
+        return $default !== '' ? $default : (str_contains($model, '/') ? $model : 'openai/'.$model);
+    }
+
+    /** @return array<string, string> */
+    private static function map(string $key): array
+    {
+        $map = config($key);
+
+        return is_array($map) ? $map : (json_decode((string) $map, true) ?: []);
     }
 
     /**

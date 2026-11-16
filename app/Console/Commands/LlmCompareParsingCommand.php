@@ -151,6 +151,7 @@ class LlmCompareParsingCommand extends Command
         }
         config([
             'services.routerai.enabled' => true,
+            'services.routerai.by_caller' => '{}',
             'services.routerai.models' => '{}',
             'services.routerai.default_model' => $variant,
             'services.routerai.no_fallback' => true,

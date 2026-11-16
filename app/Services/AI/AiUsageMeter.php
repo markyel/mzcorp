@@ -43,7 +43,7 @@ class AiUsageMeter
     }
 
     /** Кто вызвал: первый класс вне App\Services\AI (короткое имя). */
-    private static function caller(): string
+    public static function caller(): string
     {
         foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 12) as $frame) {
             $class = (string) ($frame['class'] ?? '');
