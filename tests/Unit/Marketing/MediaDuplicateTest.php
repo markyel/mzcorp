@@ -127,4 +127,36 @@ class MediaDuplicateTest extends TestCase
         $this->assertSame('draft', $copy->status);
         $this->assertStringContainsString('Bot is not admin', (string) $this->max->fresh()->last_error);
     }
+
+    public function test_a_separate_draft_for_the_mirror_is_not_posted_again(): void
+    {
+        // 17.11.2026: бонусная программа — копия из Telegram в MAX и отдельный черновик MAX, два поста.
+        Http::fake([
+            'https://mzcorp.test/*' => Http::response('JPEG', 200, ['Content-Type' => 'image/jpeg', 'Content-Length' => '4']),
+            'https://api.telegram.org/*' => Http::response(['ok' => true, 'result' => [['message_id' => 69]]]),
+            'https://max.test/uploads*' => Http::response(['url' => 'https://upload.max.test/1']),
+            'https://upload.max.test/*' => Http::response(['token' => 'img-tok']),
+            'https://max.test/messages*' => Http::response(['message' => ['body' => ['mid' => 'mid.dup'], 'url' => 'https://max.ru/channel_myzip/X']]),
+        ]);
+        $tgDraft = $this->publication();
+        $maxDraft = MediaPublication::create(['media_channel_id' => $this->max->id, 'title' => $tgDraft->title, 'body' => $tgDraft->body.' ', 'status' => 'draft']);
+
+        $this->assertTrue(app(MediaPublisherService::class)->publish($tgDraft)['ok']);
+        $res = app(MediaPublisherService::class)->publish($maxDraft);
+
+        $this->assertFalse($res['ok']);
+        $this->assertStringContainsString('уже опубликован', $res['message']);
+        $this->assertSame('https://max.ru/channel_myzip/X', $res['url']);
+        $this->assertSame('draft', $maxDraft->fresh()->status);
+        $this->assertCount(1, Http::recorded(fn (Request $r) => $r->method() === 'POST' && str_starts_with($r->url(), 'https://max.test/messages')), 'в MAX ушёл один пост');
+    }
+
+    public function test_a_max_post_is_removed_by_its_message_id(): void
+    {
+        Http::fake(['https://max.test/messages*' => Http::response(['success' => true])]);
+        $post = MediaPublication::create(['media_channel_id' => $this->max->id, 'title' => 't', 'body' => 'b', 'status' => 'published', 'external_id' => 'mid.ffff01']);
+
+        $this->assertTrue(app(MediaPublisherService::class)->removeFromMax($post)['ok']);
+        Http::assertSent(fn (Request $r) => $r->method() === 'DELETE' && str_contains($r->url(), 'message_id=mid.ffff01') && $r->hasHeader('Authorization', 'max-tok'));
+    }
 }

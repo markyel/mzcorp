@@ -71,6 +71,11 @@ class MediaPublisherService
         if (! $channel->isConnected()) {
             return ['ok' => false, 'message' => 'У канала не заполнен доступ: нужен токен и адрес места публикации.', 'url' => null];
         }
+        // Тот же пост уже вышел в этот канал — копией с канала-источника (Telegram → MAX) или повторным нажатием:
+        // второй раз не шлём (17.11.2026: бонусная программа задублилась в MAX — копия из Telegram и отдельный черновик).
+        if (($same = $this->alreadyPosted($publication)) !== null) {
+            return ['ok' => false, 'message' => 'Этот пост уже опубликован в «'.$channel->name.'»'.($same->url ? ': '.$same->url : '').' (запись №'.$same->id.') — второй раз не отправляем.', 'url' => $same->url];
+        }
 
         // Своя лента: «опубликовать» — значит выставить страницу /news и пункт
         // RSS. Ни внешнего вызова, ни ключей; адрес публикации — страница статьи.
@@ -293,6 +298,52 @@ class MediaPublisherService
 
             $mirror->forceFill(['last_posted_at' => now()])->save();
         }
+    }
+
+    /** Опубликованный за 7 дней пост того же канала с тем же заголовком и текстом; null — такого нет. */
+    public function alreadyPosted(MediaPublication $publication): ?MediaPublication
+    {
+        return MediaPublication::query()
+            ->where('media_channel_id', $publication->media_channel_id)
+            ->where('status', 'published')
+            ->whereKeyNot($publication->id)
+            ->where('published_at', '>=', now()->subDays(7))
+            ->latest('published_at')
+            ->get()
+            ->first(fn (MediaPublication $p) => self::sameText($p->title, $publication->title) && self::sameText($p->body, $publication->body));
+    }
+
+    /** Тексты совпадают без учёта пробелов и регистра. */
+    public static function sameText(?string $a, ?string $b): bool
+    {
+        $norm = fn (?string $s) => mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', (string) $s)));
+
+        return $norm($a) === $norm($b);
+    }
+
+    /**
+     * Удалить пост из канала MAX (DELETE /messages) — лишний дубль. Запись публикации удаляет вызывающий.
+     *
+     * @return array{ok: bool, message: string}
+     */
+    public function removeFromMax(MediaPublication $publication): array
+    {
+        $channel = $publication->channel;
+        $messageId = trim((string) $publication->external_id);
+        if ($channel === null || $channel->kind !== 'max' || $messageId === '') {
+            return ['ok' => false, 'message' => 'Это не пост MAX или у него нет номера сообщения.'];
+        }
+        try {
+            $r = $this->maxHttp($channel)->delete($this->maxApi().'/messages?'.http_build_query(['message_id' => $messageId]));
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'message' => 'MAX недоступен: '.mb_substr($e->getMessage(), 0, 200)];
+        }
+        if (! $r->successful() || $r->json('success') === false) {
+            return ['ok' => false, 'message' => 'MAX не удалил сообщение: HTTP '.$r->status().' '.mb_substr($r->body(), 0, 200)];
+        }
+        Log::info('MediaPublisherService: MAX post removed', ['publication_id' => $publication->id, 'message_id' => $messageId]);
+
+        return ['ok' => true, 'message' => 'Удалено из MAX.'];
     }
 
     /** Дубль поста в площадку, повторяющую канал (см. recordMirrors). */

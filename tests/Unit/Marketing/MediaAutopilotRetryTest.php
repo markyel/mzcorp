@@ -240,7 +240,8 @@ class MediaAutopilotRetryTest extends TestCase
         $this->app->instance(MediaCoverService::class, $covers);
         Http::fake(fn () => Http::response(['ok' => true, 'result' => ['message_id' => 73]]));
         $bare = $this->publication();
-        $withCover = $this->publication(['image_urls' => ['https://mzcorp.test/media/cover/old.jpg']]);
+        // Другой заголовок: два одинаковых поста в один канал публикатор не отправляет (защита от дублей, 17.11.2026).
+        $withCover = $this->publication(['title' => 'Новые позиции каталога', 'image_urls' => ['https://mzcorp.test/media/cover/old.jpg']]);
         $this->queue($bare);
         $this->queue($withCover);
 
