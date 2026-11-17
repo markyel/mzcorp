@@ -57,7 +57,6 @@
                     request()->routeIs('clients.*')         => 'clients',
                     request()->routeIs('suppliers.*')       => 'suppliers',
                     request()->routeIs('procurement.*')     => 'procurement',
-                    request()->routeIs('calendar-poll.*')   => 'calendar-poll',
                     default                                  => null,
                 };
                 $showRail = ($rail ?? true);
