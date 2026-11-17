@@ -107,8 +107,15 @@ final class LinkedThreadHandler implements InboundRoutingHandler
                 'request_id' => $linkedRequest->id,
                 'from_email' => $message->from_email,
             ]);
+            // Один открытый запрос этой организации в заявке — письмо к нему, цены разберутся (MZ2026-00795).
+            try {
+                $inquiry = app(\App\Services\Supplier\SupplierInquiryService::class)->attachToSoleOrgInquiry($message, $linkedRequest->id);
+            } catch (\Throwable $e) {
+                $inquiry = null;
+                Log::warning('MailRouter: supplier org inquiry attach failed (non-fatal)', ['email_message_id' => $message->id, 'error' => $e->getMessage()]);
+            }
 
-            return new RoutingDecision('supplier_in_client_thread', $linkedRequest->id);
+            return new RoutingDecision('supplier_in_client_thread', $linkedRequest->id, $inquiry !== null ? ['supplier_inquiry_id' => $inquiry->id] : []);
         }
 
         // Жёсткое правило sticky direct_mailbox для reply'ев (Foundation §1.5):

@@ -57,26 +57,40 @@ class SupplierReminderService
             // Не шлём повтор, если по этой заявке от нашего домена уже есть
             // входящий supplier_reply (в любом инквайри заявки ИЛИ непривязанный
             // с M-кодом заявки в теме). Кейс: 8602/10149/10451/10669/10940.
+            // Ещё: письмо того же домена уже лежит в этой заявке и пришло после запроса — любой категории
+            // и без кода в теме. MZ2026-00795: STEP прислал КП новым письмом «Angebot», менеджер привязал
+            // его к заявке, а напоминания ушли дважды («шлю предложение третий раз», 17.11.2026).
             ->whereRaw("NOT EXISTS (
                 SELECT 1 FROM email_messages em
-                WHERE em.direction = 'inbound' AND em.category = 'supplier_reply'
+                WHERE em.direction = 'inbound'
                   AND split_part(lower(em.from_email), '@', 2) = split_part(lower(supplier_inquiries.supplier_email), '@', 2)
                   AND (
-                    em.supplier_inquiry_id IN (
-                        SELECT sib.id FROM supplier_inquiries sib
-                        WHERE sib.related_request_id = supplier_inquiries.related_request_id
-                    )
+                    (em.category = 'supplier_reply' AND (
+                        em.supplier_inquiry_id IN (
+                            SELECT sib.id FROM supplier_inquiries sib
+                            WHERE sib.related_request_id = supplier_inquiries.related_request_id
+                        )
+                        OR (
+                            em.supplier_inquiry_id IS NULL
+                            AND supplier_inquiries.related_request_id IS NOT NULL
+                            AND EXISTS (
+                                SELECT 1 FROM requests r
+                                WHERE r.id = supplier_inquiries.related_request_id
+                                  AND em.subject ILIKE '%' || r.internal_code || '%'
+                            )
+                        )
+                    ))
                     OR (
-                        em.supplier_inquiry_id IS NULL
-                        AND supplier_inquiries.related_request_id IS NOT NULL
-                        AND EXISTS (
-                            SELECT 1 FROM requests r
-                            WHERE r.id = supplier_inquiries.related_request_id
-                              AND em.subject ILIKE '%' || r.internal_code || '%'
+                        supplier_inquiries.related_request_id IS NOT NULL
+                        AND em.related_request_id = supplier_inquiries.related_request_id
+                        AND em.sent_at >= supplier_inquiries.created_at
+                        AND (
+                            lower(em.from_email) = lower(supplier_inquiries.supplier_email)
+                            OR NOT (split_part(lower(em.from_email), '@', 2) = ANY (?::text[]))
                         )
                     )
                   )
-            )")
+            )", ['{'.implode(',', SupplierInquiryService::FREE_MAIL_DOMAINS).'}'])
             ->where('reminders_sent', '<', $max)
             ->where('created_at', '<', now()->subDays($firstAfter))
             ->where(fn ($q) => $q->whereNull('last_reminder_at')->orWhere('last_reminder_at', '<', now()->subDays($interval)))

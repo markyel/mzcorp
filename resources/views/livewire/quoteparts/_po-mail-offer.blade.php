@@ -11,9 +11,9 @@
         <div class="pa-col">
             <div class="pa-who"><span class="pa-sup">{{ $m['supplier'] }}</span><span class="pa-pill pa-pill-neutral" title="Запрос ушёл обычным письмом, не через QuoteParts">письмом</span></div>
             <span class="pa-meta">{{ $m['at']?->timezone($tz)->format('d.m H:i') }} · {{ $m['email'] }}</span>
-            @if($m['request_id'])
-                <a href="{{ route('requests.show', ['request' => $m['request_id'], 'tab' => 'suppliers']) }}" target="_blank" rel="noopener" class="pa-link"
-                   title="Переписка с поставщиком — во вкладке «Поставщики» заявки">▸ переписка · {{ $m['request_code'] }}</a>
+            @if(! empty($m['inquiry_id']))
+                <button type="button" wire:click="openMailDialog({{ $m['inquiry_id'] }})" class="pa-link"
+                        title="Переписка с поставщиком по запросу письмом">{{ $mailDialog === $m['inquiry_id'] ? '▾' : '▸' }} переписка{{ $m['request_code'] ? ' · '.$m['request_code'] : '' }}</button>
             @endif
         </div>
         <div class="pa-col pa-price">
@@ -38,4 +38,7 @@
             @endif
         </div>
     </div>
+    @if(! empty($m['inquiry_id']) && $mailDialog === $m['inquiry_id'])
+        @include('livewire.quoteparts._po-mail-thread', ['inquiryId' => $m['inquiry_id'], 'requestId' => $m['request_id'], 'requestCode' => $m['request_code']])
+    @endif
 </div>

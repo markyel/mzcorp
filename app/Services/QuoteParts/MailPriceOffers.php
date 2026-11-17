@@ -32,7 +32,7 @@ class MailPriceOffers
             ->join('catalog_items as ci', 'ci.id', '=', DB::raw('coalesce(sii.catalog_item_id, ri.catalog_item_id)'))
             ->leftJoin('requests as r', 'r.id', '=', 'si.related_request_id')
             ->where('si.created_at', '>=', $since)
-            ->get(['sii.id', 'ci.id as cid', 'ci.sku', 'ci.name', 'si.supplier_email', 'si.supplier_name', 'si.created_at', 'si.related_request_id', 'r.internal_code']);
+            ->get(['sii.id', 'si.id as inquiry_id', 'ci.id as cid', 'ci.sku', 'ci.name', 'si.supplier_email', 'si.supplier_name', 'si.created_at', 'si.related_request_id', 'r.internal_code']);
         if ($items->isEmpty()) {
             return [];
         }
@@ -57,7 +57,7 @@ class MailPriceOffers
             foreach ($offers->get($it->id, collect()) as $o) {
                 $base = ['id' => (int) $o->id, 'sku' => $sku, 'cid' => (int) $it->cid, 'name' => (string) $it->name, 'key' => $key, 'supplier' => $supplier,
                     'email' => (string) $it->supplier_email, 'at' => Carbon::parse($o->at), 'email_message_id' => $o->email_message_id,
-                    'request_id' => $it->related_request_id, 'request_code' => $it->internal_code];
+                    'request_id' => $it->related_request_id, 'request_code' => $it->internal_code, 'inquiry_id' => (int) $it->inquiry_id];
                 if ($o->outcome === 'quoted' && (float) $o->price > 0) {
                     $rub = IqotCurrencyConverter::toRub((float) $o->price, $o->currency);
                     // Последний ответ поставщика по позиции — его текущая цена (как в SupplierChoiceService::currentOffers).

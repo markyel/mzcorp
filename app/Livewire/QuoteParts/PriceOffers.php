@@ -87,6 +87,58 @@ class PriceOffers extends Component
     /** Предложение, по которому открыт диалог с поставщиком (уточнить цену). */
     public ?int $dialog = null;
 
+    /** Открытая переписка по запросу обычным письмом (id запроса поставщику) — на месте, а не в заявке. */
+    public ?int $mailDialog = null;
+
+    public function openMailDialog(int $inquiryId): void
+    {
+        if ($this->mailDialog !== $inquiryId) {
+            // Доступ как у заявки запроса: раньше ссылка вела в неё, и там проверялся.
+            $request = \App\Models\SupplierInquiry::query()->find($inquiryId)?->relatedRequest;
+            if ($request !== null && ! $request->isViewableBy(auth()->user())) {
+                $this->dispatch('toast', type: 'error', message: 'Нет доступа к заявке '.$request->internal_code.'.');
+
+                return;
+            }
+        }
+        $this->mailDialog = $this->mailDialog === $inquiryId ? null : $inquiryId;
+        unset($this->mailThread);
+    }
+
+    /**
+     * Письма запроса обычной почтой — наш запрос, напоминания, ответы — от старых к новым (17.11.2026: у предложений
+     * QuoteParts переписка открывалась на месте, у писем уводила в заявку).
+     *
+     * @return Collection<int, \App\Models\EmailMessage>
+     */
+    #[Computed]
+    public function mailThread(): Collection
+    {
+        if ($this->mailDialog === null) {
+            return collect();
+        }
+
+        return \App\Models\EmailMessage::withHistory()->withoutRawSource()
+            ->with('attachments:id,email_message_id,filename,mime_type,is_inline')
+            ->where('supplier_inquiry_id', $this->mailDialog)
+            ->where('is_draft', false)
+            ->orderBy('sent_at')->orderBy('id')
+            ->get()
+            // Копии того же письма в других ящиках — один раз.
+            ->unique(fn ($m) => ($mid = trim((string) $m->message_id)) !== '' ? mb_strtolower($mid) : 'row-'.$m->id)
+            ->values();
+    }
+
+    /** Текст письма без цитаты и подписи — коротко, для переписки на месте. */
+    public static function mailExcerpt(\App\Models\EmailMessage $m): string
+    {
+        $cleaner = app(\App\Services\Mail\EmailTextCleanerService::class);
+        $text = trim((string) $m->body_plain) !== '' ? (string) $m->body_plain : $cleaner->htmlToText((string) $m->body_html);
+        $text = $cleaner->removeSignature($cleaner->cutQuotedReplyTail($text));
+
+        return \Illuminate\Support\Str::limit(trim((string) preg_replace("/\n{3,}/", "\n\n", $text)), 1200);
+    }
+
     /** «Закупаем здесь»: это предложение — закупочное для позиции (выбор снабжения, идёт в выгрузку 1С). Другое выбранное снимается. */
     public function choose(int $offerId, PriceActualizationService $service): void
     {

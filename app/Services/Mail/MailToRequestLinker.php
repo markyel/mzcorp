@@ -188,6 +188,17 @@ class MailToRequestLinker
             $documents++;
         }
 
+        // Письмо поставщика (КП новым письмом, без метки и треда) — к единственному открытому запросу его
+        // организации в этой заявке: цены разберутся, напоминание не уйдёт (MZ2026-00795).
+        $inquiries = app(\App\Services\Supplier\SupplierInquiryService::class);
+        foreach ($letters->filter(fn (EmailMessage $m) => $m->direction === MailDirection::Inbound) as $m) {
+            try {
+                $inquiries->attachToSoleOrgInquiry($m->fresh() ?? $m, $request->id);
+            } catch (\Throwable $e) {
+                Log::warning('MailToRequestLinker: supplier inquiry attach failed (non-fatal)', ['email_message_id' => $m->id, 'error' => $e->getMessage()]);
+            }
+        }
+
         Log::info('MailToRequestLinker: letter linked to request by hand', [
             'email_message_id' => $anchor->id,
             'request_id' => $request->id,

@@ -501,7 +501,7 @@ class SupplierInquiryService
      * Бесплатные/публичные почтовые домены — для них домен-матч ответа
      * поставщика НЕ применяем (общий домен у разных контрагентов).
      */
-    private const FREE_MAIL_DOMAINS = [
+    public const FREE_MAIL_DOMAINS = [
         'mail.ru', 'inbox.ru', 'list.ru', 'bk.ru', 'internet.ru',
         'gmail.com', 'yandex.ru', 'ya.ru', 'yandex.com',
         'rambler.ru', 'lenta.ru', 'autorambler.ru', 'myrambler.ru',
@@ -750,6 +750,49 @@ class SupplierInquiryService
      * для входящих category=supplier_reply (чтобы не уходило в client-pipeline
      * и mail-review). Идемпотентно.
      */
+    /**
+     * Письмо поставщика легло в заявку (менеджер привязал вручную или ответом в треде клиента), а к запросу
+     * не привязалось — в заявке ровно один открытый запрос этой организации поставщика: письмо к нему,
+     * цены разберутся. MZ2026-00795 (17.11.2026): STEP прислал КП новым письмом «Angebot» — без метки
+     * и треда; цены не разобрали, а напоминания ушли дважды («шлю предложение третий раз»).
+     * Организация — по справочнику поставщиков, иначе корпоративный домен (не бесплатная почта).
+     * Два и больше подходящих запроса — не гадаем.
+     */
+    public function attachToSoleOrgInquiry(EmailMessage $message, int $requestId): ?SupplierInquiry
+    {
+        $from = mb_strtolower(trim((string) $message->from_email));
+        if ($message->direction !== MailDirection::Inbound || $message->supplier_inquiry_id !== null || $from === '') {
+            return null;
+        }
+        $open = SupplierInquiry::query()
+            ->where('related_request_id', $requestId)
+            ->where('status', 'open')
+            ->has('items')
+            ->where('created_at', '<=', $message->sent_at ?? now())
+            ->get(['id', 'supplier_email']);
+        if ($open->isEmpty()) {
+            return null;
+        }
+        $orgOf = fn (string $email): ?int => ($id = \App\Models\Supplier::query()->where('email', mb_strtolower(trim($email)))->value('supplier_organization_id')) ? (int) $id : null;
+        $domainOf = fn (string $email): string => mb_strtolower((string) substr((string) strrchr(trim($email), '@'), 1));
+        $fromOrg = $orgOf($from);
+        $fromDomain = $domainOf($from);
+        $corporate = $fromDomain !== '' && ! in_array($fromDomain, self::FREE_MAIL_DOMAINS, true) && ! $this->isInternalDomain($fromDomain);
+
+        $same = $open->filter(fn (SupplierInquiry $i) => ($fromOrg !== null && $orgOf((string) $i->supplier_email) === $fromOrg)
+            || ($corporate && $domainOf((string) $i->supplier_email) === $fromDomain))->values();
+        if ($same->count() !== 1) {
+            return null;
+        }
+        $inquiry = SupplierInquiry::find($same->first()->id);
+        $this->attachMessage($inquiry, $message);
+        \Illuminate\Support\Facades\Log::info('SupplierInquiry: supplier letter in the request attached to the sole inquiry of its organization', [
+            'email_message_id' => $message->id, 'supplier_inquiry_id' => $inquiry->id, 'request_id' => $requestId, 'from_email' => $from,
+        ]);
+
+        return $inquiry;
+    }
+
     public function attachMessage(SupplierInquiry $inquiry, EmailMessage $message): void
     {
         $fill = [];

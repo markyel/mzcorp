@@ -107,7 +107,7 @@
         @include('livewire.quoteparts._po-offer', ['r' => $r, 'it' => $it, 'chosen' => $chosen, 'best' => $best, 'only' => $only, 'pos' => $pos, 'reopened' => $section === 'new'])
     @endforeach
 
-    {{-- Цены и отказы из писем мимо QuoteParts (MailPriceOffers): переписка — в заявке. --}}
+    {{-- Цены и отказы из писем мимо QuoteParts (MailPriceOffers): переписка запроса — тут же, под строкой. --}}
     @foreach(($it['mail'] ?? []) as $m)
         @include('livewire.quoteparts._po-mail-offer', ['m' => $m, 'it' => $it, 'chosen' => $chosen, 'pos' => $pos])
     @endforeach
@@ -117,13 +117,16 @@
                 <div class="pa-col">
                     <div class="pa-who"><span class="pa-sup">{{ $d['supplier'] }}</span><span class="pa-pill pa-pill-over">отказ</span><span class="pa-pill pa-pill-neutral">письмом</span></div>
                     <span class="pa-meta">{{ $d['at']?->timezone($tz)->format('d.m H:i') }} · {{ $d['email'] }}</span>
-                    @if($d['request_id'])<a href="{{ route('requests.show', ['request' => $d['request_id'], 'tab' => 'suppliers']) }}" target="_blank" rel="noopener" class="pa-link">▸ переписка · {{ $d['request_code'] }}</a>@endif
+                    @if(! empty($d['inquiry_id']))<button type="button" wire:click="openMailDialog({{ $d['inquiry_id'] }})" class="pa-link">{{ $mailDialog === $d['inquiry_id'] ? '▾' : '▸' }} переписка{{ $d['request_code'] ? ' · '.$d['request_code'] : '' }}</button>@endif
                 </div>
                 <div class="pa-col pa-price"><span class="pa-meta" style="font-size: 13px">цену не дал</span></div>
                 <div class="pa-col"></div>
                 <div class="pa-col">@if($d['reason'])<span class="pa-note">Поставщик: «{{ $d['reason'] }}»</span>@endif</div>
                 <div class="pa-col pa-decide"></div>
             </div>
+            @if(! empty($d['inquiry_id']) && $mailDialog === $d['inquiry_id'])
+                @include('livewire.quoteparts._po-mail-thread', ['inquiryId' => $d['inquiry_id'], 'requestId' => $d['request_id'], 'requestCode' => $d['request_code']])
+            @endif
         </div>
     @endforeach
 
