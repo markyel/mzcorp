@@ -529,8 +529,10 @@ class PriceOffers extends Component
         });
 
         if (($term = trim($this->q)) !== '') {
+            // M-артикул, к которому привязан черновик T-…, — тоже для поиска.
+            $linked = \Illuminate\Support\Facades\DB::table('price_draft_skus')->whereIn('draft_code', $rows->pluck('sku')->unique())->pluck('sku', 'draft_code');
             $rows = $rows->filter(fn ($r) => mb_stripos(implode(' ', [
-                $r['sku'], $r['name'], $r['supplier'], $r['rfq_tag'], $r['request']?->internal_code, ...$extra($r),
+                $r['sku'], $linked[$r['sku']] ?? null, $r['name'], $r['supplier'], $r['rfq_tag'], $r['request']?->internal_code, ...$extra($r),
             ]), $term) !== false);
         }
 
@@ -831,7 +833,9 @@ class PriceOffers extends Component
                 ->orWhere('part_number', 'ilike', '%'.$term.'%')
                 ->orWhere('rfq_tag', 'ilike', '%'.$term.'%')
                 ->orWhereHas('catalogItem', fn ($c) => $c->where('name', 'ilike', '%'.$term.'%'))
-                ->orWhereHas('request', fn ($r) => $r->where('internal_code', 'ilike', '%'.$term.'%'))))
+                ->orWhereHas('request', fn ($r) => $r->where('internal_code', 'ilike', '%'.$term.'%'))
+                // Черновик T-… с M-артикулом: ищется и по нему (17.11.2026: по M34826 не находился T-1RHLOU).
+                ->orWhereIn('sku', \Illuminate\Support\Facades\DB::table('price_draft_skus')->where('sku', 'ilike', '%'.$term.'%')->select('draft_code'))))
             ->orderByDesc('remote_updated_at');
     }
 
