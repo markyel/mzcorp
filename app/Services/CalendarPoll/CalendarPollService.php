@@ -133,6 +133,8 @@ class CalendarPollService
             picks: $poll->picks,
             closesAt: $poll->closes_at,
             validDays: (int) config('services.calendar_poll.link_ttl_days', 14),
+            photos: $poll->photos()->count(),
+            winners: $poll->winners,
         ), (string) config('services.calendar_poll.from_name', 'Мой ЗиП'));
         if ($sent) {
             $voter->forceFill(['invited_at' => now()])->save();

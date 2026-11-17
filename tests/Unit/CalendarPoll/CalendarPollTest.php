@@ -61,12 +61,16 @@ class CalendarPollTest extends TestCase
 
     public function test_invite_mail_carries_the_personal_link_and_the_rules(): void
     {
-        $mail = new CalendarPollInviteMail('Иван Петров', 'Фото для календаря 2027', '', 'https://mzcorp.ru/calendar/'.str_repeat('a', 48), 6, null, 14);
+        $closes = \Illuminate\Support\Carbon::parse('2026-11-18 12:35', config('app.timezone'));
+        $mail = new CalendarPollInviteMail('Иван Петров', 'Фото для календаря 2027', '', 'https://mzcorp.ru/calendar/'.str_repeat('a', 48), 6, $closes, 14, photos: 19, winners: 12);
 
-        $this->assertSame('Фото для календаря 2027 — выберите 6 фото', $mail->envelope()->subject);
+        $this->assertSame('Фото для календаря 2027: выберите 6 лучших фото до 18.11', $mail->envelope()->subject);
         $html = $mail->render();
         $this->assertStringContainsString('https://mzcorp.ru/calendar/'.str_repeat('a', 48), $html);
         $this->assertStringContainsString('Иван Петров, здравствуйте', $html);
-        $this->assertStringContainsString('выбор можно поменять до конца голосования', $html);
+        $this->assertStringContainsString('В опросе 19 снимков — в календарь попадут 12 фото', $html);
+        $this->assertStringContainsString('Первое место приносит снимку 6 баллов', $html);
+        $this->assertStringContainsString('Голосование открыто до 18.11.2026, 12:35.', $html);
+        $this->assertStringContainsString('действует до конца голосования.', $html);
     }
 }
