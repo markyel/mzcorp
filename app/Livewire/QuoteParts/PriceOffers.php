@@ -318,6 +318,38 @@ class PriceOffers extends Component
         }
     }
 
+    /**
+     * Цена «на проверке» (разбор в QuoteParts не уверен) — решение менеджера: «Учесть» (с валютой, «это наша позиция»
+     * или артикулом аналога) или «Не учитывать». Учтённая становится обычным предложением поставщика.
+     *
+     * @param  array{currency?: ?string, as_item?: bool, part_number?: ?string}  $options
+     */
+    public function decideCandidate(string $rowId, int $candidateId, string $action, array $options, QuotePartsRfqService $rfqs): void
+    {
+        $row = $this->allPending->firstWhere('id', $rowId);
+        $rfq = $row ? QuotePartsRfq::query()->where('remote_id', $row['rfq_remote_id'])->first() : null;
+        if ($rfq === null) {
+            $this->dispatch('toast', type: 'error', message: 'Запрос не найден — обновите страницу.');
+
+            return;
+        }
+        $opts = array_filter([
+            'currency' => isset($options['currency']) ? mb_strtoupper(trim((string) $options['currency'])) : null,
+            'as_item' => ! empty($options['as_item']) ? true : null,
+            'part_number' => isset($options['part_number']) ? trim((string) $options['part_number']) : null,
+        ], fn ($v) => $v !== null && $v !== '');
+        try {
+            $rfqs->decideCandidate($rfq, $candidateId, $action === 'accept', $opts, auth()->user());
+        } catch (Throwable $e) {
+            $this->dispatch('toast', type: 'error', message: mb_substr($e->getMessage(), 0, 250));
+
+            return;
+        }
+        $this->forget();
+        unset($this->allPending, $this->windowRfqs);
+        $this->dispatch('toast', type: 'success', message: $action === 'accept' ? 'Цена учтена — теперь это предложение поставщика.' : 'Цену не учитываем.');
+    }
+
     /** «Повторить запрос» поставщику, который молчит: напоминание в переписку запроса сейчас. */
     public function remindSupplier(string $id, QuotePartsRfqService $rfqs): void
     {
@@ -438,6 +470,8 @@ class PriceOffers extends Component
                         'letters' => count($s['letters'] ?? []) + count($s['thread'] ?? []),
                         'reminders' => (int) ($s['reminders_sent'] ?? 0),
                         'last_reminder_at' => ! empty($s['last_reminder_at']) ? \Illuminate\Support\Carbon::parse($s['last_reminder_at']) : null,
+                        // Цены, в которых разбор не уверен, — ждут решения здесь (17.11.2026, BUENO LIFT M18409).
+                        'candidates' => array_values((array) ($line['candidates'] ?? [])),
                     ]);
                 }
             }

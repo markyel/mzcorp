@@ -361,6 +361,26 @@ class QuotePartsClient
     }
 
     /**
+     * Решение по цене «на проверке» (разбор не уверен): accept — учесть (можно с валютой, «это наша позиция»,
+     * артикулом аналога), reject — не учитывать.
+     *
+     * @param  array{action: string, currency?: ?string, as_item?: bool, part_number?: ?string}  $decision
+     * @return array<string, mixed> обновлённый снимок запроса
+     */
+    public function decideCandidate(int $remoteId, int $candidateId, array $decision): array
+    {
+        $response = $this->http()->timeout(60)->post('/api/v1/rfqs/'.$remoteId.'/candidates/'.$candidateId, array_filter($decision, fn ($v) => $v !== null && $v !== ''));
+        if ($response->status() === 422) {
+            throw new RuntimeException((string) collect($response->json('errors', []))->flatten()->implode(' ') ?: 'QuoteParts не принял решение.');
+        }
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts candidate: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * Ответ на группу одинаковых вопросов: каждому спросившему — в его переписку, текст по поставщику.
      *
      * @param  list<array{supplier:string, text:string}>  $answers

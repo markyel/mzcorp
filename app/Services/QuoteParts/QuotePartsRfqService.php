@@ -641,6 +641,24 @@ class QuotePartsRfqService
         return $rfq;
     }
 
+    /**
+     * Цена «на проверке» в QuoteParts (разбор не уверен: аналог без артикула, валюта не названа…) — решение
+     * менеджера. Раньше такие ждали в кабинете QuoteParts, куда никто не заходил (22 шт. с 10.11.2026).
+     *
+     * @param  array{currency?: ?string, as_item?: bool, part_number?: ?string}  $options
+     */
+    public function decideCandidate(QuotePartsRfq $rfq, int $candidateId, bool $accept, array $options, User $by): QuotePartsRfq
+    {
+        if (! QuotePartsPilot::canAnswer($by)) {
+            throw new RuntimeException('Решать по ценам QuoteParts могут снабжение, руководство и участники пилота.');
+        }
+        $snapshot = $this->russified($this->client->decideCandidate($rfq->remote_id, $candidateId, ['action' => $accept ? 'accept' : 'reject'] + $options));
+        $rfq->forceFill(['snapshot' => $snapshot, 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
+        \Illuminate\Support\Facades\Log::info('QuoteParts: doubtful price decided', ['rfq' => $rfq->remote_id, 'candidate' => $candidateId, 'accept' => $accept, 'options' => $options, 'by' => $by->id]);
+
+        return $rfq;
+    }
+
     public function refresh(QuotePartsRfq $rfq): QuotePartsRfq
     {
         $snapshot = $this->russified($this->client->rfq($rfq->remote_id));
