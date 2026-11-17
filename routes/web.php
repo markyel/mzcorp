@@ -73,6 +73,18 @@ Route::get('/feeds/direct/{token}/products.yml', [YandexDirectFeedController::cl
     ->where('token', '[A-Za-z0-9_-]{16,128}')
     ->name('feeds.direct.products');
 
+// Опрос «Фото для календаря» — для сотрудников и вне MyLift: БЕЗ auth. Вход по личной одноразовой
+// ссылке (дальше устройство помнит cookie), фото — только участникам и организаторам (проверка в контроллере).
+Route::get('/calendar/{token}', [\App\Http\Controllers\CalendarPollController::class, 'enter'])
+    ->where('token', '[A-Za-z0-9]{48}')->name('calendar-poll.enter');
+Route::post('/calendar/{token}/resend', [\App\Http\Controllers\CalendarPollController::class, 'resend'])
+    ->where('token', '[A-Za-z0-9]{48}')->middleware('throttle:10,1')->name('calendar-poll.resend');
+Route::get('/calendar-poll/{poll}', [\App\Http\Controllers\CalendarPollController::class, 'show'])->name('calendar-poll.show');
+Route::post('/calendar-poll/{poll}/link', [\App\Http\Controllers\CalendarPollController::class, 'requestLink'])
+    ->middleware('throttle:10,1')->name('calendar-poll.request-link');
+Route::get('/calendar-poll/{poll}/photo/{photo}/{size}', [\App\Http\Controllers\CalendarPollController::class, 'photo'])
+    ->where('size', 'thumb|preview|original')->name('calendar-poll.photo');
+
 Route::get('/dashboard', function () {
     // Менеджеру по рекламациям дашборд ни к чему (своих заявок нет) — сразу в заявки.
     $user = auth()->user();
@@ -139,6 +151,10 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/mail-quality', function () {
             return view('mail-quality.index');
         })->name('mail-quality.index');
+        // Опрос «Фото для календаря»: фото, участники, рассылка ссылок, итоги.
+        Route::get('/dashboard/calendar-poll', fn () => view('calendar-poll.manage'))->name('calendar-poll.manage');
+        Route::get('/dashboard/calendar-poll/{poll}/winners.zip', [\App\Http\Controllers\CalendarPollAdminController::class, 'winners'])
+            ->name('calendar-poll.winners');
     });
 
     // Заявки — пул менеджера и карточка. Все 4 роли;

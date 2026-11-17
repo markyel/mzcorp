@@ -520,6 +520,19 @@ return [
         'bypass_key' => (string) env('RECONSTRUCTION_BYPASS_KEY', ''),
     ],
 
+    // Опрос «Фото для календаря» (App\Services\CalendarPoll): каждый выбирает picks фото, по рейтингу берём winners.
+    // Сотрудникам вне системы — личная одноразовая ссылка; после входа устройство помнится cookie_days дней.
+    'calendar_poll' => [
+        'picks' => (int) env('CALENDAR_POLL_PICKS', 6),
+        'winners' => (int) env('CALENDAR_POLL_WINNERS', 12),
+        'link_ttl_days' => (int) env('CALENDAR_POLL_LINK_TTL_DAYS', 14),
+        'cookie_days' => (int) env('CALENDAR_POLL_COOKIE_DAYS', 30),
+        'from_name' => env('CALENDAR_POLL_FROM_NAME', 'Мой ЗиП'),
+        // Размеры копий для страницы голосования (длинная сторона, px).
+        'thumb_edge' => 640,
+        'preview_edge' => 2000,
+    ],
+
     // Telegram Bot API (боты заявок, медиаплан): прокси, если сервер не достаёт
     // до api.telegram.org напрямую. См. App\Support\TelegramHttp.
     'telegram' => [
@@ -615,6 +628,8 @@ return [
             \App\Mail\SupportTicketCreatedMail::class,
             \App\Mail\SupportTicketResolvedMail::class,
             \App\Mail\BotVerificationCodeMail::class,
+            // Приглашение в опрос «Фото для календаря»: рассылку запускает человек кнопкой, повтор — по запросу сотрудника.
+            \App\Mail\CalendarPollInviteMail::class,
         ],
         // Список наших mailbox-адресов в lowercase (для Reply-all фильтра —
         // не отправлять на самих себя). Пусто = берём все Mailbox.email из БД.
