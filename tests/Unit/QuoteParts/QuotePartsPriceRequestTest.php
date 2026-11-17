@@ -36,6 +36,16 @@ class QuotePartsPriceRequestTest extends TestCase
         $this->assertSame(['c:11' => 'Part No.: KM51173460R02'], QuotePartsRfqService::articleNotes($catalog, [11 => 'KM51173460R02']));
     }
 
+    public function test_request_card_dispatch_adds_the_edited_article_note_for_system_suppliers(): void
+    {
+        // MZ2026-01830: карточка M13626 с артикулом Elevatorcommerce 18245, менеджер поставил артикул Dinacell 000720 —
+        // из карточки заявки примечание не уходило, UniSystem получил 18245.
+        $this->assertSame(['c:14296' => 'Part No.: 000720'], QuotePartsRfqService::articleNotes(collect([self::item(14296, '18245')]), [14296 => '000720']));
+
+        $panel = (string) file_get_contents(app_path('Livewire/Requests/SupplierDispatchPanel.php'));
+        $this->assertStringContainsString('QuotePartsRfqService::articleNotes(', $panel);
+    }
+
     public function test_both_sections_use_the_same_panel(): void
     {
         $this->assertContains(ComposesSupplierPriceRequest::class, class_uses(ProcurementIndex::class));

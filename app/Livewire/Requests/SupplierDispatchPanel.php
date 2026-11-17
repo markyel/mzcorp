@@ -1415,7 +1415,7 @@ class SupplierDispatchPanel extends Component
         foreach (app(SupplierDispatchService::class)->askedRows($req, $itemIds, $edits) as $requestItemId => $row) {
             $asked[$row['catalog_item_id'] === null ? 'd:'.$requestItemId : 'c:'.$row['catalog_item_id']] ??= $row;
         }
-        $rows = RequestItem::query()->whereIn('id', $itemIds)->with('catalogItem:id,name,name_en')
+        $rows = RequestItem::query()->whereIn('id', $itemIds)->with('catalogItem:id,sku,name,name_en,brand_article')
             ->get(['id', 'catalog_item_id', 'parsed_qty', 'parsed_length', 'parsed_length_unit']);
         foreach ($rows as $it) {
             // Кол-во — свободный текст, как в письме по старому алгоритму («21,710 mm»): поставщикам
@@ -1439,6 +1439,15 @@ class SupplierDispatchPanel extends Component
                 $wording = \App\Services\QuoteParts\QuotePartsRfqService::wordingNote($this->editedNamesEn[$it->id] ?? null, $it->catalogItem?->name_en);
                 if ($wording !== null) {
                     $notes[$key] = isset($notes[$key]) ? $wording.'; '.$notes[$key] : $wording;
+                }
+                // Правленый артикул: системным письмо пишет QuoteParts по карточке — строкой «Part No.: …»
+                // под позицией, как в закупке из каталога (MZ2026-01830: ушёл артикул карточки 18245 вместо 000720).
+                // Внесистемным артикул уже в нашем письме.
+                if ($letters === [] && $it->catalogItem !== null && array_key_exists($it->id, $this->editedOem)) {
+                    $edited = (string) app(SupplierDispatchService::class)->itemOem($it, $this->editedOem);
+                    foreach (\App\Services\QuoteParts\QuotePartsRfqService::articleNotes(collect([$it->catalogItem]), [(int) $it->catalog_item_id => $edited]) as $articleNote) {
+                        $notes[$key] = isset($notes[$key]) ? $articleNote.'; '.$notes[$key] : $articleNote;
+                    }
                 }
             }
         }
