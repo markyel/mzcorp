@@ -32,17 +32,41 @@ class BotRequestNotifier
     {
     }
 
-    /** Что сказать клиенту о переходе; null — переход клиенту неинтересен. */
-    public static function text(Request $request, RequestStatus $to): ?string
+    /** Куда ушёл документ/вопрос: письмом, в этот чат, и туда и туда, никуда (статус поставили вручную). */
+    public const VIA_EMAIL = 'email';
+
+    public const VIA_CHAT = 'chat';
+
+    public const VIA_BOTH = 'both';
+
+    public const VIA_NONE = 'none';
+
+    /**
+     * Что сказать клиенту о переходе; null — переход клиенту неинтересен. «Отправили на почту» — только если
+     * письмо правда ушло: раньше говорили всегда, а КП и счёт менеджер прислал файлом в чат — клиент ждал
+     * письма (MZ2026-01628, 17.11.2026).
+     */
+    public static function text(Request $request, RequestStatus $to, string $via = self::VIA_EMAIL): ?string
     {
         $code = '<b>'.e((string) $request->internal_code).'</b>';
         $email = e((string) $request->client_email);
+        $where = match ($via) {
+            self::VIA_EMAIL => ' — отправили его на '.$email,
+            self::VIA_CHAT => ' — прислали его здесь, в чате',
+            self::VIA_BOTH => ' — отправили его на '.$email.' и прислали здесь, в чате',
+            default => '',
+        };
+        $question = match ($via) {
+            self::VIA_EMAIL => ' — вопрос отправили на '.$email.'. Ответить можно письмом или здесь.',
+            self::VIA_BOTH => ' — вопрос отправили на '.$email.' и прислали здесь. Ответить можно письмом или здесь.',
+            default => '. Ответить можно здесь.',
+        };
 
         return match ($to) {
-            RequestStatus::Quoted => '📄 По заявке '.$code.' готово коммерческое предложение — отправили его на '.$email.'.',
-            RequestStatus::PartiallyQuoted => '📄 По заявке '.$code.' готово предложение по части позиций — отправили на '.$email.'. По остальным ищем.',
-            RequestStatus::AwaitingClientClarification => '❓ По заявке '.$code.' менеджеру нужно уточнение — вопрос отправили на '.$email.'. Ответить можно письмом или здесь.',
-            RequestStatus::Invoiced => '🧾 По заявке '.$code.' выставлен счёт — отправили его на '.$email.'.',
+            RequestStatus::Quoted => '📄 По заявке '.$code.' готово коммерческое предложение'.$where.'.',
+            RequestStatus::PartiallyQuoted => '📄 По заявке '.$code.' готово предложение по части позиций'.$where.'. По остальным ищем.',
+            RequestStatus::AwaitingClientClarification => '❓ По заявке '.$code.' менеджеру нужно уточнение'.$question,
+            RequestStatus::Invoiced => '🧾 По заявке '.$code.' выставлен счёт'.$where.'.',
             RequestStatus::Paid => '✅ Оплата по заявке '.$code.' получена. Спасибо!',
             RequestStatus::ClosedWon => '✅ Заявка '.$code.' выполнена. Спасибо, что выбрали MyZip!',
             default => null,
@@ -57,17 +81,25 @@ class BotRequestNotifier
         if ($request === null || $chat === null || $to === null || $chat->blocked_at !== null) {
             return;
         }
-        $text = self::text($request, $to);
         $messenger = $this->messengers->for($chat->channel);
-        if ($text === null || $messenger === null) {
+        if (self::text($request, $to) === null || $messenger === null) {
             return;
         }
+
+        // Куда документ ушёл на самом деле: письмо клиенту за сутки и/или файл менеджера в этом чате.
+        $isDocument = in_array($to, [RequestStatus::Quoted, RequestStatus::PartiallyQuoted, RequestStatus::Invoiced], true);
+        $emailDocs = $isDocument ? $this->documents($request, $change) : [];
+        $emailed = $isDocument ? $emailDocs !== [] : $this->emailedRecently($request);
+        $inChat = $this->sentInChat($request, $isDocument ? $to === RequestStatus::Invoiced : null);
+        $via = $emailed && $inChat ? self::VIA_BOTH : ($emailed ? self::VIA_EMAIL : ($inChat ? self::VIA_CHAT : self::VIA_NONE));
+        $text = (string) self::text($request, $to, $via);
 
         $buttons = [[['text' => '💬 Написать менеджеру', 'data' => 'reply:'.$request->id]]];
         $ok = $messenger->sendText((string) $chat->chat_id, $text, $buttons);
         $sentFiles = [];
-        if (in_array($to, [RequestStatus::Quoted, RequestStatus::PartiallyQuoted, RequestStatus::Invoiced], true)) {
-            foreach ($this->documents($request, $change) as $att) {
+        // PDF из письма — в чат, если менеджер его туда уже не прислал.
+        if ($isDocument && ! $inChat) {
+            foreach ($emailDocs as $att) {
                 $bytes = $this->bytes($att);
                 if ($bytes !== null && $messenger->sendDocument((string) $chat->chat_id, $bytes, (string) $att->filename)) {
                     $sentFiles[] = (string) $att->filename;
@@ -97,6 +129,7 @@ class BotRequestNotifier
             // Распознанный документ без ссылки на письмо — последнее исходящее с PDF за сутки.
             $message = EmailMessage::query()
                 ->where('related_request_id', $request->id)
+                ->whereNull('supplier_inquiry_id')
                 ->where('direction', 'outbound')
                 ->where('is_draft', false)
                 ->where('sent_at', '>=', now()->subDay())
@@ -114,6 +147,57 @@ class BotRequestNotifier
             ->orderBy('id')
             ->limit(self::MAX_FILES)
             ->get()->all();
+    }
+
+    /** Клиенту за сутки ушло письмо по заявке (вопрос-уточнение письмом). */
+    private function emailedRecently(Request $request): bool
+    {
+        return EmailMessage::query()
+            ->where('related_request_id', $request->id)
+            ->whereNull('supplier_inquiry_id')
+            ->where('direction', 'outbound')
+            ->where('is_draft', false)
+            ->where('sent_at', '>=', now()->subDay())
+            ->exists();
+    }
+
+    /**
+     * Менеджер прислал это в чат: для документа — PDF под КП/счёт по имени за сутки или любой PDF за час
+     * (имя бывает любым); для вопроса ($invoice = null) — любое его сообщение за сутки.
+     */
+    private function sentInChat(Request $request, ?bool $invoice): bool
+    {
+        $sent = MessengerMessage::query()
+            ->where('request_id', $request->id)->where('direction', 'out')->where('kind', 'manager')
+            ->where('created_at', '>=', now()->subDay())
+            ->latest('id')->limit(30)->get(['id', 'meta', 'created_at']);
+        foreach ($sent as $m) {
+            if (! empty(($m->meta ?? [])['send_failed'])) {
+                continue;
+            }
+            if ($invoice === null) {
+                return true;
+            }
+            foreach ((array) (($m->meta ?? [])['attachments'] ?? []) as $att) {
+                if (self::isDocumentPdf((string) ($att['name'] ?? ''), (string) ($att['mime'] ?? ''), $invoice, $m->created_at)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /** PDF подходит как КП/счёт: по имени — за сутки, без говорящего имени — только свежий (час). */
+    public static function isDocumentPdf(string $name, string $mime, bool $invoice, ?\Illuminate\Support\Carbon $at): bool
+    {
+        $pdf = $mime === 'application/pdf' || str_ends_with(mb_strtolower($name), '.pdf');
+        if (! $pdf) {
+            return false;
+        }
+
+        return preg_match($invoice ? self::INVOICE_FILE_RE : self::QUOTE_FILE_RE, $name) === 1
+            || ($at !== null && $at->greaterThanOrEqualTo(now()->subHour()));
     }
 
     /** PDF в переписке бота, который менеджер прислал как КП или как счёт — по имени файла. */

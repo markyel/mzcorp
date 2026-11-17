@@ -194,6 +194,12 @@
                             <input type="file" wire:model="uploads" multiple class="hidden">
                         </label>
                         <span wire:loading wire:target="uploads" class="text-[12px] text-amber-700">загружаем…</span>
+                        @if($uploads && filled($req->client_email))
+                            <label class="text-[12px] text-fg-2" style="display: inline-flex; align-items: center; gap: 4px; cursor: pointer;"
+                                   title="Бот обещает клиенту КП и счета на почту — файлы уйдут ещё и письмом с вашего ящика">
+                                <input type="checkbox" wire:model="alsoEmail"> копию на {{ $req->client_email }}
+                            </label>
+                        @endif
                         <span style="flex: 1;"></span>
                         @if($flash)<span class="text-[12px] text-emerald-700">{{ $flash }}</span>@endif
                         <button type="button" data-send wire:click="send" class="btn btn-sm btn-primary"

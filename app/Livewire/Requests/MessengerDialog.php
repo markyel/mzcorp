@@ -4,6 +4,7 @@ namespace App\Livewire\Requests;
 
 use App\Models\MessengerMessage;
 use App\Models\Request;
+use App\Services\Bot\BotDocumentMailer;
 use App\Services\Bot\BotThreadService;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
@@ -33,6 +34,9 @@ class MessengerDialog extends Component
     public ?string $error = null;
 
     public ?string $flash = null;
+
+    /** Файлы — копией на почту клиента: бот обещает КП и счета на e-mail (MZ2026-01628). */
+    public bool $alsoEmail = true;
 
     /** Ссылка из уведомления «Клиент написал…» (?chat=1) открывает окно сразу. */
     public function mount(int $requestId): void
@@ -195,9 +199,16 @@ class MessengerDialog extends Component
         if ($res['ok']) {
             // Ответил — значит прочитал (даже если отвечает коллега за менеджера).
             MessengerMessage::markReadForRequest($this->requestId);
+            $copy = $files !== [] && $this->alsoEmail && trim((string) $this->request->client_email) !== ''
+                ? app(BotDocumentMailer::class)->send($this->request, auth()->user(), $this->text, $files)
+                : null;
             $this->text = '';
             $this->uploads = [];
-            $this->flash = $res['message'];
+            $this->alsoEmail = true;
+            $this->flash = $res['message'].($copy !== null && $copy['ok'] ? ' '.$copy['message'] : '');
+            if ($copy !== null && ! $copy['ok']) {
+                $this->error = $copy['message'];
+            }
         } else {
             $this->error = $res['message'];
         }
