@@ -65,7 +65,8 @@
 
         <div class="pa-col pa-terms" style="opacity: {{ $ignored || $r['stale'] ? .55 : 1 }}">
             @forelse($terms as $i => $t)
-                <span style="{{ $i > 0 ? 'color: var(--fg-3)' : '' }}">{{ $t }}</span>
+                {{-- Длинные условия («цена за 135 m (≈ …)», «условия EXW Europe») переносятся, а не лезут в комментарий. --}}
+                <span style="{{ $i > 0 ? 'color: var(--fg-3);' : '' }}{{ mb_strlen($t) > 16 ? ' white-space: normal; overflow-wrap: anywhere' : '' }}">{{ $t }}</span>
             @empty
                 <span style="color: var(--fg-4)">—</span>
             @endforelse
