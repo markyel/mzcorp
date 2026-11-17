@@ -655,6 +655,15 @@ class QuotePartsRfqService
         $snapshot = $this->russified($this->client->decideCandidate($rfq->remote_id, $candidateId, ['action' => $accept ? 'accept' : 'reject'] + $options));
         $rfq->forceFill(['snapshot' => $snapshot, 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
         \Illuminate\Support\Facades\Log::info('QuoteParts: doubtful price decided', ['rfq' => $rfq->remote_id, 'candidate' => $candidateId, 'accept' => $accept, 'options' => $options, 'by' => $by->id]);
+        // Принятая цена — уже предложение QuoteParts: забрать сразу, иначе до планового синка (до 10 мин) позиция
+        // показывала «ответили 1 из 4» без строки цены (M02014, 17.11.2026). Сбой синка решение не отменяет.
+        if ($accept) {
+            try {
+                app(QuotePartsPriceService::class)->syncOffers();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('QuoteParts offers sync after a decision failed', ['rfq' => $rfq->remote_id, 'error' => $e->getMessage()]);
+            }
+        }
 
         return $rfq;
     }
