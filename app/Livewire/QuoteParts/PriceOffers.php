@@ -324,10 +324,9 @@ class PriceOffers extends Component
      *
      * @param  array{currency?: ?string, as_item?: bool, part_number?: ?string}  $options
      */
-    public function decideCandidate(string $rowId, int $candidateId, string $action, array $options, QuotePartsRfqService $rfqs): void
+    public function decideCandidate(int $rfqRemoteId, int $candidateId, string $action, array $options, QuotePartsRfqService $rfqs): void
     {
-        $row = $this->allPending->firstWhere('id', $rowId);
-        $rfq = $row ? QuotePartsRfq::query()->where('remote_id', $row['rfq_remote_id'])->first() : null;
+        $rfq = QuotePartsRfq::query()->where('remote_id', $rfqRemoteId)->first();
         if ($rfq === null) {
             $this->dispatch('toast', type: 'error', message: 'Запрос не найден — обновите страницу.');
 
@@ -346,10 +345,35 @@ class PriceOffers extends Component
             return;
         }
         $this->forget();
-        unset($this->allPending, $this->windowRfqs);
+        unset($this->allPending, $this->windowRfqs, $this->answeredCandidates);
         $this->dispatch('toast', type: 'success', message: $action === 'accept' ? 'Цена учтена — теперь это предложение поставщика.' : 'Цену не учитываем.');
     }
 
+    /**
+     * Цены «на проверке» у поставщиков, которые по этой позиции уже дали предложение или отказ (вторая цена —
+     * «замена» рядом с оригиналом и т. п.): под строкой предложения / отказа. Ждущих — показывает строка «ждём ответ».
+     *
+     * @return array<string, list<array{rfq: int, c: array<string, mixed>}>> «sku|ключ поставщика» => цены
+     */
+    #[Computed]
+    public function answeredCandidates(): array
+    {
+        $out = [];
+        foreach ($this->windowRfqs as $rfq) {
+            foreach ((array) ($rfq->snapshot['suppliers'] ?? []) as $s) {
+                foreach ((array) ($s['lines'] ?? []) as $line) {
+                    if (in_array($line['status'] ?? '', ['pending', 'question'], true) || empty($line['code'])) {
+                        continue;
+                    }
+                    foreach ((array) ($line['candidates'] ?? []) as $c) {
+                        $out[$line['code'].'|'.($s['external_id'] ?? '')][] = ['rfq' => (int) $rfq->remote_id, 'c' => $c];
+                    }
+                }
+            }
+        }
+
+        return $out;
+    }
     /** «Повторить запрос» поставщику, который молчит: напоминание в переписку запроса сейчас. */
     public function remindSupplier(string $id, QuotePartsRfqService $rfqs): void
     {

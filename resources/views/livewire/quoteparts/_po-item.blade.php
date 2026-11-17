@@ -103,8 +103,16 @@
         </div>
     @endif
 
+    @php $candShown = []; @endphp
     @foreach($it['offers'] as $r)
         @include('livewire.quoteparts._po-offer', ['r' => $r, 'it' => $it, 'chosen' => $chosen, 'best' => $best, 'only' => $only, 'pos' => $pos, 'reopened' => $section === 'new'])
+        {{-- Цена «на проверке» от того же поставщика (вторая цена — «замена» рядом с оригиналом…) — под его первым предложением. --}}
+        @if(filled($r['key'] ?? null) && ! isset($candShown[$r['key']]))
+            @php $candShown[$r['key']] = true; @endphp
+            @foreach($this->answeredCandidates[$it['sku'].'|'.$r['key']] ?? [] as $ac)
+                @include('livewire.quoteparts._po-candidate', ['c' => $ac['c'], 'rfqRemoteId' => $ac['rfq']])
+            @endforeach
+        @endif
     @endforeach
 
     {{-- Цены и отказы из писем мимо QuoteParts (MailPriceOffers): переписка запроса — тут же, под строкой. --}}
@@ -147,6 +155,11 @@
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Написать</button>
                 </div>
             </div>
+            {{-- Отказал, но в том же письме цена «на проверке» (например, б/у вместо нового). Есть его предложение —
+                 цена показана под ним. --}}
+            @foreach(collect($it['offers'])->contains('key', $d['key']) ? [] : ($this->answeredCandidates[$it['sku'].'|'.$d['key']] ?? []) as $ac)
+                @include('livewire.quoteparts._po-candidate', ['c' => $ac['c'], 'rfqRemoteId' => $ac['rfq']])
+            @endforeach
             @if($declineDialog === $d['id'])
                 <div class="pa-thread">
                     @if($rfq = $this->declineRfq)
@@ -202,39 +215,7 @@
             </div>
             {{-- Цена «на проверке» (17.11.2026): разбор QuoteParts не уверен — решение здесь, а не в кабинете QuoteParts. --}}
             @foreach(($pr['candidates'] ?? []) as $c)
-                @php
-                    $kindLabel = ['original' => 'оригинал', 'analog' => 'аналог', 'copy' => 'копия', 'replacement' => 'замена', 'refurbished' => 'б/у, восстановленная'][$c['kind'] ?? ''] ?? ($c['kind'] ?? '');
-                    $prices = collect($c['tiers'] ?? [])->map(fn ($t) => rtrim(rtrim(number_format((float) $t['price'], 2, ',', ' '), '0'), ',').' '.($c['currency'] ?? '?').((float) $t['min_qty'] > 1 ? ' от '.rtrim(rtrim(number_format((float) $t['min_qty'], 3, ',', ''), '0'), ',').' шт.' : ''))->implode(' · ');
-                @endphp
-                <div wire:key="po-cand-{{ $c['id'] }}" x-data="{ cur: '', pn: '' }"
-                     style="margin: 0 0 8px 0; padding: 8px 10px; border: 1px dashed var(--status-attn-fg, #b45309); border-radius: 8px; background: var(--status-attn-bg, #fffbeb); font-size: 12.5px; display: flex; flex-direction: column; gap: 4px;">
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline;">
-                        <b style="font-size: 13px;">{{ $prices !== '' ? $prices : 'цена не распознана' }}</b>
-                        <span class="pa-pill" style="background: var(--neutral-100); color: var(--fg-2)">{{ $kindLabel }}</span>
-                        <span style="color: var(--status-attn-fg, #b45309);">на проверке: {{ $c['reason'] }}</span>
-                    </div>
-                    @if(filled($c['quote']))<span class="pa-note">Из письма: «{{ \Illuminate\Support\Str::limit(trim(preg_replace('/\s+/u', ' ', (string) $c['quote'])), 300) }}»</span>@endif
-                    @if(filled($c['note']))<span class="pa-meta">{{ $c['note'] }}</span>@endif
-                    <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 2px;">
-                        @if(($c['needs'] ?? null) === 'currency')
-                            <select x-model="cur" style="font-size: 12px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px;">
-                                <option value="">валюта…</option><option>RUB</option><option>USD</option><option>EUR</option><option>CNY</option>
-                            </select>
-                            <button type="button" class="pa-btn pa-btn-secondary" x-bind:disabled="! cur"
-                                    x-on:click="$wire.decideCandidate('{{ $pr['id'] }}', {{ (int) $c['id'] }}, 'accept', { currency: cur })">Учесть</button>
-                        @elseif(($c['needs'] ?? null) === 'part_number')
-                            <button type="button" class="pa-btn pa-btn-secondary" title="Поставщик предлагает именно запрошенную деталь — учесть как оригинал"
-                                    x-on:click="$wire.decideCandidate('{{ $pr['id'] }}', {{ (int) $c['id'] }}, 'accept', { as_item: true })">Это наша позиция</button>
-                            <input type="text" x-model="pn" placeholder="артикул аналога" style="font-size: 12px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; width: 150px;">
-                            <button type="button" class="pa-btn pa-btn-secondary" x-bind:disabled="! pn.trim()"
-                                    x-on:click="$wire.decideCandidate('{{ $pr['id'] }}', {{ (int) $c['id'] }}, 'accept', { part_number: pn })">Учесть как {{ $kindLabel }}</button>
-                        @else
-                            <button type="button" class="pa-btn pa-btn-secondary" @disabled($prices === '')
-                                    x-on:click="$wire.decideCandidate('{{ $pr['id'] }}', {{ (int) $c['id'] }}, 'accept', {})">Учесть</button>
-                        @endif
-                        <button type="button" class="pa-btn pa-btn-link" x-on:click="$wire.decideCandidate('{{ $pr['id'] }}', {{ (int) $c['id'] }}, 'reject', {})">Не учитывать</button>
-                    </div>
-                </div>
+                @include('livewire.quoteparts._po-candidate', ['c' => $c, 'rfqRemoteId' => $pr['rfq_remote_id']])
             @endforeach
             @if($pr && $declineDialog === $pr['id'])
                 <div class="pa-thread">
