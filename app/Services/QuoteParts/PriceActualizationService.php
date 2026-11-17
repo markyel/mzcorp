@@ -152,7 +152,7 @@ class PriceActualizationService
         $offers = QuotePartsOffer::query()->with('catalogItem:id,sku,name')
             ->where(fn ($q) => $q->whereIn('catalog_item_id', $cids)
                 ->orWhere(fn ($d) => $d->whereNull('catalog_item_id')->whereIn('sku', array_keys($draftSkus))))
-            ->where('superseded', false)->whereIn('status', ['active', 'expiring'])->whereNull('ignored_at')->get();
+            ->usable()->whereNull('ignored_at')->get();
 
         // Цены из писем мимо QuoteParts по этим позициям — в тот же файл (12.11.2026).
         $mail = collect(app(MailPriceOffers::class)->bySku())->only($positions->pluck('sku')->all())->flatMap(fn ($m) => $m['offers'])->values();

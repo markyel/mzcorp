@@ -20,7 +20,9 @@
     $num = fn ($v) => rtrim(rtrim(number_format((float) $v, 2, ',', ' '), '0'), ',');
     $money = fn ($v) => number_format((float) $v, 2, ',', ' ');
     $terms = array_values(array_filter([
+        $r['price_for'] ?? null,
         $r['valid'] ? 'до '.$r['valid']->format('d.m.Y') : null,
+        ($r['incoterm'] ?? null) ? 'условия '.$r['incoterm'] : null,
         $r['lead'] !== null ? 'поставка '.$r['lead'].' дн.' : null,
         $moq > 1 ? 'мин. партия '.$num($moq) : null,
     ]));
@@ -55,6 +57,10 @@
                 <span class="pa-amount">{{ $r['price'] !== null ? $money($r['price']).' '.$r['currency'] : '—' }}</span>
             @endif
             @if($r['rub'] !== null)<span class="pa-meta">≈ {{ number_format($r['rub'], 0, ',', ' ') }} ₽</span>@endif
+            {{-- Цена далеко от последней закупки: часто это цена за кусок, упаковку или не тот товар. --}}
+            @if(! empty($r['unit_check']) && ! $r['stale'])
+                <span class="pa-pill pa-pill-over" title="{{ ucfirst($r['unit_check']) }}. Проверьте, за какую единицу цена (штука, метр, упаковка, кусок) и тот ли это товар.">проверьте единицу</span>
+            @endif
         </div>
 
         <div class="pa-col pa-terms" style="opacity: {{ $ignored || $r['stale'] ? .55 : 1 }}">

@@ -39,6 +39,11 @@ class QuotePartsOffer extends Model
         'original_texts',
         // Цена агента (UniSystem): реальный поставщик за ней — Sicor, Donati…; null — не агент или не назвал.
         'origin_supplier',
+        // Базис поставки цены («EXW Europe») и за что цена, когда не за единицу (кусок каната 135 м).
+        'incoterm',
+        'incoterm_place',
+        'price_for_qty',
+        'price_for_unit',
         'photos',
         'review_status',
         'reviewed_by_user_id',
@@ -65,6 +70,7 @@ class QuotePartsOffer extends Model
         'tiers' => 'array',
         'original_texts' => 'array',
         'price' => 'decimal:4',
+        'price_for_qty' => 'decimal:3',
         'valid_until' => 'date',
         'superseded' => 'boolean',
         'remote_updated_at' => 'datetime',
@@ -139,9 +145,41 @@ class QuotePartsOffer extends Model
         return ($this->kind ?? 'original') === 'original' || $this->review_status === self::REVIEW_ACCEPTED;
     }
 
-    /** Действует: не вытеснен и не истёк. */
+    /** Действующие предложения — то же, что isUsable(), запросом. */
+    public function scopeUsable(\Illuminate\Database\Eloquent\Builder $q): \Illuminate\Database\Eloquent\Builder
+    {
+        return $q->where('superseded', false)->whereIn('status', ['active', 'expiring'])
+            ->where(fn ($w) => $w->whereNull('valid_until')->orWhere('valid_until', '>=', now()->toDateString()));
+    }
+
+    /** Действует: не вытеснен и не истёк (и по статусу QuoteParts, и по сроку действия цены). */
     public function isUsable(): bool
     {
-        return ! $this->superseded && in_array($this->status, ['active', 'expiring'], true);
+        return ! $this->superseded && in_array($this->status, ['active', 'expiring'], true) && ! $this->isExpired();
+    }
+
+    /**
+     * Срок цены прошёл: статус QuoteParts меняется с опозданием, и цена «до 16.11» 17.11 ещё шла в выгрузку
+     * как действующая (АТ-Электро, YuanQi, 17.11.2026).
+     */
+    public function isExpired(): bool
+    {
+        return $this->valid_until !== null && $this->valid_until->lt(now()->startOfDay());
+    }
+
+    /**
+     * Цена за кусок / упаковку / набор из нескольких единиц: «за 135 m (≈ 239,67 RUB за m)»; null — за единицу.
+     */
+    public function priceForNote(): ?string
+    {
+        $qty = $this->price_for_qty !== null ? (float) $this->price_for_qty : 0.0;
+        if ($qty <= 1) {
+            return null;
+        }
+        $num = fn ($v, $d) => rtrim(rtrim(number_format((float) $v, $d, ',', ' '), '0'), ',');
+        $unit = trim((string) $this->price_for_unit) !== '' ? ' '.trim((string) $this->price_for_unit) : '';
+        $per = $this->price !== null ? ' (≈ '.$num((float) $this->price / $qty, 2).' '.$this->currency.' за'.($unit !== '' ? $unit : ' ед.').')' : '';
+
+        return 'цена за '.$num($qty, 3).$unit.$per;
     }
 }

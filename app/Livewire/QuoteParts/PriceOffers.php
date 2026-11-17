@@ -41,6 +41,9 @@ class PriceOffers extends Component
 
     public const DAYS = [3, 7, 30, 90];
 
+    /** Во сколько раз цена может отличаться от последней закупки без метки «проверьте единицу». */
+    public const UNIT_CHECK_RATIO = 5;
+
     /** Оформление одно — позиция и её предложения; «по запросам» — тот же список, упорядоченный по заявкам. */
     public const VIEWS = ['item' => 'По позициям', 'request' => 'По запросам'];
 
@@ -827,7 +830,7 @@ class PriceOffers extends Component
 
         return QuotePartsOffer::query()
             ->with(['catalogItem:id,sku,name,brand,price,purchase_price,is_price_actual', 'request:id,internal_code,client_name,subject,assigned_user_id', 'request.assignedUser:id,name'])
-            ->when(! $this->withStale, fn ($q) => $q->where('superseded', false)->whereIn('status', ['active', 'expiring']))
+            ->when(! $this->withStale, fn ($q) => $q->usable())
             ->when($term !== '', fn ($q) => $q->where(fn ($w) => $w->where('sku', 'ilike', '%'.$term.'%')
                 ->orWhere('supplier_name', 'ilike', '%'.$term.'%')
                 ->orWhere('part_number', 'ilike', '%'.$term.'%')
@@ -1272,12 +1275,36 @@ class PriceOffers extends Component
                 : [],
             // Поставщик писал по-китайски — выше перевод; оригинал по наведению.
             'original' => array_filter((array) ($o->original_texts ?? [])),
-            'stale' => $o->superseded || ! in_array($o->status, ['active', 'expiring'], true),
+            'stale' => ! $o->isUsable(),
+            // Цена за кусок / упаковку («цена за 135 m (≈ 239,67 RUB за m)») и базис поставки («EXW Europe»).
+            'price_for' => $o->priceForNote(),
+            'incoterm' => trim($o->incoterm.' '.$o->incoterm_place) ?: null,
+            // Отличается от последней закупки больше чем в 5 раз — похоже на цену за упаковку, кусок или не тот товар.
+            'unit_check' => self::unitCheck($rub['known'] ? (float) $rub['rub'] : null, $purchase, $o->price_for_qty !== null ? (float) $o->price_for_qty : null),
             'purchase' => $purchase,
             'sale' => $ci?->price !== null ? (float) $ci->price : null,
             'actual' => (bool) ($ci?->is_price_actual ?? false),
             // С закупкой не сравниваем: в ней логистика и таможня, цена поставщика — без них.
         ];
+    }
+
+    /**
+     * Метка «проверьте единицу»: цена в ₽ (за единицу, если поставщик дал цену за кусок / упаковку) отличается от
+     * последней закупки больше чем в 5 раз. Канат Драко M24638 — 32 355 ₽ за кусок 135 м при закупке 286 ₽/м (17.11.2026).
+     * Закупка — с логистикой и таможней, поэтому порог грубый: ловим ошибку единицы, а не разницу цен.
+     */
+    public static function unitCheck(?float $rub, ?float $purchase, ?float $forQty): ?string
+    {
+        if ($rub === null || $rub <= 0 || $purchase === null || $purchase <= 0) {
+            return null;
+        }
+        $ratio = ($forQty !== null && $forQty > 1 ? $rub / $forQty : $rub) / $purchase;
+
+        return match (true) {
+            $ratio > self::UNIT_CHECK_RATIO => 'в '.number_format($ratio, 0, ',', ' ').' раз дороже последней закупки',
+            $ratio < 1 / self::UNIT_CHECK_RATIO => 'в '.number_format(1 / $ratio, 0, ',', ' ').' раз дешевле последней закупки',
+            default => null,
+        };
     }
 
     public function render()

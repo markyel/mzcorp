@@ -139,7 +139,7 @@ class Index extends Component
     #[Computed]
     public function freshOffersCount(): int
     {
-        return \App\Models\QuotePartsOffer::query()->where('superseded', false)->whereIn('status', ['active', 'expiring'])
+        return \App\Models\QuotePartsOffer::query()->usable()
             ->where(fn ($q) => $q->where('remote_updated_at', '>=', now()->subDays(7))->orWhere('created_at', '>=', now()->subDays(7)))
             ->count();
     }

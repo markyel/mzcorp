@@ -373,6 +373,14 @@ class PriceExportService
     {
         $num = fn ($v) => rtrim(rtrim(number_format((float) $v, 4, ',', ' '), '0'), ',');
         $parts = [];
+        // Цена не за единицу — первым делом (канат Драко M24638: 32 355 руб за кусок 135 м выглядел ценой метра).
+        if (($for = $o->priceForNote()) !== null) {
+            $parts[] = $for;
+        }
+        // Базис поставки: EXW — доставка и пошлина сверху цены (OTI «EXW Europe», 17.11.2026).
+        if (trim((string) $o->incoterm) !== '') {
+            $parts[] = 'условия '.trim($o->incoterm.' '.$o->incoterm_place);
+        }
         // Цена агента (контрагент в 1С — агент): от какого реального поставщика.
         if (trim((string) $o->origin_supplier) !== '') {
             $parts[] = 'поставщик '.trim((string) $o->origin_supplier);

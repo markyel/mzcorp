@@ -194,6 +194,11 @@ class QuotePartsPriceService
                 'remote_updated_at' => $o['updated_at'] ?? now(),
                 // Цена агента — от какого реального поставщика (UniSystem: Sicor, Donati…).
                 'origin_supplier' => isset($o['origin_supplier']) ? mb_substr((string) $o['origin_supplier'], 0, 150) : null,
+                // Базис поставки («EXW Europe» — доставка и пошлина сверху) и за что цена, когда не за единицу (17.11.2026).
+                'incoterm' => isset($o['incoterm']) ? mb_substr((string) $o['incoterm'], 0, 10) : null,
+                'incoterm_place' => isset($o['incoterm_place']) ? mb_substr((string) $o['incoterm_place'], 0, 100) : null,
+                'price_for_qty' => is_numeric($o['price_for']['qty'] ?? null) ? (float) $o['price_for']['qty'] : null,
+                'price_for_unit' => isset($o['price_for']['unit']) ? mb_substr((string) $o['price_for']['unit'], 0, 20) : null,
                 'photos' => (int) ($o['photos'] ?? 0),
                 'rfq_remote_id' => $o['rfq']['id'] ?? null,
                 'rfq_tag' => $o['rfq']['tag'] ?? null,
