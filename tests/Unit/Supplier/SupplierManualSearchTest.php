@@ -94,4 +94,21 @@ class SupplierManualSearchTest extends TestCase
         $out = SupplierManualSearch::group(collect([$all[1]]), collect($all), 'nes@is-com.ru', excludeIds: [21, 22]);
         $this->assertSame([['id' => 22, 'email' => 'nes@is-com.ru', 'in_request' => true]], $out[0]['emails']);
     }
+
+    /** UniSystem (18.11.2026): по «unisystem.si» предлагался alex@ — у него «Логистика», не «Расценка». */
+    public function test_by_domain_only_quoting_addresses_are_offered_unless_typed_in_full(): void
+    {
+        $uni = fn () => [
+            $this->row(72, 3, 'info@unisystem.si', ['quoting'], 1, 'UniSystem'),
+            $this->row(1790, 3, 'sales1@unisystem.si', ['quoting'], 2, 'UniSystem'),
+            $this->row(12, 3, 'alex@unisystem.si', ['logistics'], 3, 'UniSystem'),
+        ];
+
+        $out = SupplierManualSearch::group(collect($uni()), collect($uni()), 'unisystem.si');
+        $this->assertSame(72, $out[0]['representative_id']);
+        $this->assertSame(['sales1@unisystem.si'], array_column($out[0]['emails'], 'email'));
+
+        $exact = SupplierManualSearch::group(collect([$uni()[2]]), collect($uni()), 'alex@unisystem.si');
+        $this->assertSame(['alex@unisystem.si'], array_column($exact[0]['emails'], 'email'));
+    }
 }

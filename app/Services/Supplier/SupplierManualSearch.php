@@ -84,9 +84,14 @@ class SupplierManualSearch
             // Конкретный адрес предлагаем, если человек искал по e-mail. Представителя не повторяем —
             // его добавляет строка поставщика; но если поставщик уже в запросе, строка его только
             // отмечает, и нужный адрес показываем отдельно, даже если это представитель.
+            // Запрос подошёл к нескольким адресам (домен «unisystem.si») — только адреса для расценок (роль «Расценка»):
+            // предлагался и alex@ — у него «Логистика» (18.11.2026). Запрос указывает на один адрес («logistics@»,
+            // «alex@unisystem.si») — его предлагаем любым. Роли у организации не отмечены — все.
+            $quoting = fn (Supplier $s) => in_array('quoting', (array) ($s->contact_topics ?: []), true);
+            $hit = fn (Supplier $s) => $needle !== '' && str_contains(mb_strtolower((string) $s->email), $needle);
+            $broad = $rows->filter($hit)->count() > 1 && $all->contains($quoting);
             $emails = $orgId === null ? [] : $rows
-                ->filter(fn (Supplier $s) => ($inRequest || (int) $s->id !== (int) $rep->id)
-                    && $needle !== '' && str_contains(mb_strtolower((string) $s->email), $needle))
+                ->filter(fn (Supplier $s) => ($inRequest || (int) $s->id !== (int) $rep->id) && $hit($s) && (! $broad || $quoting($s)))
                 ->sortBy('email')
                 ->map(fn (Supplier $s) => ['id' => (int) $s->id, 'email' => (string) $s->email, 'in_request' => in_array((int) $s->id, $exclude, true)])
                 ->values()->all();
