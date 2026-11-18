@@ -37,7 +37,9 @@
                 </button>
                 <a href="{{ $r['org_id'] !== null ? route('suppliers.card', $r['org_id']) : route('suppliers.registry-edit', $r['representative_id']) }}"
                    target="_blank" rel="noopener" title="Карточка поставщика — в новой вкладке"
-                   style="flex: none; padding: 4px 10px; font-size: 11.5px; color: var(--sky-700); white-space: nowrap; text-decoration: none;">карточка ↗</a>
+                   aria-label="Карточка поставщика" style="flex: none; display: inline-flex; padding: 4px 10px; color: var(--sky-700);">
+                    {{-- Иконка вместо слова «карточка» — место под название (Lucide external-link). --}}
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></a>
                 </div>
                 @if(count($r['all_emails'] ?? []) > 1)
                     {{-- Фон списка серый, как обычная подсветка строки — подсветка своя, голубая (иначе наведения не видно). --}}
