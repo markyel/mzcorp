@@ -66,7 +66,9 @@
             @if($r['unit'])
                 <span class="pa-meta" title="Цена поставщика пересчитана на нашу единицу — в 1С уйдёт цена выше">поставщик: {{ $money($r['unit']['supplier_price']) }} {{ $r['currency'] }} за {{ $num($r['unit']['from']) }} → ×{{ $num($r['unit']['to'] / $r['unit']['from']) }}</span>
             @endif
-            @if(! $r['stale'] && $r['price'] !== null)
+            {{-- «Пересчитать» — только там, где есть повод: метка «проверьте единицу», цена поставщика за кусок / упаковку
+                 или пересчёт уже сделан. У каждой строки ссылка лишь мешала (18.11.2026). --}}
+            @if(! $r['stale'] && $r['price'] !== null && (! empty($r['unit_check']) || $r['unit'] || ($r['price_for_qty'] ?? null)))
                 @php
                     $uFrom = $r['unit']['from'] ?? ($r['price_for_qty'] ?? 1);
                     $uTo = $r['unit']['to'] ?? 1;
