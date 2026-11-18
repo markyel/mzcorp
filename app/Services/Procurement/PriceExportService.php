@@ -171,7 +171,7 @@ class PriceExportService
             $rows[] = [
                 'sku' => (string) ($o->catalogItem?->sku ?? $draftSku),
                 'name' => (string) ($o->catalogItem?->name ?? $o->product_name ?? ''),
-                'price' => (float) $o->price,
+                'price' => (float) $o->exportPrice(),
                 'currency' => $o->currency,
                 'supplier' => (string) ($names[(string) $o->supplier_key] ?? ($o->supplier_name ?: $o->supplier_key)),
                 'comment' => $o->export_comment ?? self::offerComment($o),
@@ -358,7 +358,8 @@ class PriceExportService
             'cid' => $o->catalog_item_id !== null ? (int) $o->catalog_item_id : (string) $o->sku,
             'sku' => (string) ($o->catalogItem?->sku ?? $draftSkus[(string) $o->sku]),
             'key' => $o->supplier_key, 'fallback' => (string) ($o->supplier_name ?: $o->supplier_key),
-            'price' => (float) $o->price, 'currency' => $o->currency,
+            // Цена нашей единицы: снабжение пересчитало (за 1 ступень → комплект на 10), иначе цена поставщика.
+            'price' => (float) $o->exportPrice(), 'currency' => $o->currency,
             'date' => Carbon::parse($o->remote_updated_at ?? $o->created_at),
             // Поправленный снабжением комментарий — как есть, иначе собранный.
             'comment' => $o->export_comment ?? self::offerComment($o),
@@ -373,8 +374,11 @@ class PriceExportService
     {
         $num = fn ($v) => rtrim(rtrim(number_format((float) $v, 4, ',', ' '), '0'), ',');
         $parts = [];
-        // Цена не за единицу — первым делом (канат Драко M24638: 32 355 руб за кусок 135 м выглядел ценой метра).
-        if (($for = $o->priceForNote()) !== null) {
+        // Пересчёт снабжения на нашу единицу — первым делом: в файле цена уже наша, а поставщик дал другую.
+        // Иначе — цена не за единицу по словам поставщика (канат Драко M24638: 32 355 руб за кусок 135 м).
+        if (($conv = $o->unitConversionNote()) !== null) {
+            $parts[] = $conv;
+        } elseif (($for = $o->priceForNote()) !== null) {
             $parts[] = $for;
         }
         // Базис поставки: EXW — доставка и пошлина сверху цены (OTI «EXW Europe», 17.11.2026).

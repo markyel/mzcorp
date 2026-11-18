@@ -59,7 +59,32 @@
             @if($r['rub'] !== null)<span class="pa-meta">≈ {{ number_format($r['rub'], 0, ',', ' ') }} ₽</span>@endif
             {{-- Цена далеко от последней закупки: часто это цена за кусок, упаковку или не тот товар. --}}
             @if(! empty($r['unit_check']) && ! $r['stale'])
-                <span class="pa-pill pa-pill-over" title="{{ ucfirst($r['unit_check']) }}. Проверьте, за какую единицу цена (штука, метр, упаковка, кусок) и тот ли это товар.">проверьте единицу</span>
+                <span class="pa-pill pa-pill-over" title="{{ ucfirst($r['unit_check']) }}. Проверьте, за какую единицу цена (штука, метр, упаковка, кусок) и тот ли это товар. Если цена за другое количество — «пересчитать».">проверьте единицу</span>
+            @endif
+            {{-- Пересчёт на нашу единицу (M31632: OTI дал цену за 1 ступень, позиция — комплект на 10): выше — цена нашей
+                 единицы, она и уйдёт в 1С; цена поставщика — строкой ниже и в комментарии. --}}
+            @if($r['unit'])
+                <span class="pa-meta" title="Цена поставщика пересчитана на нашу единицу — в 1С уйдёт цена выше">поставщик: {{ $money($r['unit']['supplier_price']) }} {{ $r['currency'] }} за {{ $num($r['unit']['from']) }} → ×{{ $num($r['unit']['to'] / $r['unit']['from']) }}</span>
+            @endif
+            @if(! $r['stale'] && $r['price'] !== null)
+                @php
+                    $uFrom = $r['unit']['from'] ?? ($r['price_for_qty'] ?? 1);
+                    $uTo = $r['unit']['to'] ?? 1;
+                @endphp
+                <div x-data="{ open: false, from: @js($num($uFrom)), to: @js($r['unit'] ? $num($uTo) : '') }" style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+                    <button type="button" class="pa-link" style="align-self: flex-end;" x-on:click="open = ! open"
+                            title="Поставщик дал цену не за нашу единицу (за штуку вместо комплекта, за кусок вместо метра) — пересчитать для выгрузки в 1С">⇄ {{ $r['unit'] ? 'пересчёт' : 'пересчитать' }}</button>
+                    <div x-show="open" x-cloak style="display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-surface); text-align: left; width: 176px;">
+                        <label class="pa-meta" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">цена поставщика за
+                            <input type="text" inputmode="decimal" x-model="from" class="pa-input" style="width: 56px; height: 24px; text-align: right;"></label>
+                        <label class="pa-meta" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">в нашей позиции
+                            <input type="text" inputmode="decimal" x-model="to" placeholder="10" class="pa-input" style="width: 56px; height: 24px; text-align: right;"></label>
+                        <div style="display: flex; gap: 4px; justify-content: flex-end;">
+                            @if($r['unit'])<button type="button" class="pa-btn pa-btn-link" style="height: 24px;" x-on:click="$wire.setUnit({{ $r['id'] }}, null, null); open = false">снять</button>@endif
+                            <button type="button" class="pa-btn pa-btn-secondary" style="height: 24px;" x-on:click="$wire.setUnit({{ $r['id'] }}, from, to); open = false">Применить</button>
+                        </div>
+                    </div>
+                </div>
             @endif
         </div>
 

@@ -54,7 +54,7 @@ class PriceActualizationService
                 $this->prices->review($offer, true, $by);
             }
             $choice = [
-                'supplier' => (string) ($offer->supplier_name ?: $offer->supplier_key), 'price' => $offer->price !== null ? (float) $offer->price : null,
+                'supplier' => (string) ($offer->supplier_name ?: $offer->supplier_key), 'price' => $offer->exportPrice(),
                 'currency' => $offer->currency, 'source' => 'quoteparts', 'ref' => $offer->id,
             ];
             if ($draft !== null) {
@@ -242,6 +242,33 @@ class PriceActualizationService
         });
 
         return count($positions);
+    }
+
+    /**
+     * Пересчёт цены поставщика на нашу единицу (18.11.2026, M31632: OTI дал цену за 1 ступень, позиция — комплект на
+     * 10): «цена за $from — нужна за $to». null / одинаковые — пересчёт снят. Предложение уже выбрано «Закупаем
+     * здесь» — цена выбора обновляется, позиция снова ждёт выгрузки (в 1С ушла прежняя цена).
+     */
+    public function setUnitConversion(QuotePartsOffer $offer, ?float $from, ?float $to, User $by): void
+    {
+        $clear = $from === null || $to === null || abs($from - $to) < 1e-9;
+        if (! $clear && ($from <= 0 || $to <= 0 || $from > 100000 || $to > 100000)) {
+            throw new \DomainException('Количество — от 0,001 до 100 000.');
+        }
+        DB::transaction(function () use ($offer, $from, $to, $by, $clear) {
+            $offer->forceFill([
+                'unit_from_qty' => $clear ? null : $from,
+                'unit_to_qty' => $clear ? null : $to,
+                'unit_set_by_user_id' => $clear ? null : $by->id,
+            ])->save();
+
+            $key = SupplierChoiceService::itemKey($offer->catalog_item_id, $offer->sku);
+            $choice = $key !== null ? $this->choices->forKeys([$key])->get($key) : null;
+            if ($choice !== null && $choice->source === 'quoteparts' && (int) $choice->offer_ref === (int) $offer->id) {
+                $choice->forceFill(['price' => $offer->exportPrice()])->save();
+                PricePosition::query()->where('sku', $offer->catalogItem?->sku ?? $offer->sku)->whereNotNull('exported_at')->update(['exported_at' => null]);
+            }
+        });
     }
 
     /**

@@ -48,4 +48,26 @@ class PriceRefreshTermsTest extends TestCase
         $this->assertTrue((new QuotePartsOffer($base + ['valid_until' => now()->toDateString()]))->isUsable());
         $this->assertTrue((new QuotePartsOffer($base))->isUsable());
     }
+
+    public function test_a_price_per_step_is_converted_to_our_kit_of_ten(): void
+    {
+        // M31632 (18.11.2026): OTI дал 62,90 USD за ступень, позиция — комплект на 10 ступеней.
+        $o = new QuotePartsOffer(['kind' => 'original', 'price' => 62.9, 'currency' => 'USD', 'tiers' => [['min_qty' => 1, 'price' => 62.9]],
+            'unit_from_qty' => 1, 'unit_to_qty' => 10]);
+
+        $this->assertSame(629.0, $o->exportPrice());
+        $this->assertSame('цена поставщика 62,9 USD за 1, пересчитано на 10', PriceExportService::offerComment($o));
+
+        // Канат: цена за кусок 135 м, наша единица — метр.
+        $rope = new QuotePartsOffer(['price' => 32355, 'currency' => 'RUB', 'unit_from_qty' => 135, 'unit_to_qty' => 1]);
+        $this->assertSame(239.6667, $rope->exportPrice());
+
+        $plain = new QuotePartsOffer(['price' => 62.9, 'unit_from_qty' => 1, 'unit_to_qty' => 1]);
+        $this->assertSame(62.9, $plain->exportPrice());
+        $this->assertNull($plain->unitConversionNote());
+
+        // Пересчитанная цена близка к закупке — метки «проверьте единицу» нет.
+        $this->assertNotNull(PriceOffers::unitCheck(5186, 91576, null));
+        $this->assertNull(PriceOffers::unitCheck(51860, 91576, null));
+    }
 }

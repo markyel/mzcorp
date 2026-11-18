@@ -130,7 +130,7 @@ class SupplierChoiceService
             if (! $o->countsAsItemPrice()) {
                 continue;
             }
-            $out[$o->supplier_key] = ['key' => $o->supplier_key, 'supplier' => (string) ($o->supplier_name ?: $o->supplier_key), 'price' => $o->price !== null ? (float) $o->price : null,
+            $out[$o->supplier_key] = ['key' => $o->supplier_key, 'supplier' => (string) ($o->supplier_name ?: $o->supplier_key), 'price' => $o->exportPrice(),
                 'currency' => $o->currency, 'source' => 'quoteparts', 'ref' => (int) $o->id,
                 'variant' => ($o->kind ?? 'original') !== 'original' ? \App\Models\QuotePartsOffer::kindLabel($o->kind) : null, 'at' => $o->remote_updated_at];
         }

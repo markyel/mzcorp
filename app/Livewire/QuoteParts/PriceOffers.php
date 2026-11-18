@@ -278,6 +278,24 @@ class PriceOffers extends Component
     }
 
     /** «Игнорировать» / «Вернуть»: предложение не о том — его цена не идёт в выгрузку 1С, в «лучшее» и в закупку. */
+    /**
+     * «Пересчитать на нашу единицу»: поставщик дал цену за $from, позиция — на $to (OTI: за 1 ступень, комплект на 10).
+     * Пустые / равные — пересчёт снят.
+     */
+    public function setUnit(int $offerId, mixed $from, mixed $to, PriceActualizationService $service): void
+    {
+        $num = fn ($v) => is_numeric($c = str_replace([',', ' ', "\u{00A0}"], ['.', '', ''], trim((string) $v))) ? (float) $c : null;
+        try {
+            $service->setUnitConversion(QuotePartsOffer::query()->findOrFail($offerId), $num($from), $num($to), auth()->user());
+        } catch (\DomainException $e) {
+            $this->dispatch('toast', type: 'error', message: $e->getMessage());
+
+            return;
+        }
+        $this->exportNote = null;
+        $this->forget();
+    }
+
     public function ignore(int $offerId, bool $ignore, QuotePartsPriceService $prices): void
     {
         $prices->ignore(QuotePartsOffer::query()->findOrFail($offerId), $ignore, auth()->user());
@@ -1230,7 +1248,9 @@ class PriceOffers extends Component
     private static function row(QuotePartsOffer $o, ?string $draftName = null): array
     {
         $ci = $o->catalogItem;
-        $rub = IqotCurrencyConverter::toRub($o->price !== null ? (float) $o->price : null, $o->currency);
+        // Цена нашей единицы (пересчёт снабжения, M31632) — в сравнение, «лучшее», метку единицы и выгрузку.
+        $factor = $o->unitFactor();
+        $rub = IqotCurrencyConverter::toRub($o->exportPrice(), $o->currency);
         $purchase = $ci?->purchase_price !== null ? (float) $ci->purchase_price : null;
 
         return [
@@ -1260,8 +1280,11 @@ class PriceOffers extends Component
             // Комментарий в выгрузке 1С: поправленный снабжением или собранный.
             'export_comment' => $o->export_comment ?? \App\Services\Procurement\PriceExportService::offerComment($o),
             'comment_edited' => $o->export_comment !== null,
-            'tiers' => (array) ($o->tiers ?? []),
-            'price' => $o->price !== null ? (float) $o->price : null,
+            'tiers' => array_map(fn ($t) => isset($t['price']) ? ['price' => (float) $t['price'] * $factor] + $t : $t, (array) ($o->tiers ?? [])),
+            'price' => $o->exportPrice(),
+            // Пересчёт на нашу единицу: цена поставщика как есть и «за from — нужна за to».
+            'unit' => $o->hasUnitConversion() ? ['from' => (float) $o->unit_from_qty, 'to' => (float) $o->unit_to_qty, 'supplier_price' => (float) $o->price] : null,
+            'price_for_qty' => $o->price_for_qty !== null ? (float) $o->price_for_qty : null,
             'currency' => $o->currency,
             'rub' => $rub['known'] ? $rub['rub'] : null,
             'lead' => $o->lead_time_days,
@@ -1280,7 +1303,7 @@ class PriceOffers extends Component
             'price_for' => $o->priceForNote(),
             'incoterm' => trim($o->incoterm.' '.$o->incoterm_place) ?: null,
             // Отличается от последней закупки больше чем в 5 раз — похоже на цену за упаковку, кусок или не тот товар.
-            'unit_check' => self::unitCheck($rub['known'] ? (float) $rub['rub'] : null, $purchase, $o->price_for_qty !== null ? (float) $o->price_for_qty : null),
+            'unit_check' => self::unitCheck($rub['known'] ? (float) $rub['rub'] : null, $purchase, ! $o->hasUnitConversion() && $o->price_for_qty !== null ? (float) $o->price_for_qty : null),
             'purchase' => $purchase,
             'sale' => $ci?->price !== null ? (float) $ci->price : null,
             'actual' => (bool) ($ci?->is_price_actual ?? false),

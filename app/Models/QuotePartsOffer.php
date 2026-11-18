@@ -57,6 +57,10 @@ class QuotePartsOffer extends Model
         'ignored_by_user_id',
         'export_comment',
         'export_comment_by_user_id',
+        // Пересчёт на нашу единицу (снабжение): цена поставщика за unit_from_qty — нам нужна за unit_to_qty.
+        'unit_from_qty',
+        'unit_to_qty',
+        'unit_set_by_user_id',
     ];
 
     /** Разбор отклонения (не оригинала): ждёт, принято к закупке, отклонено. */
@@ -71,6 +75,8 @@ class QuotePartsOffer extends Model
         'original_texts' => 'array',
         'price' => 'decimal:4',
         'price_for_qty' => 'decimal:3',
+        'unit_from_qty' => 'decimal:3',
+        'unit_to_qty' => 'decimal:3',
         'valid_until' => 'date',
         'superseded' => 'boolean',
         'remote_updated_at' => 'datetime',
@@ -165,6 +171,41 @@ class QuotePartsOffer extends Model
     public function isExpired(): bool
     {
         return $this->valid_until !== null && $this->valid_until->lt(now()->startOfDay());
+    }
+
+    /**
+     * Во сколько раз цена поставщика отличается от цены нашей единицы: снабжение указало «цена за unit_from_qty —
+     * нужна за unit_to_qty» (OTI: за 1 ступень, позиция — комплект на 10 → ×10). 1 — пересчёта нет.
+     */
+    public function unitFactor(): float
+    {
+        $from = (float) ($this->unit_from_qty ?? 0);
+        $to = (float) ($this->unit_to_qty ?? 0);
+
+        return $from > 0 && $to > 0 ? $to / $from : 1.0;
+    }
+
+    public function hasUnitConversion(): bool
+    {
+        return abs($this->unitFactor() - 1.0) > 1e-9;
+    }
+
+    /** Цена нашей единицы — в выгрузку 1С, выбор поставщика и сравнение; без пересчёта — цена поставщика. */
+    public function exportPrice(): ?float
+    {
+        return $this->price !== null ? round((float) $this->price * $this->unitFactor(), 4) : null;
+    }
+
+    /** «цена поставщика 62,90 USD за 1, пересчитано на 10» — в комментарий 1С; null — пересчёта нет. */
+    public function unitConversionNote(): ?string
+    {
+        if (! $this->hasUnitConversion() || $this->price === null) {
+            return null;
+        }
+        $num = fn ($v, $d) => rtrim(rtrim(number_format((float) $v, $d, ',', ' '), '0'), ',');
+
+        return 'цена поставщика '.$num($this->price, 4).' '.$this->currency.' за '.$num($this->unit_from_qty, 3)
+            .', пересчитано на '.$num($this->unit_to_qty, 3);
     }
 
     /**
