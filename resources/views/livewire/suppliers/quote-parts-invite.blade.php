@@ -149,8 +149,8 @@
                 <label class="block"><span class="text-fg-3 text-[12px]">Компания (как увидит поставщик)</span>
                     <input type="text" wire:model="company_name" class="{{ $inputCls }}">
                     @error('company_name')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror</label>
-                <label class="block"><span class="text-fg-3 text-[12px]">Страна (ISO, напр. CN)</span>
-                    <input type="text" wire:model="country" maxlength="2" class="{{ $inputCls }} uppercase">
+                <label class="block"><span class="text-fg-3 text-[12px]">Страна</span>
+                    @include('partials.country-select', ['model' => 'country', 'value' => $country, 'class' => $inputCls])
                     @error('country')<span class="text-red-700 text-[12px]">{{ $message }}</span>@enderror</label>
                 <label class="block"><span class="text-fg-3 text-[12px]">Контактное лицо</span>
                     <input type="text" wire:model="contact_name" class="{{ $inputCls }}"></label>

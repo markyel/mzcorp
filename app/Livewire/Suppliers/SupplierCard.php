@@ -98,7 +98,7 @@ class SupplierCard extends Component
     {
         $p = (array) ($this->org->qp_payload ?? []);
         $this->companyName = (string) ($p['company']['name'] ?? $this->org->name);
-        $this->country = (string) ($p['company']['country'] ?? '');
+        $this->country = strtoupper((string) ($p['company']['country'] ?? '')); // код ISO 3166-1 — как в списке стран
         $this->locale = (string) ($p['company']['locale'] ?? 'ru');
         $this->letterLocale = (string) ($p['letter_locale'] ?? '');
         $this->description = (string) ($p['profile']['assortment_description'] ?? '');

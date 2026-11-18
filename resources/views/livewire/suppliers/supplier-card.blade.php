@@ -78,7 +78,7 @@
                     @if($this->supplierOwnsCard)<span class="text-[12px] text-fg-4">Карточку компании ведёт сам поставщик в кабинете.</span>@endif
                 </label>
                 <div class="grid grid-cols-3 gap-2">
-                    <label>Страна <input type="text" wire:model="country" maxlength="2" placeholder="CN" class="{{ $in }} uppercase" @disabled($this->supplierOwnsCard)></label>
+                    <label>Страна @include('partials.country-select', ['model' => 'country', 'value' => $country, 'class' => $in, 'disabled' => $this->supplierOwnsCard])</label>
                     <label title="{{ $this->supplierOwnsCard ? 'Язык кабинета — выбрал сам поставщик' : 'Язык кабинета поставщика' }}">Предпочтительный язык
                         <select wire:model="locale" class="{{ $in }}" @disabled($this->supplierOwnsCard)>
                             <option value="ru">русский</option><option value="en">английский</option><option value="zh_CN">китайский</option>
