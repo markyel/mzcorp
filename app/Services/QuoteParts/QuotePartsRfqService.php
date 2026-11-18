@@ -135,6 +135,8 @@ class QuotePartsRfqService
                 'channel' => 'offsystem',
                 'from_name' => $by->name,
                 'signature' => $this->signature($by, offsystem: true),
+                // Та же подпись оформленной, как в письме-запросе: для напоминаний QuoteParts (18.11.2026).
+                'signature_html' => $this->signatureHtml($by, offsystem: true),
                 'letters' => $this->offsystemLetters($letters, $rows, $by),
             ];
             $payload['mirror'] = ['email' => $this->mirrorAddress($by), 'name' => $by->name];
@@ -435,6 +437,7 @@ class QuotePartsRfqService
             'files' => $this->uploadedFiles($files),
             'cc' => self::parseCc($cc),
             'signature' => $withSignature ? $this->signature($by, offsystem: ($rfq->snapshot['channel'] ?? null) === 'offsystem') : null,
+            'signature_html' => $withSignature ? $this->signatureHtml($by, offsystem: ($rfq->snapshot['channel'] ?? null) === 'offsystem') : null,
         ]);
         $rfq->forceFill([
             'snapshot' => $this->russified($snapshot),
@@ -512,7 +515,8 @@ class QuotePartsRfqService
             $askers->map(fn ($key) => ['supplier' => $key, 'text' => $languages[$key] === 'en' ? $en : $ru])->values()->all(),
             $en !== '' ? $en : $ru,
             $by->name,
-            ['files' => $this->uploadedFiles($files), 'signature' => $withSignature ? $this->signature($by, offsystem: ($rfq->snapshot['channel'] ?? null) === 'offsystem') : null],
+            ['files' => $this->uploadedFiles($files), 'signature' => $withSignature ? $this->signature($by, offsystem: ($rfq->snapshot['channel'] ?? null) === 'offsystem') : null,
+                'signature_html' => $withSignature ? $this->signatureHtml($by, offsystem: ($rfq->snapshot['channel'] ?? null) === 'offsystem') : null],
         );
         $rfq->forceFill(['snapshot' => $this->russified($snapshot), 'status' => $snapshot['status'] ?? $rfq->status, 'synced_at' => now()])->save();
 
@@ -802,6 +806,18 @@ class QuotePartsRfqService
         $plain = trim((string) preg_replace('/^\s*--\s*\R/u', '', (string) ($rendered['plain'] ?? '')));
 
         return $plain !== '' ? mb_substr($plain, 0, 2000) : null;
+    }
+
+    /**
+     * Та же подпись оформленной (логотип, контакты) — как в письме-запросе. Без неё ответы и напоминания в той же
+     * переписке шли с текстовой подписью: у EVE в одной цепочке было две разные (18.11.2026).
+     */
+    private function signatureHtml(User $by, bool $offsystem = false): ?string
+    {
+        $rendered = $offsystem ? $this->offsystemSignature($by) : app(\App\Services\Mail\EmailSignatureService::class)->render($by);
+        $html = trim((string) ($rendered['html'] ?? ''));
+
+        return $html !== '' && mb_strlen($html) <= 30000 ? $html : null;
     }
 
     /**
