@@ -356,6 +356,16 @@ class ParseOutboundQuoteJob implements ShouldQueue, ShouldBeUnique
 
             $enrichStats = $enricher->enrich($quote);
 
+            // КП разобрано и сопоставлено — покрывает ли оно (со всеми прежними) все позиции: «Частичное КП» или
+            // «КП отправлено» (QuoteCoverageService, 18.11.2026). Строки бывают готовы позже перехода в «КП отправлено».
+            if ($quote->document_type === 'outbound_quotation_full') {
+                try {
+                    app(\App\Services\Quotes\QuoteCoverageService::class)->sync($request, 'quote_parsed');
+                } catch (\Throwable $e) {
+                    Log::warning('ParseOutboundQuoteJob: quote coverage sync failed (non-fatal)', ['quote_id' => $quote->id, 'error' => $e->getMessage()]);
+                }
+            }
+
             // Покупатель «закупка + наценка» (Liftway): цена в КП/счёте выше
             // режимной — письмо менеджеру. Позиции уже сопоставлены с каталогом.
             try {

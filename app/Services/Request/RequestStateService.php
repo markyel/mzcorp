@@ -160,14 +160,18 @@ class RequestStateService
             // тонет вниз Pool, ход за клиентом.
             $activityType = match ($to) {
                 RequestStatus::AwaitingClientClarification => \App\Enums\RequestActivityType::ClarificationSent,
-                RequestStatus::Quoted => \App\Enums\RequestActivityType::QuoteSent,
+                RequestStatus::Quoted, RequestStatus::PartiallyQuoted => \App\Enums\RequestActivityType::QuoteSent,
                 RequestStatus::Invoiced => \App\Enums\RequestActivityType::InvoiceSent,
                 RequestStatus::Paid => \App\Enums\RequestActivityType::Paid,
                 RequestStatus::ClosedWon => \App\Enums\RequestActivityType::ClosedWon,
                 RequestStatus::ClosedLost => \App\Enums\RequestActivityType::ClosedLost,
                 default => \App\Enums\RequestActivityType::StatusChange,
             };
-            $this->activity->touch($request, $activityType);
+            // Пересчёт статуса системой (покрытие КП — QuoteCoverageService) — не новое событие по заявке: время
+            // последней активности не двигаем, иначе пересчёт при выкладке поднял бы сотню заявок «свежими».
+            if (! ($context['quiet_activity'] ?? false)) {
+                $this->activity->touch($request, $activityType);
+            }
 
             // Менеджер сделал КП — цикл обновления цен завершён: снимаем
             // статус/флаги отслеживания (Фаза 3.5).
@@ -183,6 +187,16 @@ class RequestStateService
             'by' => $author?->id,
             'event' => $context['event'] ?? 'manual',
         ]);
+
+        // КП ушло — покрывает ли оно все позиции: иначе «Частичное КП» (QuoteCoverageService, 18.11.2026). Строки КП
+        // из 1С могут разобраться позже перехода — тогда пересчёт сделает разбор (ParseOutboundQuoteJob).
+        if ($to === RequestStatus::Quoted && $request->status === RequestStatus::Quoted) {
+            try {
+                app(\App\Services\Quotes\QuoteCoverageService::class)->sync($request, 'quoted');
+            } catch (\Throwable $e) {
+                Log::warning('RequestStateService: quote coverage sync failed (non-fatal)', ['request_id' => $request->id, 'error' => $e->getMessage()]);
+            }
+        }
 
         // Paid — финальный позитивный исход. Разделение Paid / ClosedWon
         // оставалось из соображений «оплата получена ≠ товар отгружен», но

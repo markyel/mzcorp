@@ -31,6 +31,7 @@ class RequestItemObserver
         $this->complexity->detectAndStoreItemPath($item);
         $this->touchParent($item);
         $this->recomputeComplexity($item);
+        $this->syncQuoteCoverage($item);
     }
 
     public function updated(RequestItem $item): void
@@ -41,12 +42,31 @@ class RequestItemObserver
         $this->complexity->detectAndStoreItemPath($item);
         $this->touchParent($item);
         $this->recomputeComplexity($item);
+        // Позицию отключили («клиенту не нужно») или ей проставили карточку каталога — покрытие КП могло измениться.
+        if ($item->wasChanged(['is_active', 'catalog_item_id'])) {
+            $this->syncQuoteCoverage($item);
+        }
     }
 
     public function deleted(RequestItem $item): void
     {
         $this->touchParent($item);
         $this->recomputeComplexity($item);
+        $this->syncQuoteCoverage($item);
+    }
+
+    /** «Частичное КП» ↔ «КП отправлено» по покрытию позиций (QuoteCoverageService); вне этих статусов — ничего. */
+    private function syncQuoteCoverage(RequestItem $item): void
+    {
+        $request = $item->request_id ? Request::find($item->request_id) : null;
+        if ($request === null || ! in_array($request->status, [\App\Enums\RequestStatus::Quoted, \App\Enums\RequestStatus::PartiallyQuoted], true)) {
+            return;
+        }
+        try {
+            app(\App\Services\Quotes\QuoteCoverageService::class)->sync($request, 'items_changed');
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('RequestItemObserver: quote coverage sync failed', ['request_id' => $request->id, 'error' => $e->getMessage()]);
+        }
     }
 
     private function touchParent(RequestItem $item): void

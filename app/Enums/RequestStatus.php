@@ -287,6 +287,8 @@ enum RequestStatus: string
                 self::ClosedWon, self::ClosedLost,
             ],
             self::Quoted => [
+                // Досчитали покрытие: позиция без КП — «Частичное КП» (QuoteCoverageService, 18.11.2026).
+                self::PartiallyQuoted,
                 self::UnderReview, self::PostponedUntil,
                 self::AwaitingInvoice, self::Invoiced,
                 self::InProgress, // возврат на правки

@@ -53,6 +53,10 @@ class RequestItem extends Model
         // все ответы поставщиков = отказ, «возможно более не поставляется».
         'price_refresh_watched',
         'possibly_discontinued',
+        // «Частичное КП»: позицию закрыл менеджер — substitute (заменой) / declined (мы отказали). QuoteCoverageService.
+        'quote_resolution',
+        'quote_resolved_by_user_id',
+        'quote_resolved_at',
         // Phase 2.0 KB resolutions:
         'identification_category_id',
         'manufacturer_brand_id',
@@ -91,6 +95,7 @@ class RequestItem extends Model
             'is_active' => 'boolean',
             'price_refresh_watched' => 'boolean',
             'possibly_discontinued' => 'boolean',
+            'quote_resolved_at' => 'datetime',
             'quality_assessment_payload' => 'array',
             'suggestion_confidence' => 'float',
             'suggestion_source_email_id' => 'integer',

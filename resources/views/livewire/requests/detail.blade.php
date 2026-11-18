@@ -1718,6 +1718,10 @@
                      сводный блок теперь рендерится один раз под списком
                      позиций (см. ниже после @foreach($items)). --}}
 
+                {{-- «Не покрыто КП» — позиции без предложения клиенту («Частичное КП», QuoteCoverageService). --}}
+                <livewire:requests.quote-coverage :request-id="$req->id" :key="'quote-coverage-'.$req->id" />
+
+
                 @php
                     // Дедуп-трасса: RequestItemPersister аппендит в
                     // requests.parsing_meta.dedup_dropped[] каждую съеденную
