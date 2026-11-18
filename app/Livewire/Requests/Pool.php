@@ -4,7 +4,6 @@ namespace App\Livewire\Requests;
 
 use App\Enums\AttentionReason;
 use App\Enums\ClosedLostReason;
-use App\Enums\MailDirection;
 use App\Enums\RequestActivityType;
 use App\Enums\RequestStatus;
 use App\Enums\Role;
@@ -448,13 +447,12 @@ class Pool extends Component
      */
     /**
      * Фильтр «Заброшенные» = где МЫ перестали отвечать клиенту при мяче на нашей
-     * стороне. Две части через OR:
-     *   1) ОТКРЫТЫЕ: последнее событие по заявке — ответ клиента
-     *      (last_activity_type=client_replied → мяч у нас, точнее статуса: ловит
-     *      и quoted/invoiced, где клиент ответил после КП/счёта), и мы молчим
-     *      дольше ABANDONED_SILENCE_DAYS. Не paused/postponed (намеренные паузы).
-     *   2) ЗАКРЫТЫЕ: closed_lost «прочее / без причины», где ПОСЛЕДНЕЕ письмо
-     *      треда — входящее (мы закрыли, не ответив на письмо клиента).
+     * стороне, только заявки в работе: последнее событие по заявке — ответ клиента
+     * (last_activity_type=client_replied → мяч у нас, точнее статуса: ловит
+     * и quoted/invoiced, где клиент ответил после КП/счёта), и мы молчим
+     * дольше ABANDONED_SILENCE_DAYS. Не paused/postponed (намеренные паузы).
+     * Закрытые сюда не входят (18.11.2026, заказчик: «нужно отображать только те,
+     * которые ещё в работе») — раньше шли и closed_lost, закрытые не ответив.
      * Активный владелец — атрибуция без архивных seed (как в «Наш отказ»).
      * Сигнал last_activity_type переживает простое ОТКРЫТИЕ карточки (attention-
      * флаг снимается, а тип активности — только реальным нашим ответом), поэтому
@@ -471,26 +469,10 @@ class Pool extends Component
             RequestStatus::PostponedUntil->value,
         ];
 
-        $query->where(function ($outer) use ($terminalOrPaused) {
-            // 1) Открытые — мяч у нас, молчим дольше порога.
-            $outer->where(function ($q) use ($terminalOrPaused) {
-                $q->whereNotIn('status', $terminalOrPaused)
-                    ->where('last_activity_type', RequestActivityType::ClientReplied->value)
-                    ->where('last_activity_at', '<', now()->subDays(self::ABANDONED_SILENCE_DAYS));
-            })
-                // 2) Закрытые — закрыли, не ответив на последнее письмо клиента.
-                ->orWhere(function ($q) {
-                    $q->where('status', RequestStatus::ClosedLost->value)
-                        ->where(fn ($r) => $r->where('closed_lost_reason', 'manual_other')->orWhereNull('closed_lost_reason'))
-                        ->whereExists(function ($sub) {
-                            $sub->select(DB::raw(1))
-                                ->from('email_messages as em')
-                                ->whereColumn('em.related_request_id', 'requests.id')
-                                ->where('em.direction', MailDirection::Inbound->value)
-                                ->whereRaw('em.id = (select max(em2.id) from email_messages as em2 where em2.related_request_id = requests.id)');
-                        });
-                });
-        })
+        // В работе — мяч у нас, молчим дольше порога.
+        $query->whereNotIn('status', $terminalOrPaused)
+            ->where('last_activity_type', RequestActivityType::ClientReplied->value)
+            ->where('last_activity_at', '<', now()->subDays(self::ABANDONED_SILENCE_DAYS))
             ->whereHas('assignedUser', fn ($q) => $q->active());
     }
 

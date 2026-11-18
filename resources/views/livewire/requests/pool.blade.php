@@ -450,7 +450,7 @@
                     'silence'  => ['label' => '🤫 Клиент молчит', 'count' => $bucketCounts['silence'] ?? 0],                    'paused'   => ['label' => 'На паузе',    'count' => $bucketCounts['paused']],
                     'closed'   => ['label' => 'Закрытые',    'count' => $bucketCounts['closed']],
                     'refused'  => ['label' => '🚫 Наш отказ', 'count' => $bucketCounts['refused'] ?? 0],
-                    'abandoned'=> ['label' => '🕳 Заброшенные', 'count' => $bucketCounts['abandoned'] ?? 0, 'title' => 'Где МЫ перестали отвечать клиенту, а мяч был на нашей стороне: открытые (клиент ответил последним, молчим >5 дн.) + закрытые, которые закрыли не ответив клиенту'],
+                    'abandoned'=> ['label' => '🕳 Заброшенные', 'count' => $bucketCounts['abandoned'] ?? 0, 'title' => 'Заявки в работе, где МЫ перестали отвечать клиенту: клиент ответил последним, а мы молчим больше 5 дней'],
                     'postsale' => ['label' => '🛒 Постпродажа', 'count' => $bucketCounts['postsale'] ?? 0],
                     'all'      => ['label' => 'Все',         'count' => $bucketCounts['all']],
                 ];
