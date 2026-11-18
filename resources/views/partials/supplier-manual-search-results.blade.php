@@ -17,9 +17,10 @@
          class="mt-1 border border-border rounded-md divide-y divide-border-subtle" style="max-width: 420px"
          x-bind:style="all ? { maxHeight: '360px', overflowY: 'auto' } : {}">
         @foreach($results as $i => $r)
-            <div wire:key="sup-search-{{ $r['key'] }}" @if($i >= $limit) x-show="all" x-cloak @endif>
+            {{-- addr — раскрыт полный список адресов: тогда совпавшие «↳ только на …» прячем, иначе адреса дублировались. --}}
+            <div wire:key="sup-search-{{ $r['key'] }}" x-data="{ addr: false }" @if($i >= $limit) x-show="all" x-cloak @endif>
                 {{-- Справа — карточка поставщика в новой вкладке (организация, иначе адрес из реестра): посмотреть, кто это. --}}
-                <div x-data="{ addr: false }">
+                <div>
                 <div style="display: flex; align-items: center;">
                 <button type="button" wire:click="addSupplier({{ $r['representative_id'] }})" class="w-full text-left px-3 py-1.5 hover:bg-hover text-[12.5px]" style="flex: 1; min-width: 0;"
                         title="{{ $r['in_request'] ? 'Поставщик уже в списке выше — отметить его' : 'Добавить поставщика — по умолчанию на '.$r['email'].' (контакт «Расценка»)' }}">
@@ -53,7 +54,7 @@
                 @endif
                 </div>
                 @foreach($r['emails'] as $e)
-                    <button type="button" wire:click="addSupplier({{ $e['id'] }})" class="w-full text-left hover:bg-hover text-[11.5px] text-fg-3" style="padding: 2px 12px 4px 24px"
+                    <button type="button" wire:click="addSupplier({{ $e['id'] }})" x-show="! addr" class="w-full text-left hover:bg-hover text-[11.5px] text-fg-3" style="padding: 2px 12px 4px 24px"
                             title="{{ $e['in_request'] ? 'Адрес уже в списке выше — отметить его' : 'Отправить именно на этот адрес' }}">
                         ↳ только на <span class="mono">{{ $e['email'] }}</span>
                         @if($e['id'] === $r['representative_id'])<span class="text-[11px]" style="color: var(--status-ok-fg, #047857); font-weight: 600;"> · по умолчанию</span>@endif
