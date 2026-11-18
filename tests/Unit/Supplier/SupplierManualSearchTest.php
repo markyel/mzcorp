@@ -112,6 +112,20 @@ class SupplierManualSearchTest extends TestCase
         $this->assertSame('UniSystem', $out[0]['name']);
     }
 
+    /** «адреса ▾» (18.11.2026): все адреса организации с ролями — и когда нашли по названию, а не по адресу. */
+    public function test_all_addresses_with_roles_are_available_when_found_by_name(): void
+    {
+        $rows = [$this->row(1, 7, 'quote@securlift.ch', ['quoting'], 1, 'SECURLIFT через UniSystem'), $this->row(2, 7, 'acc@securlift.ch', ['finance'], 2, 'SECURLIFT через UniSystem')];
+
+        $out = SupplierManualSearch::group(collect($rows), collect($rows), 'unisystem', excludeIds: [2]);
+
+        $this->assertSame([], $out[0]['emails']);
+        $this->assertSame([
+            ['id' => 1, 'email' => 'quote@securlift.ch', 'topics' => ['Расценка'], 'in_request' => false],
+            ['id' => 2, 'email' => 'acc@securlift.ch', 'topics' => ['Финансы'], 'in_request' => true],
+        ], $out[0]['all_emails']);
+    }
+
     /** UniSystem (18.11.2026): по «unisystem.si» предлагался alex@ — у него «Логистика», не «Расценка». */
     public function test_by_domain_only_quoting_addresses_are_offered_unless_typed_in_full(): void
     {

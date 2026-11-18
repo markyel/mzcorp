@@ -19,9 +19,10 @@
         @foreach($results as $i => $r)
             <div wire:key="sup-search-{{ $r['key'] }}" @if($i >= $limit) x-show="all" x-cloak @endif>
                 {{-- Справа — карточка поставщика в новой вкладке (организация, иначе адрес из реестра): посмотреть, кто это. --}}
+                <div x-data="{ addr: false }">
                 <div style="display: flex; align-items: center;">
                 <button type="button" wire:click="addSupplier({{ $r['representative_id'] }})" class="w-full text-left px-3 py-1.5 hover:bg-hover text-[12.5px]" style="flex: 1; min-width: 0;"
-                        title="{{ $r['in_request'] ? 'Поставщик уже в списке выше — отметить его' : 'Добавить поставщика: кому именно отправить, выберет QuoteParts (контакт «Расценка»)' }}">
+                        title="{{ $r['in_request'] ? 'Поставщик уже в списке выше — отметить его' : 'Добавить поставщика — по умолчанию на '.$r['email'].' (контакт «Расценка»)' }}">
                     {{ $r['name'] }}
                     @if($r['org_id'] === null)
                         @if($r['email'] !== $r['name'])<span class="text-fg-4 mono text-[11px]">{{ $r['email'] }}</span>@endif
@@ -33,11 +34,32 @@
                 <a href="{{ $r['org_id'] !== null ? route('suppliers.card', $r['org_id']) : route('suppliers.registry-edit', $r['representative_id']) }}"
                    target="_blank" rel="noopener" title="Карточка поставщика — в новой вкладке"
                    style="flex: none; padding: 4px 10px; font-size: 11.5px; color: var(--sky-700); white-space: nowrap; text-decoration: none;">карточка ↗</a>
+                @if(count($r['all_emails'] ?? []) > 1)
+                    {{-- Все адреса организации с ролями: отправить на конкретный ящик, даже если нашли по названию. --}}
+                    <button type="button" x-on:click="addr = ! addr" title="Все адреса поставщика — выбрать конкретный ящик"
+                            style="flex: none; padding: 4px 10px 4px 0; font-size: 11.5px; color: var(--sky-700); white-space: nowrap; background: none; border: 0; cursor: pointer;"
+                            x-text="addr ? 'адреса ▴' : 'адреса ▾'">адреса ▾</button>
+                @endif
+                </div>
+                @if(count($r['all_emails'] ?? []) > 1)
+                    <div x-show="addr" x-cloak style="background: var(--bg-surface-2);">
+                        @foreach($r['all_emails'] as $e)
+                            <button type="button" wire:click="addSupplier({{ $e['id'] }})" class="w-full text-left hover:bg-hover text-[11.5px] text-fg-3" style="padding: 3px 12px 3px 24px"
+                                    title="{{ $e['in_request'] ? 'Адрес уже в списке выше — отметить его' : 'Отправить именно на этот адрес' }}">
+                                <span class="mono" style="color: var(--fg-1)">{{ $e['email'] }}</span>
+                                @if($e['topics'] !== [])<span class="text-fg-4 text-[11px]"> · {{ implode(', ', $e['topics']) }}</span>@endif
+                                @if($e['id'] === $r['representative_id'])<span class="text-[11px]" style="color: var(--status-ok-fg, #047857); font-weight: 600;"> · по умолчанию</span>@endif
+                                @if($e['in_request'])<span class="text-fg-4 text-[11px]"> · уже в списке</span>@endif
+                            </button>
+                        @endforeach
+                    </div>
+                @endif
                 </div>
                 @foreach($r['emails'] as $e)
                     <button type="button" wire:click="addSupplier({{ $e['id'] }})" class="w-full text-left hover:bg-hover text-[11.5px] text-fg-3" style="padding: 2px 12px 4px 24px"
                             title="{{ $e['in_request'] ? 'Адрес уже в списке выше — отметить его' : 'Отправить именно на этот адрес' }}">
                         ↳ только на <span class="mono">{{ $e['email'] }}</span>
+                        @if($e['id'] === $r['representative_id'])<span class="text-[11px]" style="color: var(--status-ok-fg, #047857); font-weight: 600;"> · по умолчанию</span>@endif
                         @if($e['in_request'])<span class="text-fg-4 text-[11px]">· уже в списке</span>@endif
                     </button>
                 @endforeach

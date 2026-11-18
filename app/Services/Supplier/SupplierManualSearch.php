@@ -109,6 +109,14 @@ class SupplierManualSearch
                 'org_id' => $orgId,
                 'in_request' => $inRequest,
                 'emails' => $emails,
+                // Все адреса организации с ролями — «адреса ▾» в строке: выбрать любой ящик, даже если нашли по названию
+                // (18.11.2026: по «system» раскрывались только UniSystem и SEA SYSTEMS — у них «system» в адресе).
+                'all_emails' => $orgId === null ? [] : $all
+                    ->sortBy(fn (Supplier $s) => [$s->contact_position ?? 999, $s->id])
+                    ->map(fn (Supplier $s) => ['id' => (int) $s->id, 'email' => (string) $s->email,
+                        'topics' => array_values(array_intersect_key(\App\Livewire\Suppliers\SupplierCard::TOPICS, array_flip((array) ($s->contact_topics ?: [])))),
+                        'in_request' => in_array((int) $s->id, $exclude, true)])
+                    ->values()->all(),
             ];
         }
 
