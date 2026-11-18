@@ -27,19 +27,16 @@
                     @if($r['org_id'] === null)
                         @if($r['email'] !== $r['name'])<span class="text-fg-4 mono text-[11px]">{{ $r['email'] }}</span>@endif
                     @elseif($r['addresses'] > 1)
-                        <span class="text-fg-4 text-[11px]">· адресов: {{ $r['addresses'] }}</span>
+                        {{-- «адресов: N ▾» раскрывает все адреса с ролями; .stop — чтобы клик не добавлял поставщика. --}}
+                        <span role="button" tabindex="0" x-on:click.stop="addr = ! addr" x-on:keydown.enter.stop.prevent="addr = ! addr"
+                              title="Все адреса поставщика — выбрать конкретный ящик"
+                              style="font-size: 11px; color: var(--sky-700); white-space: nowrap; cursor: pointer;">· адресов: {{ $r['addresses'] }} <span x-text="addr ? '▴' : '▾'">▾</span></span>
                     @endif
                     @if($r['in_request'])<span class="text-fg-4 text-[11px]">· уже в списке</span>@endif
                 </button>
                 <a href="{{ $r['org_id'] !== null ? route('suppliers.card', $r['org_id']) : route('suppliers.registry-edit', $r['representative_id']) }}"
                    target="_blank" rel="noopener" title="Карточка поставщика — в новой вкладке"
                    style="flex: none; padding: 4px 10px; font-size: 11.5px; color: var(--sky-700); white-space: nowrap; text-decoration: none;">карточка ↗</a>
-                @if(count($r['all_emails'] ?? []) > 1)
-                    {{-- Все адреса организации с ролями: отправить на конкретный ящик, даже если нашли по названию. --}}
-                    <button type="button" x-on:click="addr = ! addr" title="Все адреса поставщика — выбрать конкретный ящик"
-                            style="flex: none; padding: 4px 10px 4px 0; font-size: 11.5px; color: var(--sky-700); white-space: nowrap; background: none; border: 0; cursor: pointer;"
-                            x-text="addr ? 'адреса ▴' : 'адреса ▾'">адреса ▾</button>
-                @endif
                 </div>
                 @if(count($r['all_emails'] ?? []) > 1)
                     <div x-show="addr" x-cloak style="background: var(--bg-surface-2);">
