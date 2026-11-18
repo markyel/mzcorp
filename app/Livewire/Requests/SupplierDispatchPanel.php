@@ -684,7 +684,8 @@ class SupplierDispatchPanel extends Component
                 // Артикул для письма: позиция сматчена с каталогом — OEM из нашей базы (первый
                 // внешний, не M-код), иначе распознанный у клиента (SupplierDispatchService::itemOem).
                 'oem' => $svc->itemOem($it),
-                'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
+                // Бренд — как артикул: сматчена с каталогом — из нашей базы (SupplierDispatchService::itemBrand).
+                'brand' => $svc->itemBrand($it),
                 'qty' => $svc->itemQty($it, [], 'ru'),
                 'qty_en' => $svc->itemQty($it, [], 'en'),
                 'has_catalog' => (bool) $it->catalog_item_id,

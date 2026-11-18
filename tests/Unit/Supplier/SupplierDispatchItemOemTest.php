@@ -43,4 +43,16 @@ class SupplierDispatchItemOemTest extends TestCase
 
         $this->assertSame('ABC-1', $svc->itemOem($this->item('LW-0027395', $ci), [1 => 'ABC-1']));
     }
+
+    public function test_matched_item_takes_catalog_brand_not_the_parsed_guess(): void
+    {
+        // MZ2026-02150 (18.11.2026): «для Gen2 … FAA20780R1» — разбор придумал KONE, в каталоге OTIS.
+        $svc = app(SupplierDispatchService::class);
+        $kone = fn (?CatalogItem $ci) => tap($this->item('FAA20780R1', $ci), fn ($it) => $it->parsed_brand = 'KONE');
+
+        $this->assertSame('OTIS', $svc->itemBrand($kone(new CatalogItem(['sku' => 'M26736', 'brand' => 'OTIS']))));
+        $this->assertSame('KONE', $svc->itemBrand($kone(new CatalogItem(['sku' => 'M02564', 'brand' => 'Оборудование и запчасти ЭСКАЛАТОРОВ (мульти-бренд)']))));
+        $this->assertSame('KONE', $svc->itemBrand($kone(new CatalogItem(['sku' => 'M00001', 'brand' => null]))));
+        $this->assertSame('KONE', $svc->itemBrand($kone(null)));
+    }
 }

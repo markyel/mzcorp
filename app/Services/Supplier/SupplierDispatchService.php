@@ -359,12 +359,27 @@ class SupplierDispatchService
             $rows[] = [
                 'name' => $this->itemName($it, $names, $lang),
                 'oem' => $this->itemOem($it, $oem),
-                'brand' => ($it->brand?->name ?: $it->parsed_brand) ?: null,
+                'brand' => $this->itemBrand($it),
                 'qty' => $this->itemQty($it, $qty, $lang),
             ];
         }
 
         return $rows;
+    }
+
+    /**
+     * Бренд позиции для письма: сматчена с каталогом — бренд из нашей базы, как название и артикул (18.11.2026,
+     * MZ2026-02150: клиент написал «для Gen2 … FAA20780R1», разбор придумал KONE, в каталоге OTIS). Каталожное
+     * «мульти-бренд» — не бренд. Иначе — бренд из базы знаний, иначе распознанный у клиента.
+     */
+    public function itemBrand(RequestItem $it): ?string
+    {
+        $catalog = $it->catalog_item_id ? trim((string) $it->catalogItem?->brand) : '';
+        if ($catalog !== '' && ! preg_match('/мульти|multi/iu', $catalog)) {
+            return $catalog;
+        }
+
+        return ($it->brand?->name ?: $it->parsed_brand) ?: null;
     }
 
     /**
