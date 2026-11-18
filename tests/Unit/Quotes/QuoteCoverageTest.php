@@ -54,6 +54,18 @@ class QuoteCoverageTest extends TestCase
         $this->assertSame([2], $this->ids(QuoteCoverageService::uncoveredOf($items, $lines)));
     }
 
+    public function test_delivery_and_a_bonus_card_from_the_signature_are_not_goods(): void
+    {
+        // MZ2026-01114 / M-2026-3076: «Бонусная карта №20006176» из подписи клиента; MZ2026-01708 — доставка строкой заявки.
+        $card = $this->item(2);
+        $card->parsed_name = 'Бонусная карта №20006176';
+        $delivery = $this->item(3);
+        $delivery->parsed_name = 'Доставка Деловые Линии по адресу Ижевск';
+        $items = collect([$this->item(1, 100), $card, $delivery]);
+
+        $this->assertSame([], $this->ids(QuoteCoverageService::uncoveredOf($items, collect([$this->line('Плата', 1, 100)]))));
+    }
+
     public function test_manager_marks_and_mzcorp_quotations_cover_items(): void
     {
         $items = collect([$this->item(1), $this->item(2, null, QuoteCoverageService::RESOLUTION_DECLINED), $this->item(3, null, QuoteCoverageService::RESOLUTION_SUBSTITUTE), $this->item(4)]);

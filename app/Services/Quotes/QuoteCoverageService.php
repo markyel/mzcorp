@@ -42,6 +42,12 @@ class QuoteCoverageService
     /** Служебные строки КП: не товар. */
     private const SERVICE_LINE = '/^\s*(доставка|упаковка|транспорт|экспресс|экспедир|курьер)/iu';
 
+    /**
+     * Позиции заявки, которые не товар: доставка, вписанная клиентом строкой, и «Бонусная карта №…» из подписи
+     * клиента, принятая парсером за позицию (MZ2026-01114, M-2026-3076). КП на них не дают — непокрытыми не считаем.
+     */
+    private const NOT_GOODS_ITEM = '/^\s*(доставка|упаковка|транспорт|экспедир|курьер)|бонусн\p{L}*\s+карт/iu';
+
     private static bool $syncing = false;
 
     public function __construct(private readonly RequestStateService $states) {}
@@ -79,6 +85,7 @@ class QuoteCoverageService
         $byCatalog = $lines->pluck('matched_catalog_item_id')->filter()->map(fn ($id) => (int) $id)->all();
 
         $open = $items->reject(fn (RequestItem $i) => $i->quote_resolution !== null
+            || preg_match(self::NOT_GOODS_ITEM, (string) $i->parsed_name) === 1
             || in_array((int) $i->id, $byItem, true)
             || ($i->catalog_item_id !== null && in_array((int) $i->catalog_item_id, $byCatalog, true)))->values();
         if ($open->isEmpty()) {
