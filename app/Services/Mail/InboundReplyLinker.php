@@ -370,11 +370,22 @@ class InboundReplyLinker
 
         // Pool: входящее от клиента → ClientReplied (требует внимания).
         // sent_at — стабильный порядок при бэкфилле/перезапуске sync'а.
-        $this->activity->touch(
-            $request,
-            \App\Enums\RequestActivityType::ClientReplied,
-            $message->sent_at ?: now(),
-        );
+        // Автоответ, письмо коллеги или mzCorp, одно «спасибо» хода нам не передают (18.11.2026, «Заброшенные»):
+        // письмо в треде, а последнее событие заявки остаётся прежним.
+        $notReply = app(ClientReplySignal::class)->notAClientReply($message);
+        if ($notReply === null) {
+            $this->activity->touch(
+                $request,
+                \App\Enums\RequestActivityType::ClientReplied,
+                $message->sent_at ?: now(),
+            );
+        } else {
+            Log::info('InboundReplyLinker: linked, but not a client reply — the ball stays', [
+                'email_message_id' => $message->id,
+                'request_id' => $request->id,
+                'reason' => $notReply,
+            ]);
+        }
 
         Log::info('InboundReplyLinker: linked to existing Request', [
             'email_message_id' => $message->id,

@@ -195,6 +195,18 @@ class InternalSenderDetector
             ->exists();
     }
 
+    /** Среди получателей (to/cc) есть не наш адрес — письмо уходит наружу, а не коллеге. */
+    public function hasExternalRecipient(EmailMessage $message): bool
+    {
+        foreach ($this->recipientEmails($message) as $email) {
+            if ($this->internalReason($email) === null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function isPublicMailDomain(string $domain): bool
     {
         $domains = array_filter(array_map(

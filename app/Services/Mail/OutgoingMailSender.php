@@ -229,6 +229,11 @@ class OutgoingMailSender
             ]);
         });
 
+        // Письмо клиенту по заявке — ход передан клиенту (ManagerReplied), как у письма, найденного в «Отправленных»
+        // (OutgoingMailLinker). Там заявка уже стоит — линкер выходит раньше, и отправленное из mzCorp признак
+        // «клиент ответил последним» не снимало: заявка висела в «Заброшенных» (18.11.2026, MZ2026-01209).
+        $this->markClientLetter($draft);
+
         // Счётчик показов рекламного блока (non-fatal).
         $blockId = $draft->detected_artifacts[\App\Services\Marketing\MarketingBlockService::ARTIFACT_BLOCK_ID] ?? null;
         if ($blockId) {
@@ -257,6 +262,29 @@ class OutgoingMailSender
         }
 
         return ['success' => true, 'draft' => $draft->fresh()];
+    }
+
+    /**
+     * Отправленное письмо — клиенту заявки: ход у клиента. Поставщику (запрос, ответ, напоминание) и коллеге —
+     * нет: у заявки ничего не меняется. Тип уточняют потом хуки КП / счёта / уточнения (RequestStateService).
+     */
+    private function markClientLetter(EmailMessage $draft): void
+    {
+        try {
+            $sent = $draft->fresh();
+            if ($sent === null || ! $sent->related_request_id || $sent->supplier_inquiry_id !== null
+                || (string) $sent->category === \App\Enums\EmailCategory::SupplierReply->value) {
+                return;
+            }
+            $request = \App\Models\Request::find($sent->related_request_id);
+            $internal = app(InternalSenderDetector::class);
+            if ($request === null || ! $internal->hasExternalRecipient($sent) || ! $internal->isAddressedToClient($sent, $request->client_email, $request)) {
+                return;
+            }
+            app(\App\Services\Request\RequestActivityService::class)->touch($request, \App\Enums\RequestActivityType::ManagerReplied, $sent->sent_at ?: now());
+        } catch (\Throwable $e) {
+            Log::warning('OutgoingMailSender: client letter activity failed (non-fatal)', ['draft_id' => $draft->id, 'error' => $e->getMessage()]);
+        }
     }
 
     /**
