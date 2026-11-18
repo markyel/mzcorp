@@ -16,7 +16,11 @@ use Illuminate\Support\Collection;
  */
 class SupplierManualSearch
 {
+    /** Сколько поставщиков видно сразу; остальные — по «ещё N — показать всех» (partials.supplier-manual-search-results). */
     public const LIMIT = 8;
+
+    /** Сколько поставщиков отдаём всего: «показать всех» по «unisystem» — все «… через UniSystem» (18.11.2026). */
+    public const MAX = 50;
 
     /** Сколько совпавших адресов читаем, чтобы набрать LIMIT поставщиков. */
     private const SCAN = 200;
@@ -124,6 +128,6 @@ class SupplierManualSearch
         };
         usort($out, fn ($a, $b) => [$rank($a), mb_strtolower($a['name'])] <=> [$rank($b), mb_strtolower($b['name'])]);
 
-        return array_slice($out, 0, self::LIMIT);
+        return array_slice($out, 0, self::MAX);
     }
 }

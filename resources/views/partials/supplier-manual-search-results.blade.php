@@ -3,12 +3,21 @@
     Клик по строке — в запрос встаёт представитель, кому именно отправить, выберет QuoteParts.
     Под строкой — адреса, совпавшие с поиском по e-mail: выбрать конкретный ящик.
     Поставщик или адрес, уже стоящий в списке, помечен «уже в списке»: клик его отмечает.
+    Сразу видны первые SupplierManualSearch::LIMIT; остальные — «ещё N — показать всех» (до MAX), со своей прокруткой
+    (18.11.2026: по «unisystem» нужны все «… через UniSystem», а видно было 8).
     Ожидает $results (SupplierManualSearch::search) и Livewire-метод addSupplier(id).
 --}}
 @if($results !== [])
-    <div class="mt-1 border border-border rounded-md divide-y divide-border-subtle" style="max-width: 420px">
-        @foreach($results as $r)
-            <div wire:key="sup-search-{{ $r['key'] }}">
+    @php
+        $limit = \App\Services\Supplier\SupplierManualSearch::LIMIT;
+        $more = max(0, count($results) - $limit);
+        $capped = count($results) >= \App\Services\Supplier\SupplierManualSearch::MAX;
+    @endphp
+    <div x-data="{ all: false }" wire:key="sup-search-list-{{ md5(implode(',', array_column($results, 'key'))) }}"
+         class="mt-1 border border-border rounded-md divide-y divide-border-subtle" style="max-width: 420px"
+         x-bind:style="all ? { maxHeight: '360px', overflowY: 'auto' } : {}">
+        @foreach($results as $i => $r)
+            <div wire:key="sup-search-{{ $r['key'] }}" @if($i >= $limit) x-show="all" x-cloak @endif>
                 <button type="button" wire:click="addSupplier({{ $r['representative_id'] }})" class="w-full text-left px-3 py-1.5 hover:bg-hover text-[12.5px]"
                         title="{{ $r['in_request'] ? 'Поставщик уже в списке выше — отметить его' : 'Добавить поставщика: кому именно отправить, выберет QuoteParts (контакт «Расценка»)' }}">
                     {{ $r['name'] }}
@@ -28,5 +37,12 @@
                 @endforeach
             </div>
         @endforeach
+        @if($more > 0)
+            <button type="button" x-show="! all" x-on:click="all = true" class="w-full text-left px-3 py-1.5 hover:bg-hover text-[12px]" style="color: var(--sky-700)">
+                ещё {{ $more }} — показать всех</button>
+            @if($capped)
+                <div x-show="all" x-cloak class="px-3 py-1.5 text-[11.5px] text-fg-4">Показаны первые {{ count($results) }} — уточните поиск, чтобы найти остальных.</div>
+            @endif
+        @endif
     </div>
 @endif

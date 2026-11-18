@@ -107,7 +107,8 @@ class SupplierManualSearchTest extends TestCase
 
         $out = SupplierManualSearch::group(collect($rows), collect($rows), 'unisystem');
 
-        $this->assertCount(SupplierManualSearch::LIMIT, $out);
+        // Все десять — не только первые LIMIT: остальные открываются «показать всех».
+        $this->assertCount(10, $out);
         $this->assertSame('UniSystem', $out[0]['name']);
     }
 
