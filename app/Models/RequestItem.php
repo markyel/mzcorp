@@ -59,6 +59,8 @@ class RequestItem extends Model
         'quote_resolved_at',
         // У позиции без КП появилась цена — напомнили «можно дослать КП» (quotes:partial-price-ready).
         'quote_price_ready_at',
+        // «Ответим позже» по позиции без КП — в карточке свёрнута до появления цены; покрытием не считается.
+        'quote_deferred_at',
         // Phase 2.0 KB resolutions:
         'identification_category_id',
         'manufacturer_brand_id',
@@ -99,6 +101,7 @@ class RequestItem extends Model
             'possibly_discontinued' => 'boolean',
             'quote_resolved_at' => 'datetime',
             'quote_price_ready_at' => 'datetime',
+            'quote_deferred_at' => 'datetime',
             'quality_assessment_payload' => 'array',
             'suggestion_confidence' => 'float',
             'suggestion_source_email_id' => 'integer',

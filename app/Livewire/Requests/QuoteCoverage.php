@@ -83,6 +83,13 @@ class QuoteCoverage extends Component
         // Перенесённую в заявку-остаток позицию не возвращают: работа по ней идёт там.
         abort_if($item->quote_resolution === QuoteCoverageService::RESOLUTION_CARRIED_OVER || $this->isClosed, 422);
 
+        if ($action === 'later' || $action === 'unlater') {
+            // «Ответим позже» — только свернуть в карточке: позиция по-прежнему без КП, статус не меняется.
+            $item->forceFill(['quote_deferred_at' => $action === 'later' ? now() : null])->save();
+            $this->refreshCoverage();
+
+            return;
+        }
         if ($action === 'not_needed') {
             // «Клиенту не нужно» — позиция отключается; наблюдатель позиций пересчитает статус.
             $item->forceFill(['is_active' => false])->save();
