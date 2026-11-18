@@ -40,7 +40,9 @@
                    style="flex: none; padding: 4px 10px; font-size: 11.5px; color: var(--sky-700); white-space: nowrap; text-decoration: none;">карточка ↗</a>
                 </div>
                 @if(count($r['all_emails'] ?? []) > 1)
-                    <div x-show="addr" x-cloak style="background: var(--bg-surface-2);">
+                    {{-- Фон списка серый, как обычная подсветка строки — подсветка своя, голубая (иначе наведения не видно). --}}
+                    <style>.sup-addr-list > button:hover { background: var(--bg-selected, #eef6fc); }</style>
+                    <div x-show="addr" x-cloak class="sup-addr-list" style="background: var(--bg-surface-2);">
                         @foreach($r['all_emails'] as $e)
                             <button type="button" wire:click="addSupplier({{ $e['id'] }})" class="w-full text-left hover:bg-hover text-[11.5px] text-fg-3" style="padding: 3px 12px 3px 24px"
                                     title="{{ $e['in_request'] ? 'Адрес уже в списке выше — отметить его' : 'Отправить именно на этот адрес' }}">
