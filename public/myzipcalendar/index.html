@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<!-- myzipcalendar.ru — «Календарь Мой ЗиП в подарок подписчикам канала». Статичная страница в стиле myzip.ru
+     (Roboto, красный #E94A4B, тёмный #373D53, кнопки со скруглением 5px). Раздаёт nginx (sites-available/myzipcalendar.conf)
+     из /var/www/mzcorp/public/myzipcalendar — обновляется обычной выкладкой mzCorp. Запись — бот заявок ?start=calendar
+     (App\Services\CalendarGift\CalendarGiftFlow), список получателей — mzCorp /dashboard/calendar-gift. -->
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Календарь Мой ЗиП 2027 в подарок</title>
+    <meta name="description" content="Фирменный календарь Мой ЗиП на 2027 год в подарок подписчикам нашего канала в Telegram и MAX. Подпишитесь и укажите адрес в нашем боте.">
+    <meta property="og:title" content="Календарь Мой ЗиП 2027 в подарок">
+    <meta property="og:description" content="Подпишитесь на канал Мой ЗиП в Telegram или MAX и получите фирменный календарь.">
+    <meta property="og:image" content="https://myzipcalendar.ru/logo.png">
+    <meta property="og:url" content="https://myzipcalendar.ru/">
+    <link rel="icon" href="logo.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap&subset=cyrillic" rel="stylesheet">
+    <style>
+        :root {
+            --red: #e94a4b;
+            --red-dark: #d23b3c;
+            --dark: #373d53;
+            --ink: #050505;
+            --muted: #6b7080;
+            --line: #e6e8ec;
+            --soft: #f6f7f8;
+            --footer: #23272a;
+        }
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body { margin: 0; font-family: Roboto, Arial, sans-serif; color: var(--ink); background: #fff; font-size: 16px; line-height: 1.55; }
+        a { color: inherit; }
+        .wrap { max-width: 1110px; margin: 0 auto; padding-inline: 20px; }
+
+        /* Шапка, как на myzip.ru: логотип слева, контакты справа. */
+        .top { border-bottom: 1px solid var(--line); background: #fff; }
+        .top .wrap { display: flex; align-items: center; gap: 16px; padding-block: 14px; flex-wrap: wrap; }
+        .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+        .brand img { width: 52px; height: auto; display: block; }
+        .brand b { display: block; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; color: var(--dark); }
+        .brand span { display: block; font-size: 13px; color: var(--muted); }
+        .contacts { margin-left: auto; display: flex; gap: 20px; flex-wrap: wrap; font-size: 15px; font-weight: 500; }
+        .contacts a { text-decoration: none; white-space: nowrap; }
+        .contacts a:hover { color: var(--red); }
+
+        /* Первый экран. */
+        .hero { background: var(--soft); }
+        .hero .wrap { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); gap: 40px; align-items: center; padding-block: 56px; }
+        .eyebrow { display: inline-block; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--red); margin-bottom: 14px; }
+        h1 { margin: 0 0 16px; font-size: clamp(30px, 4.4vw, 46px); line-height: 1.12; font-weight: 500; color: var(--dark); text-wrap: balance; }
+        h1 em { font-style: normal; color: var(--red); }
+        .lead { margin: 0 0 28px; font-size: 18px; color: #3d4252; max-width: 34em; }
+        .ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 14px 26px; border-radius: 5px; font-size: 16px; font-weight: 500;
+               text-decoration: none; border: 2px solid var(--red); transition: background .15s, color .15s; }
+        .btn-red { background: var(--red); color: #fff; }
+        .btn-red:hover { background: var(--red-dark); border-color: var(--red-dark); }
+        .btn-line { background: #fff; color: var(--red); }
+        .btn-line:hover { background: var(--red); color: #fff; }
+        .btn svg { width: 20px; height: 20px; flex: none; }
+        .note { margin-top: 14px; font-size: 14px; color: var(--muted); }
+
+        /* Обложка календаря — набросок: лист с кольцами и сеткой месяца. */
+        .cover { justify-self: center; width: min(340px, 100%); aspect-ratio: 3 / 3.6; background: #fff; border-radius: 6px; position: relative;
+                 box-shadow: 0 24px 48px -20px rgba(55, 61, 83, .35), 0 2px 6px rgba(55, 61, 83, .08); padding: 34px 26px 22px; display: flex; flex-direction: column; }
+        .cover::before { content: ""; position: absolute; top: 12px; left: 30px; right: 30px; height: 10px;
+                         background: radial-gradient(circle, var(--dark) 3.5px, transparent 4px) 0 50% / 24px 10px repeat-x; }
+        .cover-photo { flex: 1; border-radius: 4px; background: linear-gradient(160deg, var(--dark) 0%, #4c5470 55%, var(--red) 140%); display: flex; align-items: flex-end; padding: 16px; }
+        .cover-photo img { width: 64px; filter: brightness(0) invert(1); opacity: .9; }
+        .cover-year { display: flex; align-items: baseline; justify-content: space-between; margin-top: 14px; }
+        .cover-year b { font-size: 34px; font-weight: 700; color: var(--dark); letter-spacing: -0.02em; }
+        .cover-year span { font-size: 13px; color: var(--muted); }
+        .cover-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 10px; }
+        .cover-grid i { height: 7px; border-radius: 2px; background: var(--line); }
+        .cover-grid i.on { background: var(--red); }
+
+        /* Шаги. */
+        section.block { padding-block: 56px; }
+        h2 { margin: 0 0 28px; font-size: clamp(24px, 3vw, 32px); font-weight: 500; color: var(--dark); text-wrap: balance; }
+        .steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; counter-reset: step; }
+        .steps li { counter-increment: step; border: 1px solid var(--line); border-radius: 6px; padding: 24px 22px; background: #fff; display: flex; flex-direction: column; gap: 8px; }
+        .steps li::before { content: counter(step); width: 40px; height: 40px; border-radius: 50%; background: var(--red); color: #fff; font-weight: 700; font-size: 18px;
+                            display: flex; align-items: center; justify-content: center; margin-bottom: 6px; }
+        .steps b { font-size: 18px; font-weight: 500; color: var(--dark); }
+        .steps p { margin: 0; color: #3d4252; font-size: 15px; }
+
+        /* Вопросы. */
+        .faq-bg { background: var(--soft); }
+        .faq { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 32px; }
+        .faq div { border-top: 2px solid var(--red); padding-top: 12px; }
+        .faq b { display: block; font-weight: 500; font-size: 17px; color: var(--dark); margin-bottom: 4px; }
+        .faq p { margin: 0; color: #3d4252; font-size: 15px; }
+
+        /* Призыв внизу. */
+        .bottom { text-align: center; }
+        .bottom .ctas { justify-content: center; }
+
+        footer { background: var(--footer); color: #c9ccd3; font-size: 14px; }
+        footer .wrap { display: flex; gap: 24px; flex-wrap: wrap; justify-content: space-between; padding-block: 28px; }
+        footer a { color: #fff; text-decoration: none; }
+        footer a:hover { color: var(--red); }
+        footer .links { display: flex; gap: 18px; flex-wrap: wrap; }
+
+        @media (max-width: 860px) {
+            .hero .wrap { grid-template-columns: minmax(0, 1fr); padding-block: 36px; }
+            .cover { width: min(260px, 80%); }
+            .steps, .faq { grid-template-columns: minmax(0, 1fr); }
+            .contacts { margin-left: 0; flex: 1 1 100%; min-width: 0; gap: 6px 16px; font-size: 14px; }
+        }
+        @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .btn { transition: none; } }
+        .btn:focus-visible, a:focus-visible { outline: 3px solid rgba(233, 74, 75, .45); outline-offset: 2px; }
+    </style>
+</head>
+<body>
+<header class="top">
+    <div class="wrap">
+        <a class="brand" href="https://www.myzip.ru/">
+            <img src="logo.svg" alt="Мой ЗиП">
+            <span><b>Мой ЗиП</b><span>Запчасти для лифтов и эскалаторов</span></span>
+        </a>
+        <nav class="contacts" aria-label="Контакты">
+            <a href="tel:+74955653772">+7 (495) 565-37-72</a>
+            <a href="tel:88003336472">8 (800) 333-64-72</a>
+            <a href="mailto:info@myzip.ru">info@myzip.ru</a>
+        </nav>
+    </div>
+</header>
+
+<main>
+    <section class="hero">
+        <div class="wrap">
+            <div>
+                <span class="eyebrow">Подарок подписчикам</span>
+                <h1>Фирменный календарь <em>Мой ЗиП 2027</em> — для вас</h1>
+                <p class="lead">Подпишитесь на наш канал в Telegram или MAX и укажите, куда отправить календарь. Всё делается в нашем боте за пару минут.</p>
+                <div class="ctas">
+                    <a class="btn btn-red" href="https://t.me/myziporderbot?start=calendar">
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.9 4.3 18.7 19.4c-.2 1.1-.9 1.3-1.8.8l-4.9-3.6-2.4 2.3c-.3.3-.5.5-1 .5l.4-5 9.1-8.2c.4-.4-.1-.6-.6-.2L6.2 13 1.4 11.5c-1-.3-1.1-1 .2-1.5L20.5 2.8c.9-.3 1.7.2 1.4 1.5Z"/></svg>
+                        Получить через Telegram</a>
+                    <a class="btn btn-line" href="https://max.ru/id7715802492_1_bot?start=calendar">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-4-7.5L21 3l-1 4.5A9 9 0 0 1 21 12Z"/></svg>
+                        Получить через MAX</a>
+                </div>
+                <p class="note">Откроется бот Мой ЗиП — он проверит подписку и спросит адрес доставки.</p>
+            </div>
+            <div class="cover" aria-hidden="true">
+                <div class="cover-photo"><img src="logo.svg" alt=""></div>
+                <div class="cover-year"><b>2027</b><span>Мой ЗиП</span></div>
+                <div class="cover-grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="block">
+        <div class="wrap">
+            <h2>Как получить календарь</h2>
+            <ol class="steps">
+                <li><b>Откройте нашего бота</b><p>Нажмите «Получить через Telegram» или «Получить через MAX» — откроется бот Мой ЗиП.</p></li>
+                <li><b>Подпишитесь на канал</b><p>Бот пришлёт ссылку на канал. Подпишитесь и нажмите в боте «Я подписался» — он проверит подписку.</p></li>
+                <li><b>Укажите, куда отправить</b><p>Имя получателя, компанию, телефон и адрес. Когда календарь будет в пути, бот напишет вам.</p></li>
+            </ol>
+        </div>
+    </section>
+
+    <section class="block faq-bg">
+        <div class="wrap">
+            <h2>Вопросы</h2>
+            <div class="faq">
+                <div><b>Что за каналы?</b><p>Канал Мой ЗиП в <a href="https://t.me/myzipru">Telegram</a> и в <a href="https://max.ru/channel_myzip">MAX</a>: новинки каталога, наличие и полезное о запчастях для лифтов и эскалаторов.</p></div>
+                <div><b>Можно ли получить нескольким сотрудникам?</b><p>Да. Календарь получит каждый подписчик, который оставит заявку в боте.</p></div>
+                <div><b>Бот говорит, что не видит подписку</b><p>Проверьте, что подписались именно на канал Мой ЗиП в том же мессенджере, где открыт бот, и нажмите «Я подписался» ещё раз.</p></div>
+                <div><b>Как изменить адрес?</b><p>Откройте бота по ссылке на этой странице ещё раз и нажмите «Изменить данные».</p></div>
+                <div><b>Зачем вам мои данные?</b><p>Только чтобы отправить календарь. Подробнее — в <a href="https://www.myzip.ru/politika.pdf">Политике обработки персональных данных</a>.</p></div>
+                <div><b>Остались вопросы?</b><p>Напишите на <a href="mailto:info@myzip.ru">info@myzip.ru</a> или позвоните <a href="tel:+74955653772">+7 (495) 565-37-72</a>.</p></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="block bottom">
+        <div class="wrap">
+            <h2>Заберите свой календарь</h2>
+            <div class="ctas">
+                <a class="btn btn-red" href="https://t.me/myziporderbot?start=calendar">Получить через Telegram</a>
+                <a class="btn btn-line" href="https://max.ru/id7715802492_1_bot?start=calendar">Получить через MAX</a>
+            </div>
+        </div>
+    </section>
+</main>
+
+<footer>
+    <div class="wrap">
+        <span>© ООО «Мой Лифт» · Мой ЗиП — запчасти для лифтов и эскалаторов</span>
+        <span class="links">
+            <a href="https://www.myzip.ru/">myzip.ru</a>
+            <a href="https://www.mylift.ru/">mylift.ru</a>
+            <a href="https://www.myzip.ru/politika.pdf">Политика обработки данных</a>
+        </span>
+    </div>
+</footer>
+</body>
+</html>
