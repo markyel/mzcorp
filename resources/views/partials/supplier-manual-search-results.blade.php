@@ -18,7 +18,9 @@
          x-bind:style="all ? { maxHeight: '360px', overflowY: 'auto' } : {}">
         @foreach($results as $i => $r)
             <div wire:key="sup-search-{{ $r['key'] }}" @if($i >= $limit) x-show="all" x-cloak @endif>
-                <button type="button" wire:click="addSupplier({{ $r['representative_id'] }})" class="w-full text-left px-3 py-1.5 hover:bg-hover text-[12.5px]"
+                {{-- Справа — карточка поставщика в новой вкладке (организация, иначе адрес из реестра): посмотреть, кто это. --}}
+                <div style="display: flex; align-items: center;">
+                <button type="button" wire:click="addSupplier({{ $r['representative_id'] }})" class="w-full text-left px-3 py-1.5 hover:bg-hover text-[12.5px]" style="flex: 1; min-width: 0;"
                         title="{{ $r['in_request'] ? 'Поставщик уже в списке выше — отметить его' : 'Добавить поставщика: кому именно отправить, выберет QuoteParts (контакт «Расценка»)' }}">
                     {{ $r['name'] }}
                     @if($r['org_id'] === null)
@@ -28,6 +30,10 @@
                     @endif
                     @if($r['in_request'])<span class="text-fg-4 text-[11px]">· уже в списке</span>@endif
                 </button>
+                <a href="{{ $r['org_id'] !== null ? route('suppliers.card', $r['org_id']) : route('suppliers.registry-edit', $r['representative_id']) }}"
+                   target="_blank" rel="noopener" title="Карточка поставщика — в новой вкладке"
+                   style="flex: none; padding: 4px 10px; font-size: 11.5px; color: var(--sky-700); white-space: nowrap; text-decoration: none;">карточка ↗</a>
+                </div>
                 @foreach($r['emails'] as $e)
                     <button type="button" wire:click="addSupplier({{ $e['id'] }})" class="w-full text-left hover:bg-hover text-[11.5px] text-fg-3" style="padding: 2px 12px 4px 24px"
                             title="{{ $e['in_request'] ? 'Адрес уже в списке выше — отметить его' : 'Отправить именно на этот адрес' }}">
