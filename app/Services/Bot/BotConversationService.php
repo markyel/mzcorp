@@ -160,6 +160,12 @@ class BotConversationService
             return;
         }
         if ($u->isStart) {
+            // Ссылка «Календарь в подарок» (?start=calendar): свой сценарий, без подтверждения e-mail.
+            if (\App\Services\CalendarGift\CalendarGiftFlow::isStartPayload((string) preg_replace('/^\/start\s*/u', '', $text))) {
+                app(\App\Services\CalendarGift\CalendarGiftFlow::class)->start($chat, $this->sayTo($chat));
+
+                return;
+            }
             $chat->stateForget('awaiting', 'flow');
             $chat->save();
             $this->say($chat, 'Здравствуйте! Это бот MyZip — запчасти для лифтов и эскалаторов. '
@@ -178,6 +184,20 @@ class BotConversationService
         }
 
         $awaiting = (string) $chat->stateGet('awaiting', '');
+
+        // Анкета «Календарь в подарок»: имя, компания, телефон, адрес — до общих правил (артикулы, файлы, e-mail).
+        if (str_starts_with($awaiting, 'cal_')) {
+            $flow = app(\App\Services\CalendarGift\CalendarGiftFlow::class);
+            if ($u->contactPhone !== null && $awaiting === 'cal_phone') {
+                $flow->onAnswer($chat, $awaiting, $u->contactPhone, $this->sayTo($chat));
+            } elseif ($u->files !== [] || $u->isEmpty()) {
+                $this->say($chat, 'Пришлите, пожалуйста, ответ текстом.');
+            } else {
+                $flow->onAnswer($chat, $awaiting, $text, $this->sayTo($chat));
+            }
+
+            return;
+        }
 
         // «Ответить» и полчаса тишины — разговор по заявке закончен, следующее сообщение уже не к ней
         // (MZ2026-00881, 11.11.2026: режим держался до «Готово, в меню», артикул через час ушёл бы в заявку).
@@ -278,6 +298,13 @@ class BotConversationService
     private function onButton(MessengerChat $chat, string $data): void
     {
         [$action, $arg] = array_pad(explode(':', $data, 2), 2, null);
+
+        // «Календарь в подарок» — без подтверждения e-mail.
+        if (str_starts_with($action, 'cal_')) {
+            app(\App\Services\CalendarGift\CalendarGiftFlow::class)->onButton($chat, $action, $this->sayTo($chat));
+
+            return;
+        }
 
         // До подтверждения e-mail — только кнопки самого подтверждения.
         if (! $chat->isVerified() && ! in_array($action, ['code_resend', 'email_change'], true)) {
@@ -1203,5 +1230,11 @@ class BotConversationService
             'text' => $html,
             'meta' => $ok ? null : ['send_failed' => true],
         ]);
+    }
+
+    /** Отправка в этот чат для сценариев вне сервиса (CalendarGiftFlow): fn (string $html, array $buttons = []). */
+    private function sayTo(MessengerChat $chat): \Closure
+    {
+        return fn (string $html, array $buttons = []) => $this->say($chat, $html, $buttons);
     }
 }

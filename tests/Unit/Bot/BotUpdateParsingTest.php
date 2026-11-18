@@ -65,6 +65,9 @@ class BotUpdateParsingTest extends TestCase
 
         $start = BotUpdate::fromMax(['update_type' => 'bot_started', 'chat_id' => 9001, 'user' => ['user_id' => 501], 'timestamp' => 7]);
         $this->assertTrue($start->isStart);
+        $this->assertSame('/start', $start->text);
+        // Ссылка с меткой max.ru/бот?start=calendar — как «/start calendar» в Telegram.
+        $this->assertSame('/start calendar', BotUpdate::fromMax(['update_type' => 'bot_started', 'chat_id' => 9001, 'user' => ['user_id' => 501], 'timestamp' => 8, 'payload' => 'calendar'])->text);
 
         $this->assertNull(BotUpdate::fromMax(['update_type' => 'message_created', 'message' => [
             'sender' => ['user_id' => 501], 'recipient' => ['chat_id' => -5, 'chat_type' => 'chat'], 'body' => ['text' => 'x'],

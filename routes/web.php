@@ -155,6 +155,9 @@ Route::middleware('auth')->group(function () {
         Route::get('/dashboard/calendar-poll', fn () => view('calendar-poll.manage'))->name('calendar-poll.manage');
         Route::get('/dashboard/calendar-poll/{poll}/winners.zip', [\App\Http\Controllers\CalendarPollAdminController::class, 'winners'])
             ->name('calendar-poll.winners');
+        // «Календарь в подарок» подписчикам каналов: кто записался через бота, проверка подписок, Excel.
+        Route::get('/dashboard/calendar-gift', fn () => view('calendar-gift.index'))->name('calendar-gift.index');
+        Route::get('/dashboard/calendar-gift/export.xlsx', \App\Http\Controllers\CalendarGiftExportController::class)->name('calendar-gift.export');
     });
 
     // Заявки — пул менеджера и карточка. Все 4 роли;

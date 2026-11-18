@@ -123,7 +123,8 @@ final class BotUpdate
 
             return new self(MessengerChannel::Max, 'start'.$user['user_id'].$ts, (string) $user['user_id'], (string) $chatId,
                 $user['username'] ?? null, self::maxFirstName($user), $user['last_name'] ?? null,
-                text: '/start', isStart: true);
+                // Ссылка с меткой (max.ru/бот?start=calendar) — метка в payload, как «/start calendar» в Telegram.
+                text: trim('/start '.(is_string($u['payload'] ?? null) ? $u['payload'] : '')), isStart: true);
         }
 
         if ($type !== 'message_created') {

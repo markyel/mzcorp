@@ -561,6 +561,75 @@ class BotConversationTest extends TestCase
         $draft = (array) $chat->fresh()->stateGet('draft');
         $this->assertSame([['M12345', 5.0], ['M23456', 1.0], ['M34567', 4.0]], array_map(fn ($l) => [$l['sku'], (float) $l['qty']], $draft));
     }
+
+    public function test_calendar_gift_checks_the_subscription_and_takes_the_delivery_details_without_email(): void
+    {
+        // Календарь в подарок подписчикам канала (18.11.2026): ?start=calendar, проверка подписки, анкета, список.
+        Schema::create('calendar_gift_recipients', function (Blueprint $t) {
+            $t->id();
+            $t->string('campaign', 20);
+            $t->unsignedBigInteger('messenger_chat_id')->nullable();
+            $t->string('channel', 20);
+            $t->string('external_user_id', 64);
+            $t->string('contact_name');
+            $t->string('company_name')->nullable();
+            $t->string('phone')->nullable();
+            $t->text('address');
+            $t->unsignedBigInteger('organization_id')->nullable();
+            $t->string('status', 20)->default('new');
+            $t->timestamp('consent_at')->nullable();
+            $t->boolean('subscribed')->default(false);
+            $t->timestamp('subscription_checked_at')->nullable();
+            $t->timestamp('sent_at')->nullable();
+            $t->text('note')->nullable();
+            $t->timestamps();
+        });
+        config(['services.calendar_gift.campaign' => '2027', 'services.calendar_gift.until' => null]);
+        $subscribed = false;
+        $checker = Mockery::mock(\App\Services\CalendarGift\ChannelSubscriptionChecker::class);
+        $checker->shouldReceive('channelUrl')->andReturn('https://t.me/myzipru');
+        $checker->shouldReceive('isSubscribed')->andReturnUsing(function ($channel, $userId) use (&$subscribed) {
+            $this->assertSame('77', $userId);
+
+            return $subscribed;
+        });
+        $this->app->instance(\App\Services\CalendarGift\ChannelSubscriptionChecker::class, $checker);
+        $start = function () {
+            $this->messenger->sent = [];
+            app(BotConversationService::class)->handle(new BotUpdate(MessengerChannel::Telegram, (string) ++$this->updateNo, '77', '77', 'ivan', 'Иван', null,
+                text: '/start calendar', isStart: true));
+
+            return implode("\n---\n", array_column($this->messenger->sent, 'html'));
+        };
+
+        $intro = $start();
+        $this->assertStringContainsString('Фирменный календарь MyZip 2027', $intro);
+        $this->assertStringNotContainsString('e-mail', $intro);
+        $this->assertTrue(collect($this->messenger->lastButtons())->flatten(1)->contains(fn ($b) => ($b['url'] ?? null) === 'https://t.me/myzipru'));
+
+        $this->assertStringContainsString('не вижу вашей подписки', $this->send(callback: 'cal_check'));
+        $subscribed = true;
+        $this->assertStringContainsString('Согласен', $this->send(callback: 'cal_check'));
+        $this->assertStringContainsString('Как к вам обращаться', $this->send(callback: 'cal_consent'));
+        // Артикул или e-mail в ответе — это ответ анкеты, а не цена и не подтверждение почты.
+        $this->assertStringContainsString('Компания', $this->send('Иван Петров'));
+        $this->assertStringContainsString('Телефон', $this->send('ООО «Лифт-Сервис»'));
+        $this->assertStringContainsString('не хватает цифр', $this->send('123'));
+        $this->assertStringContainsString('Адрес доставки', $this->send(phone: '+79001234567'));
+        $summary = html_entity_decode($this->send('Москва, ул. Лифтовая, д. 1, офис 5'));
+        $this->assertStringContainsString('ООО «Лифт-Сервис»', $summary);
+        $this->assertStringContainsString('Готово', $this->send(callback: 'cal_ok'));
+
+        $r = \App\Models\CalendarGiftRecipient::query()->sole();
+        $this->assertSame(['Иван Петров', 'ООО «Лифт-Сервис»', '+79001234567', 'Москва, ул. Лифтовая, д. 1, офис 5', 'new', true],
+            [$r->contact_name, $r->company_name, $r->phone, $r->address, $r->status, $r->subscribed]);
+        $this->assertNotNull($r->consent_at);
+        $this->assertFalse($this->chat()->isVerified());
+
+        // Повторный вход — «вы уже в списке», вторую запись не заводим.
+        $this->assertStringContainsString('уже в списке', $start());
+        $this->assertSame(1, \App\Models\CalendarGiftRecipient::query()->count());
+    }
 }
 
 class FakeBotMessenger implements BotMessenger

@@ -533,6 +533,14 @@ return [
         'preview_edge' => 2000,
     ],
 
+    // Календарь в подарок подписчикам каналов (App\Services\CalendarGift): ссылка на бота ?start=calendar, бот проверяет
+    // подписку на канал и спрашивает данные для доставки. campaign — год календаря (одна запись на человека в кампании),
+    // until — до какого дня (Y-m-d) принимаем, пусто — без срока. Лимита на организацию нет (решение заказчика 18.11.2026).
+    'calendar_gift' => [
+        'campaign' => (string) env('CALENDAR_GIFT_CAMPAIGN', '2027'),
+        'until' => env('CALENDAR_GIFT_UNTIL') ?: null,
+    ],
+
     // Telegram Bot API (боты заявок, медиаплан): прокси, если сервер не достаёт
     // до api.telegram.org напрямую. См. App\Support\TelegramHttp.
     'telegram' => [
