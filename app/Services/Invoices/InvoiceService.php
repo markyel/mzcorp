@@ -1173,6 +1173,21 @@ class InvoiceService
         array $context,
         bool $systemTransition,
     ): void {
+        // «Частичное КП», этап 2: счёт оплачен, заявка закрыта успехом (сейчас или раньше), а позиции без КП остались —
+        // они уходят в заявку-остаток. После коммита оплаты: статус к тому времени итоговый, а сбой здесь не откатывает
+        // отметку оплаты. Не закрыта успехом — spinOff ничего не делает.
+        if ($request !== null) {
+            $paidRequest = $request;
+            $trigger = (string) ($context['event'] ?? 'invoice_paid').':'.$invoice->id;
+            DB::afterCommit(function () use ($paidRequest, $trigger) {
+                try {
+                    app(\App\Services\Quotes\PartialQuoteRemainderService::class)->spinOff($paidRequest, $trigger);
+                } catch (\Throwable $e) {
+                    Log::warning('InvoiceService: partial quote remainder failed (non-fatal)', ['request_id' => $paidRequest->id, 'error' => $e->getMessage()]);
+                }
+            });
+        }
+
         try {
             if ($request === null) {
                 return;

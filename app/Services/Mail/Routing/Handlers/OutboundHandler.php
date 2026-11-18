@@ -3,6 +3,7 @@
 namespace App\Services\Mail\Routing\Handlers;
 
 use App\Enums\MailDirection;
+use App\Enums\RequestStatus;
 use App\Models\EmailMessage;
 use App\Services\Mail\CrossMailboxCopyMatcher;
 use App\Services\Mail\OutboundDocumentDetectionService;
@@ -10,6 +11,7 @@ use App\Services\Mail\OutgoingMailLinker;
 use App\Services\Mail\Routing\InboundRoutingHandler;
 use App\Services\Mail\Routing\RoutingContext;
 use App\Services\Mail\Routing\RoutingDecision;
+use App\Services\Quotes\PartialQuoteRemainderService;
 use App\Services\Supplier\SupplierInquiryService;
 use App\Services\Supplier\SupplierRegistry;
 use App\Services\Supplier\SupplierRfqClassifier;
@@ -50,6 +52,34 @@ final class OutboundHandler implements InboundRoutingHandler
                 'email_message_id' => $message->id,
                 'error' => $e->getMessage(),
             ]);
+        }
+
+        // Наше письмо в треде заявки, закрытой после оплаты частичного КП: КП во вложении или речь о позициях
+        // остатка — это работа по заявке-остатку (PartialQuoteRemainderService), туда и привязываем: статус
+        // «КП отправлено» и ответ клиента на это письмо пойдут в неё.
+        if ($linkedRequest !== null && $linkedRequest->status === RequestStatus::ClosedWon) {
+            try {
+                $remainders = app(PartialQuoteRemainderService::class);
+                $remainder = $remainders->remainderForMessage(
+                    $linkedRequest,
+                    app(\App\Services\Mail\CitedOutboundQuoteRouter::class)->ownBodyText($message),
+                    PartialQuoteRemainderService::hasQuotationAttachment($message),
+                );
+                if ($remainder !== null) {
+                    $message->forceFill(['related_request_id' => $remainder->id])->save();
+                    Log::info('MailRouter: our letter about the remainder of a won request → remainder request', [
+                        'email_message_id' => $message->id,
+                        'closed_request_id' => $linkedRequest->id,
+                        'remainder_request_id' => $remainder->id,
+                    ]);
+                    $linkedRequest = $remainder;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('MailRouter: partial remainder outbound routing failed (non-fatal)', [
+                    'email_message_id' => $message->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         // Обратный cross-mailbox дедуп. Наше исходящее, попавшее в копию

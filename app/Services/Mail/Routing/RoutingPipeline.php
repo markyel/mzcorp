@@ -11,6 +11,7 @@ use App\Services\Mail\Routing\Handlers\CrossMailboxCopyHandler;
 use App\Services\Mail\Routing\Handlers\ForwardedToManagerHandler;
 use App\Services\Mail\Routing\Handlers\LinkedThreadHandler;
 use App\Services\Mail\Routing\Handlers\LinkToRequestHandler;
+use App\Services\Mail\Routing\Handlers\PartialRemainderThreadHandler;
 use App\Services\Mail\Routing\Handlers\PostSaleOrderHandler;
 use App\Services\Mail\Routing\Handlers\PressReplyHandler;
 use App\Services\Mail\Routing\Handlers\LoopForwardHandler;
@@ -53,6 +54,8 @@ final class RoutingPipeline
         PressReplyHandler::class,
         CategorizeHandler::class,
         LinkToRequestHandler::class,
+        // Тред закрытой после оплаты частичного КП заявки: письмо про остаток — в заявку-остаток (дальше как ответ в открытую).
+        PartialRemainderThreadHandler::class,
         ClosedWonThreadHandler::class,
         PostSaleOrderHandler::class,
         LinkedThreadHandler::class,

@@ -34,6 +34,11 @@ class QuoteCoverageService
 
     public const RESOLUTIONS = [self::RESOLUTION_SUBSTITUTE => 'закрыто заменой', self::RESOLUTION_DECLINED => 'мы отказали'];
 
+    /** Счёт по частичному КП оплачен — позиция ушла в заявку-остаток (PartialQuoteRemainderService); менеджер её не ставит. */
+    public const RESOLUTION_CARRIED_OVER = 'carried_over';
+
+    public const LABELS = self::RESOLUTIONS + [self::RESOLUTION_CARRIED_OVER => 'перенесено в заявку-остаток'];
+
     /** Служебные строки КП: не товар. */
     private const SERVICE_LINE = '/^\s*(доставка|упаковка|транспорт|экспресс|экспедир|курьер)/iu';
 

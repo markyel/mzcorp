@@ -4,6 +4,7 @@ namespace App\Livewire\Requests;
 
 use App\Models\Request;
 use App\Models\RequestItem;
+use App\Services\Quotes\PartialQuoteRemainderService;
 use App\Services\Quotes\QuoteCoverageService;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Computed;
@@ -24,7 +25,7 @@ class QuoteCoverage extends Component
     #[On('quote-item-rematched')]
     public function refreshCoverage(): void
     {
-        unset($this->uncovered, $this->resolved, $this->hasQuote);
+        unset($this->uncovered, $this->resolved, $this->hasQuote, $this->isClosed, $this->remainder);
     }
 
     #[Computed]
@@ -44,6 +45,22 @@ class QuoteCoverage extends Component
         return $request !== null && $this->hasQuote ? app(QuoteCoverageService::class)->uncovered($request) : collect();
     }
 
+    /** Закрытой заявке не досылают КП — список «Не покрыто КП» с кнопками только у открытой. */
+    #[Computed]
+    public function isClosed(): bool
+    {
+        return (bool) Request::find($this->requestId)?->status->isTerminal();
+    }
+
+    /** Заявка-остаток (позиции без КП после оплаты частичного КП), если заведена. */
+    #[Computed]
+    public function remainder(): ?Request
+    {
+        $request = Request::find($this->requestId);
+
+        return $request !== null ? app(PartialQuoteRemainderService::class)->remainderOf($request, openOnly: false) : null;
+    }
+
     /** @return Collection<int, RequestItem> позиции, закрытые отметкой менеджера */
     #[Computed]
     public function resolved(): Collection
@@ -56,6 +73,8 @@ class QuoteCoverage extends Component
     {
         $item = RequestItem::query()->where('request_id', $this->requestId)->findOrFail($itemId);
         abort_unless(Request::find($this->requestId)?->isAccessibleBy(auth()->user()), 403);
+        // Перенесённую в заявку-остаток позицию не возвращают: работа по ней идёт там.
+        abort_if($item->quote_resolution === QuoteCoverageService::RESOLUTION_CARRIED_OVER || $this->isClosed, 422);
 
         if ($action === 'not_needed') {
             // «Клиенту не нужно» — позиция отключается; наблюдатель позиций пересчитает статус.

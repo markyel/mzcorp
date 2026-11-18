@@ -1,8 +1,10 @@
-{{-- «Не покрыто КП» (Livewire Requests\QuoteCoverage): позиции, на которые ещё не дали КП. Пусто и без отметок — ничего. --}}
+{{-- «Не покрыто КП» (Livewire Requests\QuoteCoverage): позиции, на которые ещё не дали КП. Пусто и без отметок — ничего.
+     У закрытой заявки — только отметки (в т.ч. «перенесено в заявку-остаток» со ссылкой), без кнопок. --}}
 @php
-    $open = $this->uncovered;
+    $open = $this->isClosed ? collect() : $this->uncovered;
     $done = $this->resolved;
-    $labels = \App\Services\Quotes\QuoteCoverageService::RESOLUTIONS;
+    $labels = \App\Services\Quotes\QuoteCoverageService::LABELS;
+    $remainder = $this->remainder;
 @endphp
 <div>
 @if($this->hasQuote && ($open->isNotEmpty() || $done->isNotEmpty()))
@@ -10,7 +12,7 @@
         @if($open->isNotEmpty())
             <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
                 <b style="color: var(--amber-800, #92400e);">Не покрыто КП: {{ $open->count() }}</b>
-                <span class="text-fg-3">по этим позициям клиент ещё не получил предложения — заявка в «Частичном КП». Дошлите КП или отметьте, как закрыли позицию.</span>
+                <span class="text-fg-3">по этим позициям клиент ещё не получил предложения — заявка в «Частичном КП». Дошлите КП или отметьте, как закрыли позицию. Оплатит счёт — они уйдут в заявку-остаток.</span>
             </div>
             @foreach($open as $it)
                 <div wire:key="qc-open-{{ $it->id }}" style="padding: 6px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--border-subtle);">
@@ -36,7 +38,11 @@
                     <div wire:key="qc-done-{{ $it->id }}" style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
                         <span>{{ $it->parsed_name ?: '—' }}</span>
                         <span class="chip chip-neutral">{{ $labels[$it->quote_resolution] ?? $it->quote_resolution }}</span>
-                        <button type="button" wire:click="resolve({{ $it->id }}, 'reset')" class="text-[11.5px]" style="color: var(--sky-700); background: none; border: 0; cursor: pointer;">вернуть</button>
+                        @if($it->quote_resolution === \App\Services\Quotes\QuoteCoverageService::RESOLUTION_CARRIED_OVER)
+                            @if($remainder)<a href="{{ route('requests.show', $remainder->id) }}" wire:navigate class="mono text-[11.5px]" style="color: var(--sky-700);">{{ $remainder->internal_code }}</a>@endif
+                        @elseif(! $this->isClosed)
+                            <button type="button" wire:click="resolve({{ $it->id }}, 'reset')" class="text-[11.5px]" style="color: var(--sky-700); background: none; border: 0; cursor: pointer;">вернуть</button>
+                        @endif
                     </div>
                 @endforeach
             </div>
