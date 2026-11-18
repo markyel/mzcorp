@@ -408,6 +408,13 @@ Schedule::command('quotes:complete-partial')
     ->onOneServer()
     ->runInBackground();
 
+// «Частичное КП», этап 3: у позиции без КП появилась цена (1С / ответ поставщика) — менеджеру «можно дослать КП».
+Schedule::command('quotes:partial-price-ready')
+    ->hourlyAt(37)
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Сторож цены «закупка + наценка»: документы со строками на неактуальной цене
 // каталога ждут импорта из 1С и перепроверяются здесь (CostPlusPriceGuard).
 Schedule::command('quotes:cost-plus-recheck')

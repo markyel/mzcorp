@@ -700,6 +700,7 @@
                             $isSupplierReplied = $attnReason === \App\Enums\AttentionReason::SupplierReplied;
                             $isPricesActualized = $attnReason === \App\Enums\AttentionReason::PricesActualized;
                             $isAllSuppliersRefused = $attnReason === \App\Enums\AttentionReason::AllSuppliersRefused;
+                            $isPartialPriceReady = $attnReason === \App\Enums\AttentionReason::PartialQuotePriceReady;
                             // «Клиент молчит» — просрочка не по вине менеджера (мяч
                             // у клиента после КП / уточнения / счёта). Янтарная
                             // пометка ТОЛЬКО когда дедлайн истёк (level=1); до этого
@@ -709,7 +710,7 @@
                             // info-флаги — это «есть новости» / «новая» / «🚩 пометка»
                             // / «клиент молчит», НЕ просрочка по нашей вине. Красным
                             // фоном не подсвечиваем, «просрочено N» текстом не пишем.
-                            $isInfoFlag = $isClientReplied || $isFreshAssignment || $isManualFlag || $isSupplierReplied || $isPricesActualized || $isAllSuppliersRefused || $isClientSilence;
+                            $isInfoFlag = $isClientReplied || $isFreshAssignment || $isManualFlag || $isSupplierReplied || $isPricesActualized || $isAllSuppliersRefused || $isPartialPriceReady || $isClientSilence;
                             $isOverdueAlarm = $req->attention_level === 1 && ! $isInfoFlag;
                             $attnText = null;
                             if ($isClientReplied) {
@@ -720,6 +721,8 @@
                                 $attnText = 'ответ поставщика';
                             } elseif ($isPricesActualized) {
                                 $attnText = '💰 цены готовы';
+                            } elseif ($isPartialPriceReady) {
+                                $attnText = 'можно дослать КП';
                             } elseif ($isAllSuppliersRefused) {
                                 $attnText = '🚫 отказ поставщиков';
                             } elseif ($isManualFlag) {

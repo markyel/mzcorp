@@ -25,7 +25,7 @@ class QuoteCoverage extends Component
     #[On('quote-item-rematched')]
     public function refreshCoverage(): void
     {
-        unset($this->uncovered, $this->resolved, $this->hasQuote, $this->isClosed, $this->remainder);
+        unset($this->uncovered, $this->resolved, $this->hasQuote, $this->isClosed, $this->remainder, $this->prices);
     }
 
     #[Computed]
@@ -43,6 +43,13 @@ class QuoteCoverage extends Component
         $request = Request::find($this->requestId);
 
         return $request !== null && $this->hasQuote ? app(QuoteCoverageService::class)->uncovered($request) : collect();
+    }
+
+    /** @return array<int, string> у каких непокрытых позиций уже есть цена (QuoteCoverageService::priceSources) */
+    #[Computed]
+    public function prices(): array
+    {
+        return app(QuoteCoverageService::class)->priceSources($this->uncovered);
     }
 
     /** Закрытой заявке не досылают КП — список «Не покрыто КП» с кнопками только у открытой. */

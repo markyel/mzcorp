@@ -5,6 +5,8 @@
     $done = $this->resolved;
     $labels = \App\Services\Quotes\QuoteCoverageService::LABELS;
     $remainder = $this->remainder;
+    $prices = $open->isNotEmpty() ? $this->prices : [];
+    $priceLabels = \App\Services\Quotes\QuoteCoverageService::PRICE_LABELS;
 @endphp
 <div>
 @if($this->hasQuote && ($open->isNotEmpty() || $done->isNotEmpty()))
@@ -20,6 +22,7 @@
                         <span style="color: var(--fg-1); font-weight: 500;">{{ $it->parsed_name ?: '—' }}</span>
                         @if($it->parsed_article)<span class="mono text-fg-3" style="font-size: 11.5px;"> · {{ $it->parsed_article }}</span>@endif
                         @if($it->parsed_qty)<span class="text-fg-3"> · {{ rtrim(rtrim(number_format((float) $it->parsed_qty, 3, ',', ' '), '0'), ',') }} {{ $it->parsed_unit }}</span>@endif
+                        @if(isset($prices[$it->id]))<span class="chip chip-ok" style="margin-left: 6px;" title="Можно дослать КП по этой позиции">📤 {{ $priceLabels[$prices[$it->id]] }}</span>@endif
                         @if($it->possibly_discontinued)<span class="chip chip-warn" style="margin-left: 6px;" title="Все спрошенные поставщики отказали">возможно, не поставляется</span>@endif
                     </div>
                     <div style="display: flex; gap: 4px; flex-wrap: wrap;">

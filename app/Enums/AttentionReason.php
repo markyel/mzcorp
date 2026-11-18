@@ -41,6 +41,9 @@ namespace App\Enums;
  *   - AllSuppliersRefused 🚫 «Поставщики отказали» — по всем отслеживаемым
  *                          позициям только отказы. info-уровень. Снимается
  *                          onManagerOpened.
+ *   - PartialQuotePriceReady 📤 «Можно дослать КП» — заявка в «Частичном КП», и у позиции
+ *                          без КП появилась цена (каталог 1С / ответ поставщика;
+ *                          quotes:partial-price-ready). info, sticky до открытия карточки.
  *
  * ─────────────────────────────────────────────────────────────────────
  *  DEPRECATED (оставлены для совместимости с существующими записями БД):
@@ -60,6 +63,7 @@ enum AttentionReason: string
     // Цикл обновления цен (Фаза 3.5):
     case PricesActualized = 'prices_actualized';
     case AllSuppliersRefused = 'all_suppliers_refused';
+    case PartialQuotePriceReady = 'partial_quote_price_ready';
 
     // ──────────── deprecated, не возвращаются compute() ────────────
     case AwaitingClient = 'awaiting_client';
@@ -80,6 +84,7 @@ enum AttentionReason: string
             self::PostSale => 'Постпродажа',
             self::PricesActualized => 'Цены актуализированы',
             self::AllSuppliersRefused => 'Поставщики отказали',
+            self::PartialQuotePriceReady => 'Можно дослать КП',
             // legacy
             self::AwaitingClient => 'Жду клиента',
             self::AwaitingSupplier => 'Жду поставщика',
@@ -104,6 +109,7 @@ enum AttentionReason: string
             self::PostSale => '🛒',
             self::PricesActualized => '💰',
             self::AllSuppliersRefused => '🚫',
+            self::PartialQuotePriceReady => '📤',
             // legacy
             self::AwaitingClient => '👤',
             self::AwaitingSupplier => '📦',
@@ -127,7 +133,8 @@ enum AttentionReason: string
             self::SupplierReplied,
             self::PostSale,
             self::PricesActualized,
-            self::AllSuppliersRefused => true,
+            self::AllSuppliersRefused,
+            self::PartialQuotePriceReady => true,
             default => false,
         };
     }

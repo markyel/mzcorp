@@ -174,6 +174,7 @@ class AttentionService
             AttentionReason::PostSale->value,
             AttentionReason::PricesActualized->value,
             AttentionReason::AllSuppliersRefused->value,
+            AttentionReason::PartialQuotePriceReady->value,
         ];
         if (! in_array($this->reasonValue($request), $clearable, true)) {
             return;
@@ -223,6 +224,22 @@ class AttentionService
     }
 
     /**
+     * Hook: заявка в «Частичном КП», и у позиции без КП появилась цена — можно дослать КП
+     * (quotes:partial-price-ready). info-уровень, держится до открытия карточки.
+     */
+    public function onPartialQuotePriceReady(Request $request): void
+    {
+        if (in_array($request->status, $this->silentStatuses(), true) || $this->isManualSet($request)) {
+            return;
+        }
+        $request->forceFill([
+            'attention_required_at' => now(),
+            'attention_reason' => AttentionReason::PartialQuotePriceReady->value,
+            'attention_level' => 1,
+        ])->save();
+    }
+
+    /**
      * Hook: по всем отслеживаемым позициям заявки поставщики отказали
      * (нет ни одной актуальной цены) — нужно решение менеджера.
      */
@@ -255,6 +272,7 @@ class AttentionService
             AttentionReason::SupplierReplied->value,
             AttentionReason::PricesActualized->value,
             AttentionReason::AllSuppliersRefused->value,
+            AttentionReason::PartialQuotePriceReady->value,
         ];
         if (! in_array($this->reasonValue($request), $clearable, true)) {
             return;
@@ -317,6 +335,8 @@ class AttentionService
             AttentionReason::FreshAssignment->value,
             AttentionReason::SupplierReplied->value,
             AttentionReason::PostSale->value,
+            // «Можно дослать КП» не смывается пересчётом SLA — до открытия карточки.
+            AttentionReason::PartialQuotePriceReady->value,
         ], true);
     }
 

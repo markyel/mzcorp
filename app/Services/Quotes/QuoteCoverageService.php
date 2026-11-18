@@ -158,6 +158,45 @@ class QuoteCoverageService
         }
     }
 
+    public const PRICE_CATALOG = 'catalog';
+
+    public const PRICE_SUPPLIER = 'supplier';
+
+    public const PRICE_LABELS = [self::PRICE_CATALOG => 'цена в 1С актуальна', self::PRICE_SUPPLIER => 'поставщик назвал цену'];
+
+    /**
+     * Этап 3: у каких позиций без КП уже есть цена — можно дослать КП. Цена 1С (товар каталога, цена актуальна и
+     * больше нуля) важнее ответа поставщика на наш запрос по этой позиции (supplier_offers, outcome = quoted).
+     *
+     * @param  Collection<int, RequestItem>  $items
+     * @return array<int, string> id позиции => PRICE_CATALOG | PRICE_SUPPLIER
+     */
+    public function priceSources(Collection $items): array
+    {
+        if ($items->isEmpty()) {
+            return [];
+        }
+        $sources = [];
+
+        $supplier = DB::table('supplier_offers as o')->join('supplier_inquiry_items as ii', 'ii.id', '=', 'o.supplier_inquiry_item_id')
+            ->whereIn('ii.request_item_id', $items->pluck('id'))->where('o.outcome', 'quoted')->where('o.price', '>', 0)
+            ->distinct()->pluck('ii.request_item_id');
+        foreach ($supplier as $id) {
+            $sources[(int) $id] = self::PRICE_SUPPLIER;
+        }
+
+        $catalogIds = $items->pluck('catalog_item_id')->filter()->unique();
+        $actual = $catalogIds->isEmpty() ? collect() : DB::table('catalog_items')->whereIn('id', $catalogIds)
+            ->where('is_price_actual', true)->where('price', '>', 0)->pluck('id')->map(fn ($id) => (int) $id);
+        foreach ($items as $item) {
+            if ($item->catalog_item_id !== null && $actual->contains((int) $item->catalog_item_id)) {
+                $sources[(int) $item->id] = self::PRICE_CATALOG;
+            }
+        }
+
+        return $sources;
+    }
+
     /** @return Collection<int, object> строки отправленных КП из 1С по заявке */
     private function lines(Request $request): Collection
     {
