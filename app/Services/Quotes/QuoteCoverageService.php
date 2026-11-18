@@ -50,6 +50,26 @@ class QuoteCoverageService
 
     private static bool $syncing = false;
 
+    /** Статусы, между которыми покрытие переключает саму заявку. */
+    public const QUOTE_STATUSES = [RequestStatus::Quoted, RequestStatus::PartiallyQuoted];
+
+    /**
+     * Заявка после КП в рабочем подсостоянии («Жду клиента», «В работе» на правках, «Отложена»): веха — КП
+     * (полное или частичное), дальше сделка не ушла. Здесь покрытие переставляет веху, а не статус.
+     */
+    public static function followsQuote(Request $request): bool
+    {
+        return in_array($request->peak_status, self::QUOTE_STATUSES, true)
+            && in_array($request->status, [RequestStatus::AwaitingClientClarification, RequestStatus::InProgress, RequestStatus::PostponedUntil], true);
+    }
+
+    /** Заявка в «Частичном КП» — статусом или вехой (после КП ждём клиента и т.п.). */
+    public static function isPartial(Request $request): bool
+    {
+        return $request->status === RequestStatus::PartiallyQuoted
+            || (self::followsQuote($request) && $request->peak_status === RequestStatus::PartiallyQuoted);
+    }
+
     public function __construct(private readonly RequestStateService $states) {}
 
     /** Ушло ли по заявке хоть одно КП (из 1С с разобранными строками или собранное в mzCorp). */
@@ -111,11 +131,25 @@ class QuoteCoverageService
             return null;
         }
         $request->refresh();
-        if (! in_array($request->status, [RequestStatus::Quoted, RequestStatus::PartiallyQuoted], true) || ! $this->hasQuote($request)) {
+        $byStatus = in_array($request->status, self::QUOTE_STATUSES, true);
+        if ((! $byStatus && ! self::followsQuote($request)) || ! $this->hasQuote($request)) {
             return null;
         }
         $open = $this->uncovered($request);
         $target = $open->isNotEmpty() ? RequestStatus::PartiallyQuoted : RequestStatus::Quoted;
+
+        // После КП заявка ушла в «Жду клиента» / «В работе» / «Отложена»: статус — что делать сейчас, а чип
+        // показывает веху (peak_status). Переставляем веху «КП отправлено» ↔ «Частичное КП», статус не трогаем
+        // (MZ2026-01401: КП на одну позицию из двух, затем вопрос клиенту — в списке было «КП отправлено»).
+        if (! $byStatus) {
+            if ($request->peak_status === $target) {
+                return null;
+            }
+            $request->forceFill(['peak_status' => $target->value])->saveQuietly();
+            Log::info('QuoteCoverage: milestone synced', ['request_id' => $request->id, 'status' => $request->status->value, 'peak' => $target->value, 'reason' => $reason]);
+
+            return $target;
+        }
         if ($request->status === $target) {
             return null;
         }

@@ -59,7 +59,8 @@ class RequestItemObserver
     private function syncQuoteCoverage(RequestItem $item): void
     {
         $request = $item->request_id ? Request::find($item->request_id) : null;
-        if ($request === null || ! in_array($request->status, [\App\Enums\RequestStatus::Quoted, \App\Enums\RequestStatus::PartiallyQuoted], true)) {
+        if ($request === null || (! in_array($request->status, \App\Services\Quotes\QuoteCoverageService::QUOTE_STATUSES, true)
+            && ! \App\Services\Quotes\QuoteCoverageService::followsQuote($request))) {
             return;
         }
         try {

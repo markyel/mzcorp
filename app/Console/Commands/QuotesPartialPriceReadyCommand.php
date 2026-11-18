@@ -31,8 +31,13 @@ class QuotesPartialPriceReadyCommand extends Command
         $requests = 0;
         $items = 0;
 
-        Request::query()->where('status', RequestStatus::PartiallyQuoted->value)->orderBy('id')
+        // «Частичное КП» статусом или вехой (после КП ждём ответа клиента на вопрос и т.п.).
+        Request::query()->where(fn ($q) => $q->where('status', RequestStatus::PartiallyQuoted->value)
+            ->orWhere('peak_status', RequestStatus::PartiallyQuoted->value))->orderBy('id')
             ->each(function (Request $r) use ($coverage, $attention, $activity, $dry, &$requests, &$items) {
+                if (! QuoteCoverageService::isPartial($r)) {
+                    return;
+                }
                 $open = $coverage->uncovered($r);
                 $sources = $coverage->priceSources($open);
                 $fresh = $open->filter(fn (RequestItem $i) => isset($sources[(int) $i->id]) && $i->quote_price_ready_at === null)->values();

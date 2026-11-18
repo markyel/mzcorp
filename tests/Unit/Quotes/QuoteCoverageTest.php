@@ -66,6 +66,19 @@ class QuoteCoverageTest extends TestCase
         $this->assertSame([], $this->ids(QuoteCoverageService::uncoveredOf($items, collect([$this->line('Плата', 1, 100)]))));
     }
 
+    public function test_after_a_quote_waiting_for_the_client_follows_the_quote_milestone(): void
+    {
+        // MZ2026-01401: КП на одну позицию из двух, затем вопрос клиенту — «Жду клиента» с вехой КП.
+        $r = new \App\Models\Request;
+        $r->status = \App\Enums\RequestStatus::AwaitingClientClarification;
+        $r->peak_status = \App\Enums\RequestStatus::PartiallyQuoted;
+        $this->assertTrue(QuoteCoverageService::followsQuote($r));
+        $this->assertTrue(QuoteCoverageService::isPartial($r));
+
+        $r->peak_status = \App\Enums\RequestStatus::Invoiced; // сделка ушла дальше КП — веху не трогаем
+        $this->assertFalse(QuoteCoverageService::followsQuote($r));
+    }
+
     public function test_manager_marks_and_mzcorp_quotations_cover_items(): void
     {
         $items = collect([$this->item(1), $this->item(2, null, QuoteCoverageService::RESOLUTION_DECLINED), $this->item(3, null, QuoteCoverageService::RESOLUTION_SUBSTITUTE), $this->item(4)]);

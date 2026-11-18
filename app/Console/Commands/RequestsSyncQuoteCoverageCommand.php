@@ -23,18 +23,23 @@ class RequestsSyncQuoteCoverageCommand extends Command
         $dry = (bool) $this->option('dry-run');
         $changes = ['to_partial' => 0, 'to_quoted' => 0];
 
-        Request::query()->whereIn('status', [RequestStatus::Quoted->value, RequestStatus::PartiallyQuoted->value])
+        // Статусом («КП отправлено» / «Частичное КП») или вехой — после КП заявка ждёт клиента, на правках, отложена.
+        Request::query()->where(fn ($q) => $q->whereIn('status', [RequestStatus::Quoted->value, RequestStatus::PartiallyQuoted->value])
+            ->orWhere(fn ($q) => $q->whereIn('peak_status', [RequestStatus::Quoted->value, RequestStatus::PartiallyQuoted->value])
+                ->whereIn('status', [RequestStatus::AwaitingClientClarification->value, RequestStatus::InProgress->value, RequestStatus::PostponedUntil->value])))
             ->orderBy('id')->each(function (Request $r) use ($coverage, $dry, &$changes) {
                 if (! $coverage->hasQuote($r)) {
                     return;
                 }
                 $open = $coverage->uncovered($r);
                 $target = $open->isNotEmpty() ? RequestStatus::PartiallyQuoted : RequestStatus::Quoted;
-                if ($r->status === $target) {
+                $byStatus = in_array($r->status, QuoteCoverageService::QUOTE_STATUSES, true);
+                $current = $byStatus ? $r->status : $r->peak_status;
+                if ($current === $target) {
                     return;
                 }
                 $changes[$target === RequestStatus::PartiallyQuoted ? 'to_partial' : 'to_quoted']++;
-                $this->line(sprintf('%s  %s → %s%s', $r->internal_code, $r->status->label(), $target->label(),
+                $this->line(sprintf('%s  %s%s → %s%s', $r->internal_code, $byStatus ? '' : '['.$r->status->label().', веха] ', $current->label(), $target->label(),
                     $open->isNotEmpty() ? '  · нет КП: '.$open->map(fn ($i) => mb_strimwidth((string) $i->parsed_name, 0, 50, '…'))->implode('; ') : ''));
                 if (! $dry) {
                     $coverage->sync($r, 'backfill');

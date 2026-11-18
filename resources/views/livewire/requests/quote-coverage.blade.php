@@ -14,7 +14,7 @@
         @if($open->isNotEmpty())
             <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
                 <b style="color: var(--amber-800, #92400e);">Не покрыто КП: {{ $open->count() }}</b>
-                <span class="text-fg-3">по этим позициям клиент ещё не получил предложения — заявка в «Частичном КП». Дошлите КП или отметьте, как закрыли позицию. Оплатит счёт — они уйдут в заявку-остаток.</span>
+                <span class="text-fg-3">по этим позициям клиент ещё не получил предложения — заявка в «Частичном КП». Ответите позже — ничего не нажимайте: позиция ждёт здесь, а появится цена — придёт напоминание «можно дослать КП». Кнопки — если позицию закрыли иначе. Оплатит счёт — непокрытое уйдёт в заявку-остаток.</span>
             </div>
             @foreach($open as $it)
                 <div wire:key="qc-open-{{ $it->id }}" style="padding: 6px 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--border-subtle);">
