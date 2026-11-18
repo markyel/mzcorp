@@ -108,7 +108,21 @@ class SupplierManualSearch
             ];
         }
 
-        usort($out, fn ($a, $b) => mb_strtolower($a['name']) <=> mb_strtolower($b['name']));
+        // Сначала тот, кого и искали: название совпало или начинается с запроса, адрес на домене из запроса; потом по
+        // алфавиту. «unisystem» находил 9 «… через UniSystem», и сама UniSystem по алфавиту не входила в LIMIT (18.11.2026).
+        $rank = function (array $r) use ($needle, $matched): int {
+            $name = mb_strtolower(trim($r['name']));
+            $domainHit = $matched->contains(fn (Supplier $s) => (string) $s->supplier_organization_id === (string) $r['org_id'] || ($r['org_id'] === null && (int) $s->id === $r['representative_id'])
+                ? str_starts_with((string) substr((string) strrchr(mb_strtolower((string) $s->email), '@'), 1), $needle)
+                : false);
+
+            return match (true) {
+                $name === $needle => 0,
+                str_starts_with($name, $needle) || $domainHit => 1,
+                default => 2,
+            };
+        };
+        usort($out, fn ($a, $b) => [$rank($a), mb_strtolower($a['name'])] <=> [$rank($b), mb_strtolower($b['name'])]);
 
         return array_slice($out, 0, self::LIMIT);
     }

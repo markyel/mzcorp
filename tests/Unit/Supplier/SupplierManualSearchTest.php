@@ -95,6 +95,22 @@ class SupplierManualSearchTest extends TestCase
         $this->assertSame([['id' => 22, 'email' => 'nes@is-com.ru', 'in_request' => true]], $out[0]['emails']);
     }
 
+    /** «unisystem» (18.11.2026): девять «… через UniSystem» — сама UniSystem по алфавиту не входила в LIMIT. */
+    public function test_the_supplier_named_as_the_query_comes_first(): void
+    {
+        $rows = [];
+        foreach (['AREALIFT S.R.L. через UniSystem', 'ASTRA Запросы через UniSystem', 'Conrad Electronic через UniSystem', 'DONATI SRL через UniSystem',
+            'Henri Peignen запрос в UniSystem', 'IS Technology через UniSystem', 'MASTECH SRL через UniSystem', 'MICROSISTEMI через UniSystem', 'VEGALIFT через UniSystem'] as $i => $name) {
+            $rows[] = $this->row(100 + $i, 200 + $i, 'x'.$i.'@partner'.$i.'.it', ['quoting'], 1, $name);
+        }
+        $rows[] = $this->row(72, 3, 'info@unisystem.si', ['quoting'], 1, 'UniSystem');
+
+        $out = SupplierManualSearch::group(collect($rows), collect($rows), 'unisystem');
+
+        $this->assertCount(SupplierManualSearch::LIMIT, $out);
+        $this->assertSame('UniSystem', $out[0]['name']);
+    }
+
     /** UniSystem (18.11.2026): по «unisystem.si» предлагался alex@ — у него «Логистика», не «Расценка». */
     public function test_by_domain_only_quoting_addresses_are_offered_unless_typed_in_full(): void
     {
