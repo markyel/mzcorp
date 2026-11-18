@@ -63,12 +63,13 @@
         .note { margin-top: 14px; font-size: 14px; color: var(--muted); }
 
         /* Обложка календаря — набросок: лист с кольцами и сеткой месяца. */
-        .cover { justify-self: center; width: min(340px, 100%); aspect-ratio: 3 / 3.6; background: #fff; border-radius: 6px; position: relative;
+        .cover { justify-self: center; width: min(380px, 100%); background: #fff; border-radius: 6px; position: relative;
                  box-shadow: 0 24px 48px -20px rgba(55, 61, 83, .35), 0 2px 6px rgba(55, 61, 83, .08); padding: 34px 26px 22px; display: flex; flex-direction: column; }
         .cover::before { content: ""; position: absolute; top: 12px; left: 30px; right: 30px; height: 10px;
                          background: radial-gradient(circle, var(--dark) 3.5px, transparent 4px) 0 50% / 24px 10px repeat-x; }
-        .cover-photo { flex: 1; border-radius: 4px; background: linear-gradient(160deg, var(--dark) 0%, #4c5470 55%, var(--red) 140%); display: flex; align-items: flex-end; padding: 16px; }
-        .cover-photo img { width: 64px; filter: brightness(0) invert(1); opacity: .9; }
+        /* Фото из календаря (2016-3.tif, уменьшено до 900 px) — целиком, по его пропорциям. */
+        .cover-photo { border-radius: 4px; overflow: hidden; aspect-ratio: 900 / 623; background: var(--line); }
+        .cover-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
         .cover-year { display: flex; align-items: baseline; justify-content: space-between; margin-top: 14px; }
         .cover-year b { font-size: 34px; font-weight: 700; color: var(--dark); letter-spacing: -0.02em; }
         .cover-year span { font-size: 13px; color: var(--muted); }
@@ -105,7 +106,7 @@
 
         @media (max-width: 860px) {
             .hero .wrap { grid-template-columns: minmax(0, 1fr); padding-block: 36px; }
-            .cover { width: min(260px, 80%); }
+            .cover { width: min(340px, 92%); }
             .steps, .faq { grid-template-columns: minmax(0, 1fr); }
             .contacts { margin-left: 0; flex: 1 1 100%; min-width: 0; gap: 6px 16px; font-size: 14px; }
         }
@@ -146,7 +147,7 @@
                 <p class="note">Откроется бот Мой ЗиП — он проверит подписку и спросит адрес доставки.</p>
             </div>
             <div class="cover" aria-hidden="true">
-                <div class="cover-photo"><img src="logo.svg" alt=""></div>
+                <div class="cover-photo"><img src="photo.jpg" alt="Фото из календаря Мой ЗиП" width="900" height="623"></div>
                 <div class="cover-year"><b>2027</b><span>Мой ЗиП</span></div>
                 <div class="cover-grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
             </div>
