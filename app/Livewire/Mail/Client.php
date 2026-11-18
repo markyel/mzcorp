@@ -1357,6 +1357,27 @@ class Client extends Component
             ->get(['id', 'internal_code', 'status', 'onec_number'])->keyBy('id');
     }
 
+    /**
+     * Письма о заявке без привязки к ней — уведомления mzCorp («Цены собраны, можно выбирать · MZ2026-01881»),
+     * копии писем поставщиков, пересылки: заявка по номеру в теме, как подсказка в открытом письме (hintedRequest).
+     * У строки те же чипы — номер, стадия, 1С (18.11.2026: в письме подсказка была, в списке — нет).
+     *
+     * @return array<int, Request> id письма => заявка
+     */
+    #[Computed]
+    public function subjectRequests(): array
+    {
+        $codes = $this->threads->filter(fn ($m) => ! $m->related_request_id && ! $m->notice_request_id)
+            ->mapWithKeys(fn ($m) => [$m->id => \App\Support\RequestCode::find((string) $m->subject)])->filter();
+        if ($codes->isEmpty()) {
+            return [];
+        }
+        $requests = Request::query()->whereIn(\Illuminate\Support\Facades\DB::raw('upper(internal_code)'), $codes->unique()->values()->all())
+            ->get(['id', 'internal_code', 'status', 'onec_number'])->keyBy(fn ($r) => mb_strtoupper((string) $r->internal_code));
+
+        return $codes->map(fn ($code) => $requests->get($code))->filter()->all();
+    }
+
     #[Computed]
     public function hasMore(): bool
     {

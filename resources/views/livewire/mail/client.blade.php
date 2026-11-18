@@ -752,13 +752,14 @@ body.mail-resizing iframe{pointer-events:none}
         </div>
 
         <div class="threads">
-            @php $autoQuotes = $this->autoQuotes; $noticeRequests = $this->noticeRequests; @endphp
+            @php $autoQuotes = $this->autoQuotes; $noticeRequests = $this->noticeRequests; $subjectRequests = $this->subjectRequests; @endphp
             @forelse($this->threads->take($perPage) as $m)
                 @php
                     $unread = $m->my_read_at === null && $m->direction?->value === 'inbound';
                     $cat = $catChip($m->category);
-                    // Заявка строки: привязанная, иначе заявка уведомления (письмо о заявке из бота).
-                    $rowReq = $m->related_request_id ? $m->relatedRequest : ($m->notice_request_id ? ($noticeRequests[$m->notice_request_id] ?? null) : null);
+                    // Заявка строки: привязанная, иначе заявка уведомления (письмо о заявке из бота),
+                    // иначе — по номеру в теме (уведомления mzCorp, копии писем поставщиков).
+                    $rowReq = $m->related_request_id ? $m->relatedRequest : ($m->notice_request_id ? ($noticeRequests[$m->notice_request_id] ?? null) : ($subjectRequests[$m->id] ?? null));
                     $isOrg = $rowReq !== null || (bool) $m->related_request_id;
                     // Заявка в «Клиент ждёт счёт» — строка подсвечивается (цвет текста + маркер ₽).
                     $rrs = null;
