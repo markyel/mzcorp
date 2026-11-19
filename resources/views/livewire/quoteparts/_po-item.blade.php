@@ -177,7 +177,8 @@
     @foreach(($it['waiting'] ?? []) as $w)
         @php
             // Строка запроса QuoteParts этого поставщика: переписка (наше письмо видно до ответа) и «Повторить запрос».
-            $pr = $this->allPending->first(fn ($p) => $p['sku'] === $it['sku'] && $p['supplier'] === $w);
+            // В карточке заявки позиция с T-кодом показана под M-артикулом (PriceOffers::requestAliases).
+            $pr = $this->allPending->first(fn ($p) => ($p['sku'] === $it['sku'] || ($this->requestAliases[$p['sku']]['sku'] ?? null) === $it['sku']) && $p['supplier'] === $w);
         @endphp
         <div wire:key="po-w-{{ $it['sku'] }}-{{ $loop->index }}" class="pa-offer {{ $pr && $declineDialog === $pr['id'] ? 'is-open' : '' }}">
             <div class="pa-grid pa-row">

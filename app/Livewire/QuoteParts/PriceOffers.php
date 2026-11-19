@@ -169,14 +169,31 @@ class PriceOffers extends Component
         $out = [];
         $items = \App\Models\RequestItem::query()->where('request_id', $this->requestId)->where('is_active', true)
             ->with('catalogItem:id,sku')->orderBy('position')->orderBy('id')->get();
+        // И M-артикул, и код новой позиции T-…: запрос в QuoteParts мог уйти до привязки к каталогу, предложения — под
+        // T-кодом (M-2026-19167: T-IWQJJI, позже карточка M34839).
         foreach ($items as $i => $item) {
-            $sku = (string) ($item->catalogItem?->sku ?: $item->quoteparts_code);
-            if ($sku !== '' && ! isset($out[$sku])) {
-                $out[$sku] = $i;
+            foreach ([(string) $item->catalogItem?->sku, (string) $item->quoteparts_code] as $sku) {
+                if ($sku !== '' && ! isset($out[$sku])) {
+                    $out[$sku] = $i;
+                }
             }
         }
 
         return $out;
+    }
+
+    /** @return array<string, array{sku: string, cid: int}> код новой позиции T-… => её M-артикул и карточка каталога (позиция заявки с обоими) */
+    #[Computed]
+    public function requestAliases(): array
+    {
+        if ($this->requestId === null) {
+            return [];
+        }
+
+        return \App\Models\RequestItem::query()->where('request_id', $this->requestId)->where('is_active', true)
+            ->whereNotNull('quoteparts_code')->whereNotNull('catalog_item_id')->with('catalogItem:id,sku')->get()
+            ->filter(fn ($it) => $it->catalogItem?->sku && $it->catalogItem->sku !== $it->quoteparts_code)
+            ->mapWithKeys(fn ($it) => [(string) $it->quoteparts_code => ['sku' => (string) $it->catalogItem->sku, 'cid' => (int) $it->catalog_item_id]])->all();
     }
 
     /**
@@ -199,7 +216,13 @@ class PriceOffers extends Component
         $mailSeeds = $this->mailOnlySeeds(\Illuminate\Support\Carbon::createFromTimestamp(0))
             ->filter(fn ($r) => in_array($r['sku'], $skus, true) && ! in_array($r['sku'], $seen, true));
 
-        return $this->itemsFrom($rows, $declines, $pending->merge($mailSeeds))
+        // Одна позиция — один блок: строки под T-кодом (спросили до привязки к каталогу) — под её M-артикулом.
+        $aliases = $this->requestAliases;
+        $toM = fn (Collection $c) => $aliases === [] ? $c : $c->map(fn ($r) => isset($aliases[$r['sku']])
+            ? array_merge($r, ['sku' => $aliases[$r['sku']]['sku'], 'cid' => $r['cid'] ?? $aliases[$r['sku']]['cid']]) : $r)->values();
+        $back = collect($aliases)->mapWithKeys(fn ($m, $t) => [$m['sku'] => $t])->all();
+
+        return $this->itemsFrom($toM($rows), $toM($declines), $toM($pending->merge($mailSeeds)), $back)
             ->sortBy(fn ($it) => $order[$it['sku']] ?? PHP_INT_MAX)->values();
     }
 
@@ -1019,7 +1042,11 @@ class PriceOffers extends Component
      * @param  Collection<int, array<string, mixed>>|null  $unanswered  позиции, где ещё никто не ответил (строки allPending)
      * @return Collection<int, array<string, mixed>>
      */
-    private function itemsFrom(Collection $rows, ?Collection $declines = null, ?Collection $unanswered = null): Collection
+    /**
+     * @param  array<string, string>  $aliases  M-артикул => код новой позиции T-…, под которым её спрашивали (карточка заявки):
+     *                                         сводка «кого спросили» и «отложил ответ» — по T-коду
+     */
+    private function itemsFrom(Collection $rows, ?Collection $declines = null, ?Collection $unanswered = null, array $aliases = []): Collection
     {
         $checker = app(PriceRefreshReadiness::class);
         $declinesBySku = ($declines ?? collect())->groupBy('sku');
@@ -1035,10 +1062,10 @@ class PriceOffers extends Component
             ->map(fn (Collection $g) => $g->mapWithKeys(fn ($r) => [$r['supplier'] => ['until' => $r['postponed_until'], 'note' => $r['postpone_note']]])->all());
 
         return $bySku
-            ->map(function (Collection $offers, string $sku) use ($checker, $declinesBySku, $unansweredBySku, $postponed) {
+            ->map(function (Collection $offers, string $sku) use ($checker, $declinesBySku, $unansweredBySku, $postponed, $aliases) {
                 $itemDeclines = $declinesBySku->get($sku, collect())->values();
                 $first = $offers->first() ?? $itemDeclines->first() ?? $unansweredBySku->get($sku)?->first();
-                $st = $this->readiness[$sku] ?? null;
+                $st = isset($aliases[$sku]) ? ($this->readiness[$aliases[$sku]] ?? $this->readiness[$sku] ?? null) : ($this->readiness[$sku] ?? null);
                 // Сначала оригиналы, потом копии и аналоги; внутри — дешевле выше.
                 $sorted = $offers->sortBy(fn ($r) => [($r['kind'] ?? 'original') === 'original' ? 0 : 1, $r['rub'] ?? PHP_FLOAT_MAX])->values();
                 // Цены и отказы из писем мимо QuoteParts (MailPriceOffers): в счёт «ответили N из M» — по поставщику один раз.
@@ -1084,7 +1111,7 @@ class PriceOffers extends Component
                     // Спросили, а он ни цены, ни отказа: строка «ждём ответ».
                     'waiting' => $st ? array_values(array_map(fn ($k) => $this->supplierNames[$k] ?? $k,
                         array_diff($st['asked'], $st['offered'], $st['declined'], $offers->pluck('key')->filter()->all(), $mail['offered'] ?? [], $mail['declined'] ?? []))) : [],
-                    'postponed' => $postponed->get($sku, []),
+                    'postponed' => $postponed->get($sku, isset($aliases[$sku]) ? $postponed->get($aliases[$sku], []) : []),
                     'at' => $offers->merge($itemDeclines)->merge($mailOffers)->max('at') ?? $unansweredBySku->get($sku)?->max('at'),
                 ];
             })
