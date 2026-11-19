@@ -85,6 +85,7 @@ class OutboundQuoteItemEditor
             'previous' => $previous,
             'by_user_id' => $by->id,
         ]);
+        $this->syncCoverage($quoteItem, 'quote_line_linked');
 
         return $quoteItem;
     }
@@ -123,8 +124,25 @@ class OutboundQuoteItemEditor
             'previous_request_item_id' => $previous['request_item_id'],
             'by_user_id' => $by->id,
         ]);
+        $this->syncCoverage($quoteItem, 'quote_line_unlinked');
 
         return $quoteItem;
+    }
+
+    /**
+     * Строку КП привязали к позиции или отвязали — покрытие изменилось: «КП отправлено» ↔ «Частичное КП»
+     * (QuoteCoverageService). Раньше статус оставался прежним до следующего события (MZ2026-01220, 20.11.2026).
+     */
+    private function syncCoverage(OutboundQuoteItem $quoteItem, string $reason): void
+    {
+        try {
+            $request = $quoteItem->quote?->request;
+            if ($request !== null) {
+                app(QuoteCoverageService::class)->sync($request, $reason);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('OutboundQuoteItemEditor: quote coverage sync failed', ['quote_item_id' => $quoteItem->id, 'error' => $e->getMessage()]);
+        }
     }
 
     /**

@@ -45,6 +45,15 @@ class OutboundQuoteItemMatcher
         'low' => 0.45,
     ];
 
+    /**
+     * Строки КП с нашим новым M-артикулом: в каталоге mzCorp его ещё нет, а на mylift.ru уже есть (MyliftArticleLookup) —
+     * менеджер завёл карточку под позицию без карточки и выдал КП (MZ2026-01220, M34817). Такую строку не связываем с
+     * позицией, у которой уже есть другая карточка: LLM связал «Кнопку -1» M34817 с соседней «Кнопкой 1» (M25059).
+     *
+     * @var array<int, string> id строки КП => M-артикул
+     */
+    private array $newSkuLines = [];
+
     public function __construct(
         private readonly OpenAIChatService $chat,
         private readonly MatchOutboundQuoteItemsPrompt $prompt,
@@ -74,6 +83,7 @@ class OutboundQuoteItemMatcher
         }
 
         $stats = ['total' => $items->count()] + $this->emptyStats();
+        $this->newSkuLines = [];
 
         // Step 1+2: M-SKU exact + catalog→request link (через request_item.catalog_item_id
         // ИЛИ через M-SKU извлечённый из request_item.parsed_article/name — клиент сам
@@ -87,6 +97,9 @@ class OutboundQuoteItemMatcher
 
         // Step 3: Fuzzy для тех, у кого ещё нет matched_request_item_id.
         $this->matchByFuzzy($items, $request);
+
+        // Step 3.2: новая карточка (артикул есть на mylift.ru) ↔ единственная свободная позиция без карточки.
+        $this->matchNewSkusToItemsWithoutCard($items, $request);
 
         // Step 3.5: строка КП резолвится в каталог (M-SKU), но ни одна позиция
         // заявки к ней не привязалась — клиент описал деталь своими словами и
@@ -301,6 +314,8 @@ class OutboundQuoteItemMatcher
         foreach ($skuToItem as $sku => $quoteItems) {
             $catalogItem = $catalog->get($sku);
             if ($catalogItem === null) {
+                $this->markNewSku((string) $sku, $quoteItems, $requestSkuMap);
+
                 continue;
             }
 
@@ -438,6 +453,9 @@ class OutboundQuoteItemMatcher
             $qArt = CatalogImportService::normalizeArticle($qi->raw_article);
 
             foreach ($activeReqItems as $ri) {
+                if (! $this->mayLink($qi, $ri)) {
+                    continue;
+                }
                 // 3a — fuzzy по article.
                 if ($qArt !== null && $qArt !== '') {
                     $riArt = CatalogImportService::normalizeArticle($ri->parsed_article);
@@ -534,6 +552,9 @@ class OutboundQuoteItemMatcher
             if (! in_array($riId, $validRequestIds, true)) {
                 continue;
             }
+            if (! $this->mayLink($unmatchedByIndex[$idx], $request->items->firstWhere('id', $riId))) {
+                continue;
+            }
             $score = self::LLM_CONFIDENCE_SCORES[$conf] ?? 0.0;
             if ($score < $threshold) {
                 continue;
@@ -546,6 +567,68 @@ class OutboundQuoteItemMatcher
             $qi->match_reason = $reason ?: ('LLM '.$conf);
             $qi->save();
         }
+    }
+
+    /**
+     * M-артикула строки нет в каталоге mzCorp — есть ли он на mylift.ru. Есть — новая карточка (newSkuLines); клиент
+     * сам написал этот M-артикул в заявке — связываем с той позицией.
+     *
+     * @param  iterable<OutboundQuoteItem>  $quoteItems
+     * @param  array<string, RequestItem>  $requestSkuMap
+     */
+    private function markNewSku(string $sku, iterable $quoteItems, array $requestSkuMap): void
+    {
+        try {
+            $siteName = app(\App\Services\Catalog\MyliftArticleLookup::class)->name($sku);
+        } catch (\Throwable $e) {
+            $siteName = null;
+        }
+        if ($siteName === null) {
+            return;
+        }
+        foreach ($quoteItems as $qi) {
+            $this->newSkuLines[(int) $qi->id] = $sku;
+            if (isset($requestSkuMap[$sku])) {
+                $qi->matched_request_item_id = $requestSkuMap[$sku]->id;
+                $qi->match_score = 1.0;
+                $qi->match_source = OutboundQuoteItem::MATCH_SOURCE_SKU_TO_REQUEST;
+                $qi->match_reason = sprintf('новый M-SKU %s (есть на mylift.ru) найден в request_item#%d', $sku, $requestSkuMap[$sku]->id);
+                $qi->save();
+            }
+        }
+    }
+
+    /** Строку с новой карточкой — только к позиции без карточки (другой товар каталога — не она). */
+    private function mayLink(OutboundQuoteItem $qi, ?RequestItem $ri): bool
+    {
+        return $ri !== null && (! isset($this->newSkuLines[(int) $qi->id]) || $ri->catalog_item_id === null);
+    }
+
+    /**
+     * Step 3.2. Одна строка с новой карточкой ↔ одна свободная позиция без карточки — связываем: под неё карточку и
+     * завели. Несколько — решит LLM (с тем же запретом mayLink).
+     *
+     * @param  Collection<int, OutboundQuoteItem>  $items
+     */
+    private function matchNewSkusToItemsWithoutCard(Collection $items, Request $request): void
+    {
+        $lines = $items->filter(fn (OutboundQuoteItem $it) => isset($this->newSkuLines[(int) $it->id]) && $it->matched_request_item_id === null)->values();
+        if ($lines->count() !== 1) {
+            return;
+        }
+        $taken = $items->pluck('matched_request_item_id')->filter()->all();
+        $free = $request->items->where('is_active', true)->whereNull('catalog_item_id')
+            ->reject(fn (RequestItem $ri) => in_array($ri->id, $taken, true))->values();
+        if ($free->count() !== 1) {
+            return;
+        }
+        $qi = $lines->first();
+        $qi->matched_request_item_id = $free->first()->id;
+        $qi->match_score = 0.8;
+        $qi->match_source = OutboundQuoteItem::MATCH_SOURCE_SINGLE_PAIR;
+        $qi->match_reason = sprintf('новая карточка %s (есть на mylift.ru, в каталоге ещё нет) ↔ единственная позиция без карточки #%d',
+            $this->newSkuLines[(int) $qi->id], $free->first()->id);
+        $qi->save();
     }
 
     /**

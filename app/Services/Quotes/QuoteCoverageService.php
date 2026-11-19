@@ -85,7 +85,8 @@ class QuoteCoverageService
      */
     public function uncovered(Request $request): Collection
     {
-        $items = RequestItem::query()->where('request_id', $request->id)->where('is_active', true)->orderBy('position')->orderBy('id')->get();
+        $items = RequestItem::query()->where('request_id', $request->id)->where('is_active', true)->with('catalogItem:id,sku')
+            ->orderBy('position')->orderBy('id')->get();
 
         return self::uncoveredOf($items, $this->lines($request), $this->sentQuotationItemIds($request));
     }
@@ -101,13 +102,21 @@ class QuoteCoverageService
     public static function uncoveredOf(Collection $items, Collection $lines, array $quotedItemIds = []): Collection
     {
         $lines = $lines->reject(fn ($l) => preg_match(self::SERVICE_LINE, (string) ($l->raw_name ?? '')) === 1)->values();
+
+        // Наш M-артикул в строке КП (MZ2026-01220, 20.11.2026): менеджер завёл карточку M34817 под позицию «Кнопка -1»
+        // и выдал КП, а разбор связал строку с соседней «Кнопкой 1». Строка с M-артикулом X покрывает позицию с
+        // карточкой X — как только карточка в каталоге и у позиции. Связь строки с другой позицией НЕ отменяем: так
+        // бывает и принадлежность (селектор к фотозавесе, MZ2026-01847), и ложное «КП отправлено» хуже ложного частичного.
+        $itemSku = fn (RequestItem $i) => $i->relationLoaded('catalogItem') ? strtoupper((string) $i->catalogItem?->sku) : '';
+        $lineSkus = $lines->map(fn ($l) => self::lineSku($l))->filter()->all();
         $byItem = $lines->pluck('matched_request_item_id')->filter()->map(fn ($id) => (int) $id)->merge($quotedItemIds)->all();
         $byCatalog = $lines->pluck('matched_catalog_item_id')->filter()->map(fn ($id) => (int) $id)->all();
 
         $open = $items->reject(fn (RequestItem $i) => $i->quote_resolution !== null
             || preg_match(self::NOT_GOODS_ITEM, (string) $i->parsed_name) === 1
             || in_array((int) $i->id, $byItem, true)
-            || ($i->catalog_item_id !== null && in_array((int) $i->catalog_item_id, $byCatalog, true)))->values();
+            || ($i->catalog_item_id !== null && in_array((int) $i->catalog_item_id, $byCatalog, true))
+            || ($itemSku($i) !== '' && in_array($itemSku($i), $lineSkus, true)))->values();
         if ($open->isEmpty()) {
             return $open;
         }
@@ -119,6 +128,18 @@ class QuoteCoverageService
             && ! ($l->matched_catalog_item_id && in_array((int) $l->matched_catalog_item_id, $itemCatalog, true)))->count();
 
         return $open->count() <= $spare ? collect() : $open;
+    }
+
+    /** M-артикул строки КП (артикул, иначе в названии); кириллическая «М» — как латинская. */
+    private static function lineSku(object $line): ?string
+    {
+        foreach ([(string) ($line->raw_article ?? ''), (string) ($line->raw_name ?? '')] as $text) {
+            if (preg_match('/(?<![\p{L}\p{N}])[MМ](\d{4,6})(?![\p{L}\p{N}])/u', $text, $m) === 1) {
+                return 'M'.$m[1];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -237,7 +258,7 @@ class QuoteCoverageService
         return DB::table('outbound_quote_items as l')->join('outbound_quotes as q', 'q.id', '=', 'l.outbound_quote_id')
             ->where('q.request_id', $request->id)->where('q.document_type', 'outbound_quotation_full')
             ->whereIn('q.status', ['matched', 'parsed'])
-            ->get(['l.raw_name', 'l.matched_request_item_id', 'l.matched_catalog_item_id']);
+            ->get(['l.raw_name', 'l.raw_article', 'l.matched_request_item_id', 'l.matched_catalog_item_id']);
     }
 
     /** @return list<int> позиции в КП, собранных в mzCorp и отправленных клиенту */

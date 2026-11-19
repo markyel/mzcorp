@@ -408,6 +408,14 @@ Schedule::command('quotes:complete-partial')
     ->onOneServer()
     ->runInBackground();
 
+// «Частичное КП»: страховочный пересчёт «КП отправлено» ↔ «Частичное КП» — строки КП и позиции меняются и в обход
+// событий (перематч, правки каталога), MZ2026-01220 (20.11.2026). Перед напоминанием о ценах.
+Schedule::command('requests:sync-quote-coverage')
+    ->hourlyAt(33)
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // «Частичное КП», этап 3: у позиции без КП появилась цена (1С / ответ поставщика) — менеджеру «можно дослать КП».
 Schedule::command('quotes:partial-price-ready')
     ->hourlyAt(37)

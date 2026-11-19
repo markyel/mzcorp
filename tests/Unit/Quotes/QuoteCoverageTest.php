@@ -66,6 +66,29 @@ class QuoteCoverageTest extends TestCase
         $this->assertSame([], $this->ids(QuoteCoverageService::uncoveredOf($items, collect([$this->line('Плата', 1, 100)]))));
     }
 
+    public function test_our_m_article_in_the_quote_covers_the_item_with_that_card(): void
+    {
+        // MZ2026-01220: «Кнопка -1» — новая карточка M34817, «Кнопка 1» — M25059; разбор связал обе строки с «Кнопкой 1».
+        $card = fn (int $id, string $sku) => tap(new \App\Models\CatalogItem, fn ($c) => $c->forceFill(['id' => $id, 'sku' => $sku]));
+        $minus = $this->item(1, 31310);
+        $minus->setRelation('catalogItem', $card(31310, 'M34817'));
+        $plus = $this->item(2, 721);
+        $plus->setRelation('catalogItem', $card(721, 'M25059'));
+        $lines = collect([
+            (object) ['raw_name' => 'Кнопка приказа "-1" тип A4N49744S05', 'raw_article' => 'M34817', 'matched_request_item_id' => 2, 'matched_catalog_item_id' => null],
+            (object) ['raw_name' => 'Кнопка приказа "1" тип A4N49744S05', 'raw_article' => 'M25059', 'matched_request_item_id' => 2, 'matched_catalog_item_id' => 721],
+        ]);
+
+        $this->assertSame([], $this->ids(QuoteCoverageService::uncoveredOf(collect([$minus, $plus]), $lines)));
+    }
+
+    public function test_the_mylift_page_tells_an_existing_article(): void
+    {
+        $this->assertSame('Кнопка приказа "-1" тип A4N49744S05 с браилем', \App\Services\Catalog\MyliftArticleLookup::nameFromHtml(
+            '<meta itemprop="name" content="Кнопка приказа "-1" тип A4N49744S05 с браилем" />'));
+        $this->assertNull(\App\Services\Catalog\MyliftArticleLookup::nameFromHtml('<meta itemprop="name" content="" />'));
+    }
+
     public function test_after_a_quote_waiting_for_the_client_follows_the_quote_milestone(): void
     {
         // MZ2026-01401: КП на одну позицию из двух, затем вопрос клиенту — «Жду клиента» с вехой КП.

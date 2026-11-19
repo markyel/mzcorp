@@ -541,6 +541,12 @@ return [
         'until' => env('CALENDAR_GIFT_UNTIL') ?: null,
     ],
 
+    // Сайт mylift.ru: страница товара по M-артикулу (?code=M…&fn=view). Товар там появляется сразу после заведения в 1С —
+    // раньше, чем в каталоге mzCorp (App\Services\Catalog\MyliftArticleLookup).
+    'mylift' => [
+        'url' => env('MYLIFT_URL', 'https://mylift.ru'),
+    ],
+
     // Telegram Bot API (боты заявок, медиаплан): прокси, если сервер не достаёт
     // до api.telegram.org напрямую. См. App\Support\TelegramHttp.
     'telegram' => [
