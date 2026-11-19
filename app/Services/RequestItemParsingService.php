@@ -863,7 +863,9 @@ PROMPT;
                 'error' => $e->getMessage(),
             ]);
         }
-        $attachments = $nested['attachments'];
+        // Файлы, где менеджер отметил «не искать позиции» (клиент просит счёт по одной служебной записке, остальные
+        // приложенные документы — не заявка; MZ2026-02199, 20.11.2026).
+        $attachments = $nested['attachments']->reject(fn ($a) => ($a->items_ignored_at ?? null) !== null)->values();
 
         // Выбор источника тела письма:
         //   - Обычно body_plain содержит plain-text alternative и его

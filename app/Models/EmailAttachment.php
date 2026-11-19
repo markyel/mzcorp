@@ -28,6 +28,9 @@ class EmailAttachment extends Model
         // по KB photo-slug'ам — kb_slot_candidates[].
         // См. App\Services\Kb\PhotoSlotClassifierService.
         'metadata',
+        // «Не искать позиции в этом файле» — отметка менеджера; парсер позиций файл пропускает.
+        'items_ignored_at',
+        'items_ignored_by_user_id',
     ];
 
     protected function casts(): array
@@ -36,6 +39,7 @@ class EmailAttachment extends Model
             'size_bytes' => 'integer',
             'is_inline' => 'bool',
             'metadata' => 'array',
+            'items_ignored_at' => 'datetime',
         ];
     }
 

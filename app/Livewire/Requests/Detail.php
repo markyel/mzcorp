@@ -2558,6 +2558,8 @@ class Detail extends Component
         return $this->redirect(route('requests.show', $child->id), navigate: false);
     }
 
+    /** Перезапуск парсера: кнопка карточки и «Перечитать позиции» блока «Где искать позиции» (ItemSourceFiles). */
+    #[\Livewire\Attributes\On('reparse-items')]
     public function reparseItems(): void
     {
         $user = auth()->user();

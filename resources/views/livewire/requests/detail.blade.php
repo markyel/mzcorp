@@ -1720,6 +1720,7 @@
 
                 {{-- «Не покрыто КП» — позиции без предложения клиенту («Частичное КП», QuoteCoverageService). --}}
                 <livewire:requests.quote-coverage :request-id="$req->id" :key="'quote-coverage-'.$req->id" />
+                <livewire:requests.item-source-files :request-id="$req->id" :key="'item-source-files-'.$req->id" />
 
 
                 @php
