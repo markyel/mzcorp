@@ -505,6 +505,12 @@ class QuotePartsRfqService
         $en = trim((string) $en);
         $askers = collect($group['questions'] ?? [])->where('status', 'open')->pluck('supplier')->filter()->unique();
         $languages = $this->supplierLanguages($askers);
+        // Англоязычному поставщику без английского варианта: ответ уже по-английски (без кириллицы) — он и уходит,
+        // по-русски — переводим, как кнопкой «Перевести». Раньше «Ответить» молча отказывал всплывающей ошибкой
+        // (M-2026-20851, JIEFENG, 19.11.2026: ответ по-английски написали в первое поле).
+        if ($ru !== '' && $en === '' && in_array('en', $languages, true)) {
+            $en = preg_match('/\p{Cyrillic}/u', $ru) === 1 ? trim((string) app(QuotePartsAnswerTranslator::class)->toEnglish($ru)) : $ru;
+        }
         if ($ru === '' || (in_array('en', $languages, true) && $en === '')) {
             throw new RuntimeException('Напишите ответ'.(in_array('en', $languages, true) ? ' и проверьте перевод на английский' : '').'.');
         }
