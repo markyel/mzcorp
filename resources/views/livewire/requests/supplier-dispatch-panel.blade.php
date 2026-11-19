@@ -442,6 +442,14 @@
             </div>
 
             @error('send') <div class="text-[12px] text-red-600">{{ $message }}</div> @enderror
+            {{-- Англоязычному поставщику — только английские названия: пока не готовы, отправка недоступна (19.11.2026). --}}
+            @php $enGaps = $this->englishNameGaps; @endphp
+            @if($enGaps !== [])
+                <div class="text-[12px]" style="padding: 8px 10px; border: 1px solid var(--amber-300, #fcd34d); border-radius: 6px; background: var(--amber-50, #fffbeb); color: var(--amber-800, #92400e);">
+                    <b>Не удалось подготовить английские названия</b> для англоязычных поставщиков: «{{ implode('», «', $enGaps) }}».
+                    Нажмите «🌐 Перевести позиции (ИИ)» или впишите названия по-английски — до этого отправка недоступна.
+                </div>
+            @endif
 
             <div class="flex items-center gap-2 pt-2 border-t border-border-subtle">
                 <button type="button" wire:click="openEmailPreview" wire:loading.attr="disabled" wire:target="openEmailPreview,newFiles"
@@ -451,7 +459,8 @@
                     <span wire:loading wire:target="openEmailPreview">Собираю…</span>
                 </button>
                 <button type="button" wire:click="send" wire:loading.attr="disabled" wire:target="send,newFiles"
-                        class="btn btn-primary" @disabled($selItems === 0 || $selSups === 0)>
+                        class="btn btn-primary" @disabled($selItems === 0 || $selSups === 0 || $enGaps !== [])
+                        @if($enGaps !== []) title="Нет английских названий — переведите позиции" @endif>
                     <span wire:loading.remove wire:target="send">Отправить запросы ({{ $selSups }})</span>
                     <span wire:loading wire:target="send">Отправляю…</span>
                 </button>
@@ -524,7 +533,8 @@
                     <div style="flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
                                 padding: 10px 14px; background: var(--bg-surface-2); border-top: 1px solid var(--border-subtle);">
                         <button type="button" wire:click="send" wire:loading.attr="disabled" wire:target="send"
-                                class="btn btn-primary">
+                                class="btn btn-primary" @disabled($this->englishNameGaps !== [])
+                                @if($this->englishNameGaps !== []) title="Нет английских названий — вернитесь к правкам и переведите позиции" @endif>
                             <span wire:loading.remove wire:target="send">Отправить запросы ({{ $selSups }})</span>
                             <span wire:loading wire:target="send">Отправляю…</span>
                         </button>

@@ -146,6 +146,10 @@ class SupplierDispatchPanel extends Component
         }
 
         $this->restoreDraft();
+        // Черновик с англоязычным поставщиком: английские названия — сразу, а не только при смене выбора.
+        if ($this->englishNameGaps !== []) {
+            $this->autoTranslateIfEnglish();
+        }
         $this->draftHash = $this->draftFingerprint();
     }
 
@@ -1101,6 +1105,27 @@ class SupplierDispatchPanel extends Component
         $this->runEnglishTranslation(app(\App\Services\Supplier\SupplierItemTranslator::class), silent: true);
     }
 
+    /**
+     * Отмеченные позиции без английского названия, когда среди получателей есть англоязычный поставщик: пока они есть,
+     * «Отправить запросы» неактивна, а автор видит, что перевести (решение заказчика 19.11.2026 после MZ2026-02350 —
+     * PaulSchaab получил «Ключевина (замок)…»: тихий автоперевод не вышел).
+     *
+     * @return list<string> названия позиций, как в заявке
+     */
+    #[Computed]
+    public function englishNameGaps(): array
+    {
+        if (! $this->hasEnglishSupplierSelected()) {
+            return [];
+        }
+        $ids = array_keys(array_filter($this->selectedItems));
+
+        return $ids === [] ? [] : RequestItem::query()->whereIn('id', $ids)->orderBy('position')->get(['id', 'parsed_name'])
+            ->filter(fn (RequestItem $it) => ($en = trim((string) ($this->editedNamesEn[$it->id] ?? ''))) === '' || preg_match('/\p{Cyrillic}/u', $en) === 1)
+            ->map(fn (RequestItem $it) => mb_strimwidth(trim((string) ($this->editedNames[$it->id] ?? '')) ?: (string) $it->parsed_name, 0, 60, '…'))
+            ->values()->all();
+    }
+
     private function hasEnglishSupplierSelected(): bool
     {
         $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
@@ -1241,6 +1266,20 @@ class SupplierDispatchPanel extends Component
         }
 
         $this->validate(['newFiles.*' => 'file|max:25600']);
+
+        // Англоязычному поставщику — только английские названия. Тихий автоперевод при выборе поставщика мог не
+        // выйти, и письмо уходило с русским названием (MZ2026-02350, PaulSchaab, 19.11.2026: «Ключевина (замок)…»).
+        // Переводим ещё раз; не вышло — не отправляем.
+        if ($this->hasEnglishSupplierSelected()) {
+            $this->runEnglishTranslation(app(\App\Services\Supplier\SupplierItemTranslator::class), silent: true);
+            $missing = $this->englishNameGaps;
+            if ($missing !== []) {
+                $this->addError('send', 'Нет английского названия: «'.implode('», «', $missing).'». Нажмите «Перевести» или впишите название по-английски — '
+                    .'англоязычному поставщику письмо с русским названием не уйдёт.');
+
+                return null;
+            }
+        }
 
         // Сохраняем загруженные файлы в staging на local; сервис скопирует
         // их в черновик каждого поставщика.
@@ -1746,6 +1785,7 @@ class SupplierDispatchPanel extends Component
         foreach ($translated as $id => $en) {
             $this->editedNamesEn[$id] = $en;
         }
+        unset($this->englishNameGaps);
 
         if ($silent) {
             return;

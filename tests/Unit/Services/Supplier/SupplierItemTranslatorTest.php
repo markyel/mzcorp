@@ -41,4 +41,18 @@ class SupplierItemTranslatorTest extends TestCase
 
         $this->assertSame([43729 => 'Traction sheave D=600 mm, d=13 mm, 6 grooves, U-shaped groove, gearless machine MX20'], $names);
     }
+
+    public function test_a_broken_answer_is_asked_again(): void
+    {
+        // 19.11.2026: сбойный ответ модели — названия ушли поставщикам по-русски (MZ2026-02350).
+        $openai = Mockery::mock(OpenAIChatService::class);
+        $openai->shouldReceive('chat')->twice()->andReturn(
+            ['content' => 'not json'],
+            ['content' => json_encode(['items' => [['id' => 7, 'name_en' => 'Landing door lock MS 42 P (S1 a), triangular key, red indicator light']]])],
+        );
+
+        $names = (new SupplierItemTranslator($openai))->translate([7 => 'Ключевина (замок) MS 42 P (S1 a), ключ треуголный, красная подсветка']);
+
+        $this->assertSame([7 => 'Landing door lock MS 42 P (S1 a), triangular key, red indicator light'], $names);
+    }
 }
