@@ -159,18 +159,30 @@
         </section>
     @endif
 
-    {{-- C. Сравнение цен по позициям. --}}
+    {{-- C. Предложения по позициям — тем же блоком, что в «Актуализации цен» (PriceOffers в режиме заявки): функционал
+         сквозной, вид один (решение заказчика 19.11.2026). Позиции без артикула (нет в каталоге и в QuoteParts) раздел
+         не видит — они ниже прежним видом. --}}
+    @php $cmpNoSku = collect($cmp)->filter(fn ($p) => blank($p['sku']))->values()->all(); @endphp
     @if($cmp !== [])
         <section class="rs-card">
             <div class="rs-head">
-                <h2>Сравнение цен</h2>
-                <span class="rs-hint" style="flex: 1 1 300px">Все предложения из писем и QuoteParts, сгруппированы по позициям. Выберите цену для 1С в каждой позиции.</span>
+                <h2>Предложения поставщиков</h2>
+                <span class="rs-hint" style="flex: 1 1 300px">Как в «Актуализации цен»: по каждой позиции — «Закупаем здесь», «Уточнить» или «Игнорировать». Выгрузка в 1С — внизу.</span>
                 @if($usd)<span class="rs-hint" style="white-space: nowrap">₽ по курсу {{ number_format($usd, 2, ',', ' ') }}</span>@endif
+            </div>
+            <livewire:quote-parts.price-offers :request-id="$this->requestId" :key="'po-card-'.$this->requestId" />
+        </section>
+    @endif
+    @if($cmpNoSku !== [])
+        <section class="rs-card">
+            <div class="rs-head">
+                <h2>Позиции без артикула</h2>
+                <span class="rs-hint" style="flex: 1 1 300px">Нет в каталоге 1С и в QuoteParts — предложения из писем. Выберите цену для 1С.</span>
             </div>
             <div style="overflow-x: auto">
                 <div style="min-width: 760px">
                     <div class="rs-grid rs-colhead"><span>Поставщик · ответ</span><span style="text-align: right">Цена</span><span>Условия</span><span style="text-align: right">Для 1С</span></div>
-                    @foreach($cmp as $p)
+                    @foreach($cmpNoSku as $p)
                         <div wire:key="rsp-{{ $p['item_id'] }}" class="rs-pos {{ $p['offers'] > 0 ? 'priced' : 'waiting' }}">
                             <div class="rs-pos-head">
                                 @if($p['sku'])<span class="rs-sku">{{ $p['sku'] }}</span>@endif

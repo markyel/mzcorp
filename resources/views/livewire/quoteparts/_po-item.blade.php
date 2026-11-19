@@ -67,7 +67,8 @@
         </div>
         <div class="pa-head-side">
             {{-- В «Ждём» — только когда выбрана цена из письма: такая позиция в «Готово» не попадает (готовность считает QuoteParts). --}}
-            @if((! in_array($section, ['wait', 'closed'], true) || ($section === 'wait' && is_string($chosen))) && ($it['ckey'] ?? $it['cid']))
+            {{-- В карточке заявки «+ В выгрузку» нет: выгружает её нижняя полоса (PriceOffers::$requestId). --}}
+            @if($this->requestId === null && (! in_array($section, ['wait', 'closed'], true) || ($section === 'wait' && is_string($chosen))) && ($it['ckey'] ?? $it['cid']))
                 @if($pos?->inExportOf(auth()->id()))
                     <span class="pa-export is-in">
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{ $pos->exported_at ? 'выгружено '.$pos->exported_at->timezone($tz)->format('d.m H:i') : 'в выгрузке 1С' }}</span>

@@ -143,6 +143,78 @@ class PriceOffers extends Component
     }
 
     /** «Закупаем здесь»: это предложение — закупочное для позиции (выбор снабжения, идёт в выгрузку 1С). Другое выбранное снимается. */
+    /**
+     * Карточка заявки → «Поставщики» (SupplierDispatchPanel): только позиции этой заявки, тем же блоком позиции, что в
+     * разделе, — без окна дней, фильтров и «моей выгрузки» (в заявке выгружает её нижняя полоса). Единый вид
+     * предложений поставщиков (решение заказчика 19.11.2026).
+     */
+    #[\Livewire\Attributes\Locked]
+    public ?int $requestId = null;
+
+    public function mount(): void
+    {
+        // В карточке заявки фильтра «Чьи запросы» нет — и в её адресе не должно появляться «?au=…».
+        if ($this->requestId !== null) {
+            $this->author = '';
+        }
+    }
+
+    /** @return array<string, int> артикул позиции заявки (M-… или код новой T-…) => её порядок */
+    #[Computed]
+    public function requestSkus(): array
+    {
+        if ($this->requestId === null) {
+            return [];
+        }
+        $out = [];
+        $items = \App\Models\RequestItem::query()->where('request_id', $this->requestId)->where('is_active', true)
+            ->with('catalogItem:id,sku')->orderBy('position')->orderBy('id')->get();
+        foreach ($items as $i => $item) {
+            $sku = (string) ($item->catalogItem?->sku ?: $item->quoteparts_code);
+            if ($sku !== '' && ! isset($out[$sku])) {
+                $out[$sku] = $i;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Позиции заявки с предложениями, отказами, ожиданием и ценами из писем — за всё время (не за период раздела).
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    #[Computed]
+    public function cardItems(): Collection
+    {
+        $order = $this->requestSkus;
+        if ($order === []) {
+            return collect();
+        }
+        $skus = array_map('strval', array_keys($order));
+        $rows = $this->query()->whereIn('sku', $skus)->get()->pipe(fn (Collection $offers) => self::rowsOf($offers));
+        $declines = $this->allDeclines->whereIn('sku', $skus)->values();
+        $pending = $this->allPending->whereIn('sku', $skus)->values();
+        $seen = array_merge($rows->pluck('sku')->all(), $declines->pluck('sku')->all(), $pending->pluck('sku')->all());
+        $mailSeeds = $this->mailOnlySeeds(\Illuminate\Support\Carbon::createFromTimestamp(0))
+            ->filter(fn ($r) => in_array($r['sku'], $skus, true) && ! in_array($r['sku'], $seen, true));
+
+        return $this->itemsFrom($rows, $declines, $pending->merge($mailSeeds))
+            ->sortBy(fn ($it) => $order[$it['sku']] ?? PHP_INT_MAX)->values();
+    }
+
+    /** Раздел позиции в карточке заявки — как в «Актуализации цен»: new / closed / ready / wait (цвет шапки, кнопки). */
+    public function cardSection(array $it): string
+    {
+        $pos = $this->positions->get($it['sku']);
+        if ($pos?->closed_at) {
+            return $it['offers']->contains(fn ($r) => $r['created'] && $r['created']->gt($pos->closed_at)) ? 'new' : 'closed';
+        }
+        $st = $this->readiness[$it['sku']] ?? null;
+
+        return $st !== null && app(PriceRefreshReadiness::class)->isReady($st) ? 'ready' : 'wait';
+    }
+
     public function choose(int $offerId, PriceActualizationService $service): void
     {
         $o = QuotePartsOffer::query()->findOrFail($offerId);
@@ -249,7 +321,11 @@ class PriceOffers extends Component
     private function forget(): void
     {
         unset($this->rows, $this->readyRows, $this->readyItems, $this->items, $this->groups, $this->choices, $this->bestIds, $this->closedItems,
-            $this->positions, $this->newItems, $this->readyList, $this->waitItems, $this->bar, $this->clarifications);
+            $this->positions, $this->newItems, $this->readyList, $this->waitItems, $this->bar, $this->clarifications, $this->cardItems);
+        // В карточке заявки: выбор поставщика — её нижней полосе («Выбрано N из M», выгрузка в 1С).
+        if ($this->requestId !== null) {
+            $this->dispatch('price-choice-changed');
+        }
     }
 
     /** @param  int|string  $key  карточка каталога или код новой позиции T-… */
@@ -568,7 +644,13 @@ class PriceOffers extends Component
     #[Computed]
     public function mailBySku(): array
     {
-        return app(\App\Services\QuoteParts\MailPriceOffers::class)->bySku();
+        // Карточка заявки: и письма с её создания, если она старше окна запросов.
+        $since = null;
+        if ($this->requestId !== null && ($created = \App\Models\Request::query()->whereKey($this->requestId)->value('created_at')) !== null) {
+            $since = \Illuminate\Support\Carbon::parse($created)->min(now()->subDays(PriceRefreshReadiness::WINDOW_DAYS));
+        }
+
+        return app(\App\Services\QuoteParts\MailPriceOffers::class)->bySku($since);
     }
 
     /**
@@ -600,7 +682,10 @@ class PriceOffers extends Component
     public function windowRfqs(): Collection
     {
         return QuotePartsRfq::query()->with('request:id,internal_code,client_name,subject,assigned_user_id', 'request.assignedUser:id,name')
-            ->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))->get();
+            ->where(fn ($q) => $q->where('created_at', '>=', now()->subDays(PriceRefreshReadiness::WINDOW_DAYS))
+                // Карточка заявки: её запросы — и старше окна.
+                ->when($this->requestId !== null, fn ($q) => $q->orWhere('request_id', $this->requestId)))
+            ->get();
     }
 
     /** @return array<string, string> ключ поставщика => название */
@@ -798,7 +883,9 @@ class PriceOffers extends Component
     #[Computed]
     public function lastPurchases(): Collection
     {
-        $ids = $this->rows->pluck('cid')->merge($this->readyItems->pluck('cid'))->merge($this->newItems->pluck('cid'))->filter()->unique()->values()->all();
+        $ids = ($this->requestId !== null
+            ? $this->cardItems->pluck('cid')
+            : $this->rows->pluck('cid')->merge($this->readyItems->pluck('cid'))->merge($this->newItems->pluck('cid')))->filter()->unique()->values()->all();
 
         return $ids === [] ? collect() : \App\Models\CatalogSupplierPrice::query()->whereIn('catalog_item_id', $ids)->where('kind', 'last')
             ->orderByDesc('priced_at')->get()->unique('catalog_item_id')->keyBy('catalog_item_id');
@@ -1332,6 +1419,9 @@ class PriceOffers extends Component
 
     public function render()
     {
+        if ($this->requestId !== null) {
+            return view('livewire.quoteparts.price-offers-card');
+        }
         if (! array_key_exists($this->view, self::VIEWS)) {
             $this->view = $this->view === 'list' ? 'item' : 'request';
         }

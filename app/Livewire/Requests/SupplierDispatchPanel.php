@@ -329,6 +329,14 @@ class SupplierDispatchPanel extends Component
         unset($this->overview);
     }
 
+    /** В блоке предложений (PriceOffers в режиме заявки) выбрали / сняли поставщика — пересчитать нижнюю полосу. */
+    #[\Livewire\Attributes\On('price-choice-changed')]
+    public function onPriceChoiceChanged(): void
+    {
+        unset($this->overview);
+        $this->exportNote = null;
+    }
+
     /** Итог последней выгрузки в 1С — в нижней панели. */
     public ?string $exportNote = null;
 
@@ -341,7 +349,7 @@ class SupplierDispatchPanel extends Component
         abort_unless($this->canDispatch, 403);
         $rows = $this->overview->exportPrices();
         if ($rows->isEmpty()) {
-            $this->dispatch('toast', type: 'error', message: 'Нет позиций с выбранной ценой — нажмите «Выбрать» в сравнении цен.');
+            $this->dispatch('toast', type: 'error', message: 'Нет позиций с выбранной ценой — нажмите «Закупаем здесь» у предложения позиции.');
 
             return null;
         }
@@ -372,7 +380,7 @@ class SupplierDispatchPanel extends Component
         abort_unless($this->canDispatch, 403);
         $positions = $this->overview->chosenPositions();
         if ($positions === []) {
-            $this->dispatch('toast', type: 'error', message: 'Нет позиций с выбранной ценой — нажмите «Выбрать» в сравнении цен.');
+            $this->dispatch('toast', type: 'error', message: 'Нет позиций с выбранной ценой — нажмите «Закупаем здесь» у предложения позиции.');
 
             return;
         }
