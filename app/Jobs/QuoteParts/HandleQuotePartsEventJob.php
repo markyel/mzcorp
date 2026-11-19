@@ -72,6 +72,8 @@ class HandleQuotePartsEventJob implements ShouldQueue
         $supplierName = $this->supplierKey !== null
             ? ($service->supplierNames([$rfq])[$this->supplierKey] ?? null)
             : null;
+        // Вопрос поставщика по-китайски — в «колокольчик» и письма по-русски, оригинал ниже (M-2026-20536).
+        $this->questions = $this->russianQuestions($this->questions);
 
         // Запрос, открытый вопросом поставщика по позиции из номенклатуры, — общий для снабжения:
         // «колокольчик» всем снабженцам, а вопросы ещё и письмом.
@@ -104,6 +106,28 @@ class HandleQuotePartsEventJob implements ShouldQueue
         if ($this->event === 'supplier.replied') {
             app(\App\Services\QuoteParts\QuotePartsRfqReadiness::class)->notifyReady(collect([$rfq->fresh(['createdBy', 'request'])]));
         }
+    }
+
+    /**
+     * Вопросы на китайском (японском, корейском) — переводом на русский, оригинал строкой ниже. Перевод не вышел —
+     * как есть (ForeignTextTranslator fail-safe), уведомление всё равно уходит.
+     *
+     * @param  list<string>  $questions
+     * @return list<string>
+     */
+    private function russianQuestions(array $questions): array
+    {
+        try {
+            $ru = app(\App\Services\QuoteParts\ForeignTextTranslator::class)->toRussian($questions);
+        } catch (Throwable $e) {
+            Log::warning('QuoteParts event: question translation failed', ['rfq' => $this->remoteId, 'error' => $e->getMessage()]);
+
+            return $questions;
+        }
+
+        return array_values(array_map(fn (string $q) => isset($ru[$q]) && trim($ru[$q]) !== ''
+            ? trim($ru[$q])."\n(в оригинале: ".trim($q).')'
+            : $q, $questions));
     }
 
     /**
