@@ -13,7 +13,7 @@
     </div>
 
     <div style="display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface-2); font-size: 13px;">
-        <div style="color: var(--fg-2);">Ссылки для письма клиентам и поста в канале: бот попросит подписаться на канал, проверит подписку и спросит, куда отправить календарь.</div>
+        <div style="color: var(--fg-2);">Ссылки для письма клиентам и поста в канале: бот попросит подписаться на канал, проверит подписку и спросит ФИО, организацию и контакт; адрес и способ передачи согласуем отдельно.</div>
         @foreach($this->links as $label => $url)
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" x-data="{ copied: false }">
                 <b style="width: 70px;">{{ $label }}</b>
@@ -44,7 +44,7 @@
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
             <thead>
                 <tr style="text-align: left; color: var(--fg-3); font-size: 12px; border-bottom: 1px solid var(--border-strong);">
-                    <th style="padding: 8px 10px;">Получатель</th><th style="padding: 8px 10px;">Телефон</th><th style="padding: 8px 10px;">Адрес</th>
+                    <th style="padding: 8px 10px;">Получатель</th><th style="padding: 8px 10px;">Контакт</th><th style="padding: 8px 10px;">Адрес</th>
                     <th style="padding: 8px 10px;">Канал</th><th style="padding: 8px 10px;">Подписка</th><th style="padding: 8px 10px;">Записался</th><th style="padding: 8px 10px;">Статус</th>
                 </tr>
             </thead>

@@ -562,9 +562,10 @@ class BotConversationTest extends TestCase
         $this->assertSame([['M12345', 5.0], ['M23456', 1.0], ['M34567', 4.0]], array_map(fn ($l) => [$l['sku'], (float) $l['qty']], $draft));
     }
 
-    public function test_calendar_gift_checks_the_subscription_and_takes_the_delivery_details_without_email(): void
+    public function test_calendar_gift_checks_the_subscription_and_takes_the_name_company_and_contact(): void
     {
         // Календарь в подарок подписчикам канала (18.11.2026): ?start=calendar, проверка подписки, анкета, список.
+        // Адрес и способ передачи согласуем отдельно (19.11.2026): бот спрашивает ФИО, организацию и контакт.
         Schema::create('calendar_gift_recipients', function (Blueprint $t) {
             $t->id();
             $t->string('campaign', 20);
@@ -574,7 +575,7 @@ class BotConversationTest extends TestCase
             $t->string('contact_name');
             $t->string('company_name')->nullable();
             $t->string('phone')->nullable();
-            $t->text('address');
+            $t->text('address')->nullable();
             $t->unsignedBigInteger('organization_id')->nullable();
             $t->string('status', 20)->default('new');
             $t->timestamp('consent_at')->nullable();
@@ -610,18 +611,18 @@ class BotConversationTest extends TestCase
         $this->assertStringContainsString('не вижу вашей подписки', $this->send(callback: 'cal_check'));
         $subscribed = true;
         $this->assertStringContainsString('Согласен', $this->send(callback: 'cal_check'));
-        $this->assertStringContainsString('Как к вам обращаться', $this->send(callback: 'cal_consent'));
+        $this->assertStringContainsString('ФИО', $this->send(callback: 'cal_consent'));
         // Артикул или e-mail в ответе — это ответ анкеты, а не цена и не подтверждение почты.
-        $this->assertStringContainsString('Компания', $this->send('Иван Петров'));
-        $this->assertStringContainsString('Телефон', $this->send('ООО «Лифт-Сервис»'));
-        $this->assertStringContainsString('не хватает цифр', $this->send('123'));
-        $this->assertStringContainsString('Адрес доставки', $this->send(phone: '+79001234567'));
-        $summary = html_entity_decode($this->send('Москва, ул. Лифтовая, д. 1, офис 5'));
+        $this->assertStringContainsString('Организация', $this->send('Иван Петров'));
+        $this->assertStringContainsString('Телефон или e-mail', $this->send('ООО «Лифт-Сервис»'));
+        $this->assertStringContainsString('Напишите телефон', $this->send('123'));
+        $summary = html_entity_decode($this->send(phone: '+79001234567'));
         $this->assertStringContainsString('ООО «Лифт-Сервис»', $summary);
+        $this->assertStringNotContainsString('📍', $summary);
         $this->assertStringContainsString('Готово', $this->send(callback: 'cal_ok'));
 
         $r = \App\Models\CalendarGiftRecipient::query()->sole();
-        $this->assertSame(['Иван Петров', 'ООО «Лифт-Сервис»', '+79001234567', 'Москва, ул. Лифтовая, д. 1, офис 5', 'new', true],
+        $this->assertSame(['Иван Петров', 'ООО «Лифт-Сервис»', '+79001234567', null, 'new', true],
             [$r->contact_name, $r->company_name, $r->phone, $r->address, $r->status, $r->subscribed]);
         $this->assertNotNull($r->consent_at);
         $this->assertFalse($this->chat()->isVerified());

@@ -9,8 +9,9 @@ use Illuminate\Support\Carbon;
 
 /**
  * Сценарий бота «Календарь в подарок» (ссылка ?start=calendar): подписаться на канал → «Я подписался» (бот канала
- * проверяет подписку) → согласие на обработку данных → имя, компания, телефон, адрес → запись в список получателей
- * (CalendarGiftRecipient). E-mail не спрашиваем — подтверждение почты здесь лишнее. Лимита на организацию нет.
+ * проверяет подписку) → согласие на обработку данных → ФИО, организация, контакт (телефон или e-mail) → запись в список
+ * получателей (CalendarGiftRecipient). Адрес и способ передачи календаря согласуем с человеком отдельно (решение заказчика
+ * 19.11.2026) — бот их не спрашивает. Лимита на организацию нет.
  *
  * Кнопки — «cal_…», шаги анкеты — awaiting «cal_…»; BotConversationService передаёт их сюда до общих правил
  * (в т.ч. до проверки e-mail). $say — его отправка с журналом: fn (string $html, array $buttons = []).
@@ -19,10 +20,9 @@ class CalendarGiftFlow
 {
     /** Шаги анкеты по порядку: поле черновика => вопрос. */
     private const STEPS = [
-        'cal_name' => ['contact_name', 'Как к вам обращаться? Напишите имя и фамилию получателя.'],
-        'cal_company' => ['company_name', 'Компания, в которую отправить календарь?'],
-        'cal_phone' => ['phone', 'Телефон получателя — для курьера.'],
-        'cal_address' => ['address', 'Адрес доставки: город, улица, дом, офис. Если нужен индекс — добавьте его.'],
+        'cal_name' => ['contact_name', 'Напишите ФИО получателя.'],
+        'cal_company' => ['company_name', 'Организация?'],
+        'cal_phone' => ['phone', 'Телефон или e-mail для связи — по нему согласуем, как передать вам календарь.'],
     ];
 
     public function __construct(private readonly ChannelSubscriptionChecker $checker) {}
@@ -54,7 +54,7 @@ class CalendarGiftFlow
             return;
         }
         if (($mine = $this->recipient($chat)) !== null) {
-            $say('Вы уже в списке получателей календаря '.$this->campaign().".\n\n".$this->summary($mine->only(['contact_name', 'company_name', 'phone', 'address'])),
+            $say('Вы уже в списке получателей календаря '.$this->campaign().".\n\n".$this->summary($mine->only(['contact_name', 'company_name', 'phone'])),
                 [[['text' => '✏️ Изменить данные', 'data' => 'cal_edit']], [['text' => 'Меню', 'data' => 'menu']]]);
 
             return;
@@ -68,7 +68,7 @@ class CalendarGiftFlow
         $say('<b>Фирменный календарь MyZip '.$this->campaign().' в подарок</b> 🎁'."\n\n"
             .'Отправим календарь подписчикам нашего канала в '.$chat->channel->label().". Два шага:\n"
             ."1. Подпишитесь на канал — кнопка ниже.\n"
-            .'2. Нажмите «Я подписался» и укажите, куда отправить календарь.', $buttons);
+            .'2. Нажмите «Я подписался» и оставьте контакты — как передать календарь, согласуем с вами отдельно.', $buttons);
     }
 
     public function onButton(MessengerChat $chat, string $action, Closure $say): void
@@ -91,8 +91,9 @@ class CalendarGiftFlow
         $error = match ($step) {
             'cal_name' => mb_strlen($text) < 2 ? 'Напишите, пожалуйста, имя получателя.' : null,
             'cal_company' => mb_strlen($text) < 2 ? 'Напишите название компании.' : null,
-            'cal_phone' => strlen((string) preg_replace('/\D+/', '', $text)) < 10 ? 'Похоже, в номере не хватает цифр. Пример: +7 900 123-45-67.' : null,
-            'cal_address' => mb_strlen($text) < 10 ? 'Напишите адрес подробнее: город, улица, дом.' : null,
+            // Телефон (10+ цифр) или e-mail.
+            'cal_phone' => strlen((string) preg_replace('/\D+/', '', $text)) < 10 && filter_var($text, FILTER_VALIDATE_EMAIL) === false
+                ? 'Напишите телефон (например, +7 900 123-45-67) или e-mail.' : null,
             default => null,
         };
         if (! isset(self::STEPS[$step])) {
@@ -106,7 +107,7 @@ class CalendarGiftFlow
             return;
         }
         $draft = (array) $chat->stateGet('cal', []);
-        $draft[self::STEPS[$step][0]] = mb_substr($text, 0, $step === 'cal_address' ? 1000 : 255);
+        $draft[self::STEPS[$step][0]] = mb_substr($text, 0, $step === 'cal_phone' ? 50 : 255);
         $chat->stateSet('cal', $draft);
         $chat->save();
         $this->next($chat, $step, $say);
@@ -139,7 +140,7 @@ class CalendarGiftFlow
         $chat->stateSet('cal', ['subscribed_at' => now()->toIso8601String()]);
         $chat->save();
         $say("Спасибо за подписку! Чтобы отправить календарь, нам нужны имя, компания, телефон и адрес получателя.\n\n"
-            .'Нажимая «Согласен», вы соглашаетесь на обработку этих данных для отправки календаря.',
+            .'Нажимая «Согласен», вы соглашаетесь на обработку этих данных для передачи календаря.',
             [[['text' => '✅ Согласен', 'data' => 'cal_consent']], [['text' => 'Отмена', 'data' => 'menu']]]);
     }
 
@@ -197,7 +198,7 @@ class CalendarGiftFlow
     private function save(MessengerChat $chat, Closure $say): void
     {
         $draft = (array) $chat->stateGet('cal', []);
-        if (empty($draft['contact_name']) || empty($draft['address']) || empty($draft['subscribed_at'])) {
+        if (empty($draft['contact_name']) || empty($draft['phone']) || empty($draft['subscribed_at'])) {
             $this->start($chat, $say);
 
             return;
@@ -209,7 +210,6 @@ class CalendarGiftFlow
                 'contact_name' => $draft['contact_name'],
                 'company_name' => $draft['company_name'] ?? null,
                 'phone' => $draft['phone'] ?? null,
-                'address' => $draft['address'],
                 'organization_id' => $chat->organization_id,
                 'status' => CalendarGiftRecipient::STATUS_NEW,
                 'consent_at' => $draft['consent_at'] ?? now(),
@@ -219,8 +219,8 @@ class CalendarGiftFlow
         );
         $chat->stateForget('awaiting', 'cal');
         $chat->save();
-        $say('Готово! Вы в списке получателей календаря '.$this->campaign().'. Отправим его по указанному адресу — '
-            .'когда календарь будет в пути, напишем здесь. Оставайтесь с нами в канале 🙂', [[['text' => 'Меню', 'data' => 'menu']]]);
+        $say('Готово! Вы в списке получателей календаря '.$this->campaign().'. Мы свяжемся с вами, чтобы согласовать, '
+            .'куда и как передать календарь. Оставайтесь с нами в канале 🙂', [[['text' => 'Меню', 'data' => 'menu']]]);
     }
 
     /** «Изменить данные» — анкета заново; подписку проверяем снова (могла пропасть). */
@@ -256,6 +256,6 @@ class CalendarGiftFlow
     {
         $e = fn ($v) => e((string) ($v ?? '—'));
 
-        return '👤 '.$e($d['contact_name'] ?? null)."\n🏢 ".$e($d['company_name'] ?? null)."\n📞 ".$e($d['phone'] ?? null)."\n📍 ".$e($d['address'] ?? null);
+        return '👤 '.$e($d['contact_name'] ?? null)."\n🏢 ".$e($d['company_name'] ?? null)."\n📞 ".$e($d['phone'] ?? null);
     }
 }

@@ -10,7 +10,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 /** Список получателей календаря в Excel — для отправки (курьер, почта). Отменённые не выгружаются. */
 class CalendarGiftExportController extends Controller
 {
-    public const HEADER = ['№', 'Получатель', 'Компания', 'Телефон', 'Адрес', 'Канал', 'Подписка', 'Статус', 'Записался'];
+    public const HEADER = ['№', 'Получатель', 'Компания', 'Контакт (телефон или e-mail)', 'Адрес', 'Канал', 'Подписка', 'Статус', 'Записался'];
 
     public function __invoke(): StreamedResponse
     {
