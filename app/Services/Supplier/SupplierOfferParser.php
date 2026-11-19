@@ -618,11 +618,9 @@ class SupplierOfferParser
                 return '';
             }
             $msg = \Webklex\PHPIMAP\Message::fromString($raw);
-            $text = trim((string) $msg->getTextBody());
-            if ($text === '') {
-                $html = method_exists($msg, 'getHTMLBody') ? (string) $msg->getHTMLBody() : '';
-                $text = trim(strip_tags($html));
-            }
+            // Нет текстовой части или она обрезана отправителем (JIEFENG) — текст из HTML.
+            $html = method_exists($msg, 'getHTMLBody') ? (string) $msg->getHTMLBody() : '';
+            $text = trim(app(\App\Services\Mail\EmailTextCleanerService::class)->bodyText((string) $msg->getTextBody(), $html));
             $text = $this->stripQuotedReply($text);
 
             return mb_substr($text, 0, 4000);

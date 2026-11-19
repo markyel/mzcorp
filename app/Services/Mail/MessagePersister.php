@@ -1222,9 +1222,6 @@ class MessagePersister
         // CSS, а сам запрос шёл после них — классификатор видел только CSS и
         // тему, и записал заявку в постпродажу. Если в plain есть CSS, а HTML
         // у письма есть, чистим HTML сами.
-        if (trim($plain) !== '' && ! (self::looksLikeCss($plain) && trim($html) !== '')) {
-            return $plain;
-        }
         if (trim($html) === '') {
             return $plain;
         }
@@ -1232,6 +1229,11 @@ class MessagePersister
             $fromHtml = $this->cleanString(app(\App\Services\Mail\EmailTextCleanerService::class)->htmlToText($html));
         } catch (\Throwable $e) {
             $fromHtml = $this->cleanString(trim(strip_tags($html)));
+        }
+        // Текстовая часть обрезана отправителем: одно приветствие JIEFENG, «| |» bidzaar — письмо целиком в HTML
+        // (EmailTextCleanerService::plainIsCut, 19.11.2026).
+        if (trim($plain) !== '' && ! self::looksLikeCss($plain) && ! EmailTextCleanerService::plainIsCut($plain, $fromHtml)) {
+            return $plain;
         }
 
         // Если из HTML ничего осмысленного не вышло, лучше мусорный plain,

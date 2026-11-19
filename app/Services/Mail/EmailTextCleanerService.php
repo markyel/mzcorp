@@ -161,6 +161,78 @@ class EmailTextCleanerService
      * (LazyLift и маркетинговые письма часто содержат таблицу позиций;
      * без этого преобразования AI получит сплошную строку без структуры).
      */
+    /**
+     * Таблица без вложенных таблиц — строками «ячейка | ячейка», помеченными $rendered (внешняя таблица с ними —
+     * каркас вёрстки, см. htmlToText).
+     */
+    private function tableRows(string $tableHtml, string $rendered): string
+    {
+        $rows = [];
+        if (preg_match_all('/<tr\b[^>]*>(.*?)<\/tr>/is', $tableHtml, $rs)) {
+            foreach ($rs[1] as $rowHtml) {
+                $cells = [];
+                if (preg_match_all('/<t[dh]\b[^>]*>(.*?)<\/t[dh]>/is', $rowHtml, $cs)) {
+                    foreach ($cs[1] as $cellHtml) {
+                        $cell = strip_tags($cellHtml);
+                        $cell = html_entity_decode($cell, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                        $cell = preg_replace('/\s+/u', ' ', $cell) ?? $cell;
+                        $cells[] = trim($cell);
+                    }
+                }
+                if (count($cells) > 0) {
+                    $rows[] = implode(' | ', $cells);
+                }
+            }
+        }
+
+        return $rows === [] ? '' : $rendered."\n".implode("\n", $rows)."\n";
+    }
+
+    /** Начало цитаты прошлого письма — сразу за текстовой частью, если она — только наш ответ без цитаты. */
+    private const QUOTE_START = '/(-{3,}|_{5,}|(^|\s)(from|от|от кого|sent|date|дата|发件人|发送时间|отправлено)\s*[:：]|wrote:|написал|пишет:|original message|исходное сообщение|replied message|\d{1,2}[.\/]\d{1,2}[.\/]\d{2,4},? (в )?\d{1,2}:\d{2}|\d{1,2} (янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек)\S* \d{4})/iu';
+
+    /**
+     * Текстовая часть письма обрезана отправителем, а всё письмо — в HTML ($fromHtml — его текст, htmlToText):
+     *  — в текстовой части ни буквы, ни цифры («| |» у уведомлений bidzaar), а в HTML текст есть;
+     *  — она короткая (до 300 знаков) и совпадает с началом HTML, а дальше в HTML не цитата, а ещё 300+ знаков
+     *    письма. Почтовая программа JIEFENG (kid@escalatorparts.cn) оставляет в тексте одно приветствие «Hello Sergey
+     *    Agryzkov», цены — только в HTML (19.11.2026). Ответ «спасибо» над цитатой не считается: за ним — цитата.
+     * На 91 тыс. писем за 120 дней правило срабатывает только на этих отправителей.
+     */
+    public static function plainIsCut(string $plain, string $fromHtml): bool
+    {
+        $p = trim((string) preg_replace('/\s+/u', ' ', $plain));
+        $h = trim((string) preg_replace('/\s+/u', ' ', $fromHtml));
+        if ($p === '' || $h === '') {
+            return false;
+        }
+        if (preg_match('/[\p{L}\p{N}]/u', $p) !== 1) {
+            return preg_match_all('/\p{L}/u', $h) >= 20;
+        }
+        if (mb_strlen($p) > 300 || mb_strlen($h) < mb_strlen($p) + 300) {
+            return false;
+        }
+        $pos = mb_stripos($h, mb_substr($p, 0, 40));
+        if ($pos === false || $pos > 20) {
+            return false;
+        }
+
+        return preg_match(self::QUOTE_START, mb_substr($h, $pos + mb_strlen($p), 250)) !== 1;
+    }
+
+    /** Текст письма: текстовая часть, а если её нет или она обрезана (plainIsCut) — из HTML. */
+    public function bodyText(string $plain, string $html): string
+    {
+        if (trim($html) === '') {
+            return $plain;
+        }
+        if (trim($plain) !== '' && ! self::plainIsCut($plain, $fromHtml = $this->htmlToText($html))) {
+            return $plain;
+        }
+
+        return $fromHtml ?? $this->htmlToText($html);
+    }
+
     public function htmlToText(string $html): string
     {
         if (trim($html) === '') {
@@ -176,31 +248,26 @@ class EmailTextCleanerService
         // article | description | qty — раньше выходила «article\n |
         // \ndescription\n | \nqty\n», LLM делил по cells, появлялось 4
         // позиции из 2 реальных).
-        $text = preg_replace_callback(
-            '/<table\b[^>]*>(.*?)<\/table>/is',
-            function ($m) {
-                $tableHtml = $m[1];
-                $rows = [];
-                if (preg_match_all('/<tr\b[^>]*>(.*?)<\/tr>/is', $tableHtml, $rs)) {
-                    foreach ($rs[1] as $rowHtml) {
-                        $cells = [];
-                        if (preg_match_all('/<t[dh]\b[^>]*>(.*?)<\/t[dh]>/is', $rowHtml, $cs)) {
-                            foreach ($cs[1] as $cellHtml) {
-                                $cell = strip_tags($cellHtml);
-                                $cell = html_entity_decode($cell, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                                $cell = preg_replace('/\s+/u', ' ', $cell) ?? $cell;
-                                $cells[] = trim($cell);
-                            }
-                        }
-                        if (count($cells) > 0) {
-                            $rows[] = implode(' | ', $cells);
-                        }
-                    }
-                }
-                return $rows === [] ? '' : "\n" . implode("\n", $rows) . "\n";
-            },
-            $text
-        ) ?? $text;
+        //
+        // Вложенные таблицы (вёрстка рассылок: таблица в ячейке таблицы) — изнутри наружу. Нежадный «<table>…</table>»
+        // закрывал внешнюю таблицу первым же «</table>» внутренней, и текст письма пропадал целиком: у уведомления bidzaar
+        // выходило «| |» (19.11.2026, 31 письмо за 120 дней). Самые внутренние таблицы — строками с « | »; таблица, внутри
+        // которой уже была таблица, — каркас вёрстки: её ячейки — просто блоки текста.
+        $rendered = "\u{E000}";
+        for ($guard = 0; $guard < 20; $guard++) {
+            $next = preg_replace_callback(
+                '/<table\b[^>]*>((?:(?!<table\b).)*?)<\/table>/is',
+                fn ($m) => str_contains($m[1], $rendered)
+                    ? "\n".(preg_replace('/<\/?(tr|td|th|tbody|thead|tfoot)\b[^>]*>/i', "\n", $m[1]) ?? $m[1])."\n"
+                    : $this->tableRows($m[1], $rendered),
+                $text
+            );
+            if ($next === null || $next === $text) {
+                break;
+            }
+            $text = $next;
+        }
+        $text = str_replace($rendered, '', $text);
 
         // Прочие табличные/блочные разделители — на случай если таблица
         // была повреждена или используется без <table> (раньше работали

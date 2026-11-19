@@ -216,10 +216,8 @@ class NestedAttachmentUnpacker
         if ($msg === null) {
             return '';
         }
-        $text = trim((string) $msg->getTextBody());
-        if ($text === '' && $msg->hasHTMLBody()) {
-            $text = app(EmailTextCleanerService::class)->htmlToText((string) $msg->getHTMLBody());
-        }
+        // Нет текстовой части или она обрезана отправителем — текст из HTML (EmailTextCleanerService::bodyText).
+        $text = trim(app(EmailTextCleanerService::class)->bodyText((string) $msg->getTextBody(), $msg->hasHTMLBody() ? (string) $msg->getHTMLBody() : ''));
         $text = trim(preg_replace("/\n{3,}/", "\n\n", str_replace("\r", '', $text)) ?? $text);
         if ($text === '') {
             return '';
