@@ -88,7 +88,9 @@ class SupplierItemTranslator
             if (! is_array($row) || ! isset($row['id'])) {
                 continue;
             }
-            $en = trim((string) ($row['name_en'] ?? ''));
+            // Qwen (RouterAI, с 16.11.2026) нередко отвечает ключом входа — «name», а не «name_en»: перевод отбрасывался,
+            // и в письма шло русское название (19.11.2026). Берём любой из ключей; кириллица ниже — не перевод.
+            $en = trim((string) ($row['name_en'] ?? $row['name'] ?? $row['en'] ?? ''));
             // Ответ «перевода» кириллицей — не перевод.
             if ($en !== '' && preg_match('/\p{Cyrillic}/u', $en) !== 1) {
                 $out[(int) $row['id']] = $en;

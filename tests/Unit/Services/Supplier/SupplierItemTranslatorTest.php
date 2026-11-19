@@ -42,6 +42,18 @@ class SupplierItemTranslatorTest extends TestCase
         $this->assertSame([43729 => 'Traction sheave D=600 mm, d=13 mm, 6 grooves, U-shaped groove, gearless machine MX20'], $names);
     }
 
+    public function test_an_answer_under_the_input_key_is_taken(): void
+    {
+        // Qwen через RouterAI отвечает «name» вместо «name_en» (19.11.2026, T-DNVFSU); русский ответ — не перевод.
+        $openai = Mockery::mock(OpenAIChatService::class);
+        $openai->shouldReceive('chat')->once()->andReturn(['content' => json_encode(['items' => [
+            ['id' => 34403, 'name' => 'Landing door lock MS 42 P (S1 a), triangular key, red indicator light'],
+        ]])]);
+
+        $this->assertSame([34403 => 'Landing door lock MS 42 P (S1 a), triangular key, red indicator light'],
+            (new SupplierItemTranslator($openai))->translate([34403 => 'Ключевина (замок) MS 42 P (S1 a), ключ треуголный, красная подсветка']));
+    }
+
     public function test_a_broken_answer_is_asked_again(): void
     {
         // 19.11.2026: сбойный ответ модели — названия ушли поставщикам по-русски (MZ2026-02350).
