@@ -1,5 +1,6 @@
 {{-- «Не покрыто КП» (Livewire Requests\QuoteCoverage): позиции, на которые ещё не дали КП. Пусто и без отметок — ничего.
-     «Ответим позже» сворачивает позицию в строку, пока по ней нет цены; появилась цена — снова в списке с пометкой.
+     «Ответим позже» сворачивает позицию в строку; снова в списке — когда цена появилась ПОСЛЕ этого (quote_price_ready_at
+     позже quote_deferred_at). Цена, что уже была, позицию не разворачивает (MZ2026-01254, 20.11.2026).
      У закрытой заявки — только отметки (в т.ч. «перенесено в заявку-остаток» со ссылкой), без кнопок. --}}
 @php
     $open = $this->isClosed ? collect() : $this->uncovered;
@@ -8,7 +9,8 @@
     $remainder = $this->remainder;
     $prices = $open->isNotEmpty() ? $this->prices : [];
     $priceLabels = \App\Services\Quotes\QuoteCoverageService::PRICE_LABELS;
-    [$later, $active] = $open->partition(fn ($it) => $it->quote_deferred_at !== null && ! isset($prices[$it->id]));
+    [$later, $active] = $open->partition(fn ($it) => $it->quote_deferred_at !== null
+        && ! ($it->quote_price_ready_at !== null && $it->quote_price_ready_at->gt($it->quote_deferred_at)));
 @endphp
 <div>
 @if($this->hasQuote && ($open->isNotEmpty() || $done->isNotEmpty()))
@@ -28,9 +30,7 @@
                         @if($it->possibly_discontinued)<span class="chip chip-warn" style="margin-left: 6px;" title="Все спрошенные поставщики отказали">возможно, не поставляется</span>@endif
                     </div>
                     <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-                        @unless(isset($prices[$it->id]))
-                            <button type="button" wire:click="resolve({{ $it->id }}, 'later')" class="btn btn-xs" title="Клиенту сказали, что по позиции ответим позже: свернуть до появления цены. Заявка остаётся в «Частичном КП»">ответим позже</button>
-                        @endunless
+                        <button type="button" wire:click="resolve({{ $it->id }}, 'later')" class="btn btn-xs" title="Клиенту сказали, что по позиции ответим позже: свернуть; если цены ещё нет — развернётся, когда она появится. Заявка остаётся в «Частичном КП»">ответим позже</button>
                         <button type="button" wire:click="resolve({{ $it->id }}, 'substitute')" class="btn btn-xs" title="В КП предложили другое вместо этой позиции">закрыто заменой</button>
                         <button type="button" wire:click="resolve({{ $it->id }}, 'declined')" class="btn btn-xs" title="Мы сообщили клиенту, что не поставляем">мы отказали</button>
                         <button type="button" wire:click="resolve({{ $it->id }}, 'not_needed')" wire:confirm="Отключить позицию «{{ mb_strimwidth((string) $it->parsed_name, 0, 60, '…') }}»? Клиенту она не нужна."
@@ -50,6 +50,7 @@
                         <div wire:key="qc-later-{{ $it->id }}" style="display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;">
                             <span>{{ $it->parsed_name ?: '—' }}</span>
                             <span class="text-fg-3 text-[11.5px]">с {{ $it->quote_deferred_at->format('d.m') }}</span>
+                            @if(isset($prices[$it->id]))<span class="text-[11.5px]" style="color: var(--status-ok-fg);">📤 {{ $priceLabels[$prices[$it->id]] }}</span>@endif
                             <button type="button" wire:click="resolve({{ $it->id }}, 'unlater')" class="text-[11.5px]" style="color: var(--sky-700); background: none; border: 0; cursor: pointer;">вернуть в список</button>
                         </div>
                     @endforeach
