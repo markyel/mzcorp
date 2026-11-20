@@ -29,4 +29,21 @@ class SupplierRepresentativesTest extends TestCase
 
         $this->assertSame([3, 4, 6], $picked->pluck('id')->sort()->values()->all());
     }
+
+    public function test_a_picked_address_without_quoting_is_flagged(): void
+    {
+        $info = $this->row(72, 6, ['general', 'quoting'], 1);
+        $info->email = 'info@unisystem.si';
+        $alex = $this->row(12, 6, ['logistics'], 3);
+        $alex->email = 'alex@unisystem.si';
+        $noRoles = $this->row(20, 9, [], 1);
+        $loose = $this->row(30, null, ['finance'], null);
+        $org = collect([$info, $alex, $noRoles, $this->row(21, 9, [], 2)]);
+
+        $this->assertSame(
+            [['email' => 'alex@unisystem.si', 'topics' => ['Логистика'], 'default' => 'info@unisystem.si']],
+            SupplierMatchService::nonQuotingPicks(collect([$alex, $info, $noRoles, $loose]), $org),
+        );
+        $this->assertSame([], SupplierMatchService::nonQuotingPicks(collect([$info]), $org));
+    }
 }

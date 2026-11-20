@@ -194,7 +194,7 @@
                                 @if(($o['already_awaiting'] ?? 0) > 0)
                                     <span class="chip chip-warn text-[10px] ml-1" title="Уже отправлен запрос — ждём ответ по этим позициям">⏳ уже ждём · {{ $o['already_awaiting'] }} поз.</span>
                                 @endif
-                                @if($o['email'])<span class="block text-[11px] text-fg-4 mono">{{ $o['email'] }}</span>@endif
+                                @if($o['email'])<span class="block text-[11px] text-fg-4"><span class="mono">{{ $o['email'] }}</span>@if(($o['topics'] ?? []) !== [])<span title="Роль адреса у поставщика"> · {{ implode(', ', $o['topics']) }}</span>@endif</span>@endif
                             </span>
                         </label>
                     @empty
@@ -450,6 +450,13 @@
                     Нажмите «🌐 Перевести позиции (ИИ)» или впишите названия по-английски — до этого отправка недоступна.
                 </div>
             @endif
+            {{-- Отмечен ящик без роли «Расценка» — запрос уйдёт именно туда (20.11.2026, alex@unisystem.si). Не запрет. --}}
+            @foreach($this->nonQuotingPicks as $nq)
+                <div wire:key="nq-{{ $nq['email'] }}" class="text-[12px]" style="padding: 8px 10px; border: 1px solid var(--amber-300, #fcd34d); border-radius: 6px; background: var(--amber-50, #fffbeb); color: var(--amber-800, #92400e);">
+                    <b class="mono">{{ $nq['email'] }}</b> — {{ $nq['topics'] !== [] ? 'контакт: '.mb_strtolower(implode(', ', $nq['topics'])) : 'контакт без роли' }}, не для расценки. Запрос уйдёт именно на этот адрес.
+                    @if($nq['default'])Для расценки по умолчанию — <span class="mono">{{ $nq['default'] }}</span>.@endif
+                </div>
+            @endforeach
 
             <div class="flex items-center gap-2 pt-2 border-t border-border-subtle">
                 <button type="button" wire:click="openEmailPreview" wire:loading.attr="disabled" wire:target="openEmailPreview,newFiles"

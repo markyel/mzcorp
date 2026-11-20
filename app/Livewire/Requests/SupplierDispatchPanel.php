@@ -847,7 +847,7 @@ class SupplierDispatchPanel extends Component
     /**
      * Подобранные (по выбранным позициям) + добавленные вручную.
      *
-     * @return array<int, array{id:int, name:string, email:?string, matched:bool, item_count:int, already_awaiting:int}>
+     * @return array<int, array{id:int, name:string, email:?string, matched:bool, item_count:int, already_awaiting:int, topics:list<string>}>
      */
     #[Computed]
     public function supplierOptions(): array
@@ -885,6 +885,8 @@ class SupplierDispatchPanel extends Component
                 'matched' => isset($coverage[$id]),
                 'item_count' => $coverage[$id] ?? 0,
                 'already_awaiting' => $awaiting[mb_strtolower(trim((string) $s->email))] ?? 0,
+                // Роли адреса у поставщика: видно, что ящик — не для расценки (20.11.2026, alex@unisystem.si — «Логистика»).
+                'topics' => array_values(array_intersect_key(\App\Livewire\Suppliers\SupplierCard::TOPICS, array_flip((array) ($s->contact_topics ?: [])))),
             ];
         }
         usort($out, fn ($a, $b) => $b['item_count'] <=> $a['item_count']);
@@ -1124,6 +1126,26 @@ class SupplierDispatchPanel extends Component
             ->filter(fn (RequestItem $it) => ! \App\Support\EnglishText::isEnglish($this->editedNamesEn[$it->id] ?? null))
             ->map(fn (RequestItem $it) => mb_strimwidth(trim((string) ($this->editedNames[$it->id] ?? '')) ?: (string) $it->parsed_name, 0, 60, '…'))
             ->values()->all();
+    }
+
+    /**
+     * Отмеченные ящики не для расценки (SupplierMatchService::nonQuotingPicks) — предупреждение над отправкой.
+     *
+     * @return list<array{email: string, topics: list<string>, default: ?string}>
+     */
+    #[Computed]
+    public function nonQuotingPicks(): array
+    {
+        $ids = array_values(array_map('intval', array_keys(array_filter($this->selectedSuppliers))));
+        $selected = $ids === [] ? collect() : Supplier::query()->whereIn('id', $ids)->whereNotNull('supplier_organization_id')
+            ->get(['id', 'email', 'supplier_organization_id', 'contact_topics', 'contact_position']);
+        if ($selected->isEmpty()) {
+            return [];
+        }
+        $org = Supplier::query()->whereIn('supplier_organization_id', $selected->pluck('supplier_organization_id')->unique())
+            ->whereNotNull('email')->get(['id', 'email', 'supplier_organization_id', 'contact_topics', 'contact_position']);
+
+        return SupplierMatchService::nonQuotingPicks($selected, $org);
     }
 
     private function hasEnglishSupplierSelected(): bool

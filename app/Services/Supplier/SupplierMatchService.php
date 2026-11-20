@@ -97,6 +97,35 @@ class SupplierMatchService
             ->values();
     }
 
+    /**
+     * Отмеченные адреса не для расценки: у организации есть контакт «Расценка», а отмечен ящик без неё — запрос уйдёт
+     * именно туда (20.11.2026, MZ2026-02508: запрос ушёл на alex@unisystem.si — «Логистика», вместо info@).
+     * Не запрет — предупреждение: иногда так и нужно. Роли у организации не отмечены — не предупреждаем.
+     *
+     * @param  Collection<int, Supplier>  $selected  отмеченные адреса
+     * @param  Collection<int, Supplier>  $orgAddresses  все адреса их организаций
+     * @return list<array{email: string, topics: list<string>, default: ?string}>  default — кому ушло бы по умолчанию
+     */
+    public static function nonQuotingPicks(Collection $selected, Collection $orgAddresses): array
+    {
+        $quoting = fn (Supplier $s) => in_array('quoting', (array) ($s->contact_topics ?: []), true);
+        $byOrg = $orgAddresses->groupBy(fn (Supplier $s) => (int) $s->supplier_organization_id);
+        $out = [];
+        foreach ($selected as $s) {
+            $org = $byOrg->get((int) $s->supplier_organization_id);
+            if (! $s->supplier_organization_id || $quoting($s) || $org === null || ! $org->contains($quoting)) {
+                continue;
+            }
+            $out[] = [
+                'email' => (string) $s->email,
+                'topics' => array_values(array_intersect_key(\App\Livewire\Suppliers\SupplierCard::TOPICS, array_flip((array) ($s->contact_topics ?: [])))),
+                'default' => self::representatives($org)->first()?->email,
+            ];
+        }
+
+        return $out;
+    }
+
     /** Представитель поставщика по организации (см. representatives). */
     public static function representativeId(int $organizationId): ?int
     {
