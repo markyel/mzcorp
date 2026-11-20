@@ -164,6 +164,7 @@
                     $qpRouting = app(\App\Services\QuoteParts\QuotePartsRouting::class);
                     $qpRouted = $qpRouting->routedIds(collect($this->supplierOptions)->pluck('id'));
                     $qpOffsystem = $qpRouting->offsystemIds(collect($this->supplierOptions)->pluck('id'));
+                    $nqByEmail = array_column($this->nonQuotingPicks, null, 'email');
                 @endphp
                 <div class="border border-border rounded-md divide-y divide-border-subtle">
                     @php $orgOpts = $opts; $prevOrgOpt = null; @endphp
@@ -195,6 +196,12 @@
                                     <span class="chip chip-warn text-[10px] ml-1" title="Уже отправлен запрос — ждём ответ по этим позициям">⏳ уже ждём · {{ $o['already_awaiting'] }} поз.</span>
                                 @endif
                                 @if($o['email'])<span class="block text-[11px] text-fg-4"><span class="mono">{{ $o['email'] }}</span>@if(($o['topics'] ?? []) !== [])<span title="Роль адреса у поставщика"> · {{ implode(', ', $o['topics']) }}</span>@endif</span>@endif
+                                {{-- Отмечен ящик не для расценки — сразу под ним, не только над кнопкой отправки (20.11.2026). --}}
+                                @if(! empty($selectedSuppliers[$o['id']]) && ($nq = $nqByEmail[(string) $o['email']] ?? null))
+                                    <span class="block text-[11.5px] mt-1" style="padding: 4px 8px; border: 1px solid var(--amber-300, #fcd34d); border-radius: 6px; background: var(--amber-50, #fffbeb); color: var(--amber-800, #92400e);">
+                                        ⚠ Не для расценки — запрос уйдёт именно сюда.@if($nq['default']) Для расценки по умолчанию — <span class="mono">{{ $nq['default'] }}</span>.@endif
+                                    </span>
+                                @endif
                             </span>
                         </label>
                     @empty
