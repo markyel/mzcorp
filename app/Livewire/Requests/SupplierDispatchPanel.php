@@ -1121,7 +1121,7 @@ class SupplierDispatchPanel extends Component
         $ids = array_keys(array_filter($this->selectedItems));
 
         return $ids === [] ? [] : RequestItem::query()->whereIn('id', $ids)->orderBy('position')->get(['id', 'parsed_name'])
-            ->filter(fn (RequestItem $it) => ($en = trim((string) ($this->editedNamesEn[$it->id] ?? ''))) === '' || preg_match('/\p{Cyrillic}/u', $en) === 1)
+            ->filter(fn (RequestItem $it) => ! \App\Support\EnglishText::isEnglish($this->editedNamesEn[$it->id] ?? null))
             ->map(fn (RequestItem $it) => mb_strimwidth(trim((string) ($this->editedNames[$it->id] ?? '')) ?: (string) $it->parsed_name, 0, 60, '…'))
             ->values()->all();
     }
@@ -1329,7 +1329,7 @@ class SupplierDispatchPanel extends Component
 
         $edits = [
             'names_ru' => $this->editedNames,
-            'names_en' => $this->editedNamesEn,
+            'names_en' => array_map(fn ($n) => \App\Support\EnglishText::fold((string) $n), $this->editedNamesEn),
             'oem' => $this->editedOem,
             'qty' => $this->editedQty,
             'qty_en' => $this->editedQtyEn,
@@ -1608,7 +1608,7 @@ class SupplierDispatchPanel extends Component
         $lang = in_array($supplier->language, ['ru', 'en'], true) ? $supplier->language : 'ru';
         $edits = [
             'names_ru' => $this->editedNames,
-            'names_en' => $this->editedNamesEn,
+            'names_en' => array_map(fn ($n) => \App\Support\EnglishText::fold((string) $n), $this->editedNamesEn),
             'oem' => $this->editedOem,
             'qty' => $this->editedQty,
             'qty_en' => $this->editedQtyEn,
@@ -1730,7 +1730,7 @@ class SupplierDispatchPanel extends Component
                 'id' => $it->id,
                 'name_model' => $lang === 'en' ? 'editedNamesEn' : 'editedNames',
                 'qty_model' => $lang === 'en' ? 'editedQtyEn' : 'editedQty',
-                'cyrillic' => $lang === 'en' && preg_match('/\p{Cyrillic}/u', $name) === 1,
+                'cyrillic' => $lang === 'en' && ! \App\Support\EnglishText::isEnglish($name),
             ];
         }
 
@@ -1767,7 +1767,7 @@ class SupplierDispatchPanel extends Component
             // каталожных позиций проверка шла после подстановки name_en, и выбор поставщика
             // молча затирал правку менеджера каталожным названием.
             $current = trim((string) ($this->editedNamesEn[$it->id] ?? ''));
-            if ($current !== '' && preg_match('/\p{Cyrillic}/u', $current) !== 1) {
+            if (\App\Support\EnglishText::isEnglish($current)) {
                 continue;
             }
             $catalog = $it->catalog_item_id ? $it->catalogItem : null;

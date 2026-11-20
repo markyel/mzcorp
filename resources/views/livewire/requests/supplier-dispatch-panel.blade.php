@@ -546,8 +546,8 @@
     @endif
     @endif {{-- canDispatch --}}
 
-    {{-- Пилот QuoteParts: отдельная отправка через платформу (участникам пилота при включённом рубильнике). --}}
-    <livewire:requests.quote-parts-panel :request-id="$requestId" :key="'qp-panel-'.$requestId" />
+    {{-- Пилот QuoteParts (отдельная кнопка «Запрос через QuoteParts») убран 20.11.2026: «Отправить запросы» выше сама
+         отправляет через QuoteParts тем, кто в нём, остальным — письмом; вторая кнопка путала. --}}
 
     @include('livewire.requests._supplier-bar')
 </div>

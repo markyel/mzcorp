@@ -90,9 +90,10 @@ class SupplierItemTranslator
             }
             // Qwen (RouterAI, с 16.11.2026) нередко отвечает ключом входа — «name», а не «name_en»: перевод отбрасывался,
             // и в письма шло русское название (19.11.2026). Берём любой из ключей; кириллица ниже — не перевод.
-            $en = trim((string) ($row['name_en'] ?? $row['name'] ?? $row['en'] ?? ''));
+            // Коды «как написано» несут кириллические двойники русского названия («Rope 250Т») — латиницей.
+            $en = \App\Support\EnglishText::fold(trim((string) ($row['name_en'] ?? $row['name'] ?? $row['en'] ?? '')));
             // Ответ «перевода» кириллицей — не перевод.
-            if ($en !== '' && preg_match('/\p{Cyrillic}/u', $en) !== 1) {
+            if (\App\Support\EnglishText::isEnglish($en)) {
                 $out[(int) $row['id']] = $en;
             }
         }

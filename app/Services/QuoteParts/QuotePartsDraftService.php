@@ -47,8 +47,8 @@ class QuotePartsDraftService
         $toTranslate = [];
         foreach ($rows as $r) {
             $typed = trim((string) ($names['en'][$r->id] ?? ''));
-            if ($typed !== '' && preg_match('/\p{Cyrillic}/u', $typed) !== 1) {
-                $en[$r->id] = $typed;
+            if (\App\Support\EnglishText::isEnglish($typed)) {
+                $en[$r->id] = \App\Support\EnglishText::fold($typed);
             } else {
                 $toTranslate[$r->id] = $ru($r);
             }
