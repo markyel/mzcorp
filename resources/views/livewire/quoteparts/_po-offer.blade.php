@@ -51,7 +51,7 @@
             <span class="pa-kind {{ $kind === 'original' ? 'is-orig' : 'is-dev' }}">{{ $kind === 'original' ? 'оригинал' : mb_strtolower(\App\Models\QuotePartsOffer::kindLabel($kind)) }}</span>
             {{-- Цена и «✎» рядом: правильная цена для 1С вручную (UniSystem M16131, 20.11.2026: разбор взял итог с
                  доставкой и НДС). Заданная вручную — в строке, цена поставщика — ниже. --}}
-            <div x-data="{ edit: false, v: @js($r['manual'] ? $money($r['price']) : '') }" style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+            <div x-data="{ edit: false, v: @js($r['price'] !== null ? $money($r['price']) : '') }" style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
                 <div style="display: flex; align-items: baseline; gap: 4px; justify-content: flex-end;">
                     <div style="display: flex; flex-direction: column; align-items: flex-end;">
                         @if($tiers->count() > 1 && ! $r['manual'])
@@ -66,9 +66,10 @@
                         <button type="button" x-on:click="edit = ! edit" class="pa-link" style="align-self: center; font-size: 13px; line-height: 1;" title="Задать правильную цену для 1С вручную">✎</button>
                     @endunless
                 </div>
-                <div x-show="edit" x-cloak style="display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-surface); text-align: left; width: 176px;">
+                <div x-show="edit" x-cloak x-on:click.outside="edit = false" x-on:keydown.escape.window="edit = false" style="position: relative; display: flex; flex-direction: column; gap: 4px; padding: 8px 8px 8px; padding-top: 18px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-surface); text-align: left; width: 176px;">
+                    <button type="button" x-on:click="edit = false" title="Закрыть" aria-label="Закрыть" style="position: absolute; top: 2px; right: 4px; border: 0; background: none; cursor: pointer; color: var(--fg-3); font-size: 14px; line-height: 1; padding: 2px;">✕</button>
                     <label class="pa-meta" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">цена для 1С, {{ $r['currency'] }}
-                        <input type="text" inputmode="decimal" x-model="v" placeholder="746,64" class="pa-input" style="width: 72px; height: 24px; text-align: right;"
+                        <input type="text" inputmode="decimal" x-model="v" class="pa-input" style="width: 72px; height: 24px; text-align: right;"
                                x-on:keydown.enter="$wire.setManualPrice({{ $r['id'] }}, v); edit = false"></label>
                     <div style="display: flex; gap: 4px; justify-content: flex-end;">
                         @if($r['manual'])<button type="button" class="pa-btn pa-btn-link" style="height: 24px;" x-on:click="$wire.setManualPrice({{ $r['id'] }}, ''); edit = false">снять</button>@endif
@@ -96,7 +97,8 @@
                 <div x-data="{ open: false, from: @js($num($uFrom)), to: @js($r['unit'] ? $num($uTo) : '') }" style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
                     <button type="button" class="pa-link" style="align-self: flex-end;" x-on:click="open = ! open"
                             title="Поставщик дал цену не за нашу единицу (за штуку вместо комплекта, за кусок вместо метра) — пересчитать для выгрузки в 1С">⇄ {{ $r['unit'] ? 'пересчёт' : 'пересчитать' }}</button>
-                    <div x-show="open" x-cloak style="display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-surface); text-align: left; width: 176px;">
+                    <div x-show="open" x-cloak x-on:click.outside="open = false" x-on:keydown.escape.window="open = false" style="position: relative; display: flex; flex-direction: column; gap: 4px; padding: 8px; padding-top: 18px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-surface); text-align: left; width: 176px;">
+                        <button type="button" x-on:click="open = false" title="Закрыть" aria-label="Закрыть" style="position: absolute; top: 2px; right: 4px; border: 0; background: none; cursor: pointer; color: var(--fg-3); font-size: 14px; line-height: 1; padding: 2px;">✕</button>
                         <label class="pa-meta" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">цена поставщика за
                             <input type="text" inputmode="decimal" x-model="from" class="pa-input" style="width: 56px; height: 24px; text-align: right;"></label>
                         <label class="pa-meta" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">в нашей позиции
