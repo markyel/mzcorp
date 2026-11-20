@@ -201,8 +201,21 @@ final class LinkedThreadHandler implements InboundRoutingHandler
             }
         }
 
+        // Клиент отвечает на наш вопрос — это ответ, а не новая заявка, как бы ни решил LLM (MZ2026-02505 → 02520,
+        // 20.11.2026: «укажите марку эскалатора и пришлите фото» → клиент прислал фото и марку, под цитатой исходного
+        // запроса — LLM увидел «новую заявку» с уверенностью 0,95).
+        $answersUs = ($intentResult['payload']['intent'] ?? null) === 'new_request' && $this->answersOurQuestion($message, $linkedRequest);
+        if ($answersUs) {
+            Log::info('MailRouter: reply to our question — new_request intent ignored, no spin-off', [
+                'email_message_id' => $message->id,
+                'request_id' => $linkedRequest->id,
+                'intent_confidence' => (float) ($intentResult['confidence'] ?? 0),
+            ]);
+        }
+
         if ($shouldParse
             && ! $confirmsOrder
+            && ! $answersUs
             && ($intentResult['payload']['intent'] ?? null) === 'new_request'
             && (float) ($intentResult['confidence'] ?? 0) >= self::NEW_REQUEST_CONFIDENCE
         ) {
@@ -395,6 +408,33 @@ final class LinkedThreadHandler implements InboundRoutingHandler
      * клиента. Гарды: origin mailbox — Personal; owner существует, не archived,
      * не в долгом unavailable; текущий assigned_user_id !== owner_user_id.
      */
+    /** Наш вопрос клиенту: вопросительный знак или просьба сообщить/прислать/уточнить. */
+    private const OUR_QUESTION = '/\?|(?<!\p{L})(укажите|пришлите|пришлёте|вышлите|уточните|подтвердите|сообщите|напишите|скажите|подскажите|какой|какая|какие|нужн[аоы]? ли)(?!\p{L})/iu';
+
+    /**
+     * Клиент отвечает на наш вопрос: последнее наше письмо по заявке до его письма (не старше недели) — с вопросом, и
+     * после него мы ничего не писали. Клиент может ответить и на своё же письмо (фото, потом марка — MZ2026-02505),
+     * поэтому смотрим наше последнее письмо, а не In-Reply-To.
+     */
+    private function answersOurQuestion(EmailMessage $message, Request $request): bool
+    {
+        $at = $message->sent_at ?? now();
+        $ours = EmailMessage::query()->where('related_request_id', $request->id)
+            ->where('direction', MailDirection::Outbound->value)->whereNull('supplier_inquiry_id')
+            ->where('sent_at', '<=', $at)->where('sent_at', '>=', $at->copy()->subDays(7))
+            ->orderByDesc('sent_at')->first();
+        if ($ours === null) {
+            return false;
+        }
+        $text = $this->cleaner->removeSignature($this->cleaner->cutQuotedReplyTail((string) ($ours->body_plain ?: strip_tags((string) $ours->body_html))));
+        // Автоуведомление «Ваше письмо получено, номер заявки…» — не вопрос.
+        if (preg_match('/принято в работу|номер вашей заявки/iu', $text) === 1) {
+            return false;
+        }
+
+        return preg_match(self::OUR_QUESTION, $text) === 1;
+    }
+
     /**
      * Отправитель — адрес из справочника поставщиков, не клиент заявки (тот же домен, на бесплатной
      * почте — тот же адрес) и не контакт клиентов: у двойных адресов (дилер, «Метеор») письмо клиентское.
