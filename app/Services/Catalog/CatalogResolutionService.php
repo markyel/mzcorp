@@ -539,6 +539,80 @@ class CatalogResolutionService
      * @param array<string, mixed> $extraPayload  Доп. поля в payload->catalog_match
      *                               (например, similarity для C-step).
      */
+    /**
+     * M-артикул замены из названия снятой карточки: «(ЗАМЕНЕНО НА M05793) Ролик…», «(ЗАМЕНЕН НА M01120 или M05365) …» —
+     * первый. «(замена B153ACJX03)» — наоборот, эта карточка сама замена, не трогаем.
+     */
+    public static function replacementSku(?string $name): ?string
+    {
+        if (preg_match('/ЗАМЕНЕН[А-Я]*\s+НА\s+([MМ])\s*(\d{5})/ui', (string) $name, $m) !== 1) {
+            return null;
+        }
+
+        return 'M'.$m[2];
+    }
+
+    /** Замена снятой карточки (по цепочке, до трёх шагов); нет активной замены — сама карточка. */
+    public static function followReplacement(CatalogItem $catalog): CatalogItem
+    {
+        $current = $catalog;
+        for ($hop = 0; $hop < 3; $hop++) {
+            $sku = self::replacementSku($current->name);
+            $next = $sku !== null && $sku !== $current->sku
+                ? CatalogItem::query()->where('sku', $sku)->where('is_active', true)->first()
+                : null;
+            if ($next === null) {
+                break;
+            }
+            $current = $next;
+        }
+
+        return $current;
+    }
+
+    /**
+     * К позиции дописали артикул (уточнение клиента — автоматически или кнопкой менеджера) — подбор каталога заново.
+     * Раньше подбор шёл только при разборе письма: клиент ответил «M15555» / «GLS126NT2, M01290», а карточка у позиции
+     * так и не появлялась до КП (38 позиций за 2 недели, разбор 20.11.2026). Позиция без карточки — полный подбор;
+     * с карточкой «по похожему названию» — только точный подбор по артикулу, и он её заменяет. Остальные карточки
+     * (по коду, ручные, из КП) не трогаем.
+     */
+    public function rematchAfterArticleAdded(RequestItem $item): bool
+    {
+        if ($item->catalog_item_id === null) {
+            return $this->matchOrResolve($item);
+        }
+        $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+        if (($payload['catalog_match']['method'] ?? null) !== 'C_name_vector') {
+            return false;
+        }
+
+        $previous = $item->catalog_item_id;
+        $item->catalog_item_id = null;
+        if (! $this->matchByArticle($item)) {
+            $item->catalog_item_id = $previous;
+            $item->syncOriginalAttribute('catalog_item_id');
+
+            return false;
+        }
+        if ((int) $item->catalog_item_id === (int) $previous) {
+            return false;
+        }
+
+        $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+        $payload['manual_edits'] = [...(array) ($payload['manual_edits'] ?? []), [
+            'action' => 'rematch_after_article',
+            'old' => ['catalog_item_id' => $previous],
+            'new' => ['catalog_item_id' => $item->catalog_item_id],
+            'by' => 'system',
+            'at' => now()->toIso8601String(),
+        ]];
+        $item->quality_assessment_payload = $payload;
+        $item->save();
+
+        return true;
+    }
+
     private function applyCatalogToItem(
         RequestItem $item,
         CatalogItem $catalog,
@@ -546,6 +620,15 @@ class CatalogResolutionService
         string $matchMethod,
         array $extraPayload = [],
     ): void {
+        // Снятая карточка «(ЗАМЕНЕНО НА M05793) …» — ставим её замену: по КП за 2 недели (20.11.2026) менеджер
+        // в 19 случаях из 19 выдал именно замену. Снятую — в payload, видно, что клиент спрашивал.
+        $replaced = self::followReplacement($catalog);
+        if ($replaced->id !== $catalog->id) {
+            $extraPayload['replaced_from_sku'] = $catalog->sku;
+            $extraPayload['replaced_from_catalog_item_id'] = $catalog->id;
+            $catalog = $replaced;
+        }
+
         $item->catalog_item_id = $catalog->id;
 
         // parsed_name: если у позиции имя пустое или это просто SKU

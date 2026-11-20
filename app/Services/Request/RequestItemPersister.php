@@ -817,9 +817,28 @@ class RequestItemPersister
                 'source_email_message_id' => $entry['source_email_message_id'] ?? null,
                 'reasoning' => $entry['reasoning'] ?? null,
             ]);
+            if (is_string($addArt) && $addArt !== '') {
+                self::rematchCatalog($item);
+            }
         }
 
         return $dirty;
+    }
+
+    /**
+     * Уточнение дописало артикул — подбор каталога заново (CatalogResolutionService::rematchAfterArticleAdded).
+     * Сбой подбора не мешает уточнению.
+     */
+    public static function rematchCatalog(RequestItem $item): void
+    {
+        try {
+            app(\App\Services\Catalog\CatalogResolutionService::class)->rematchAfterArticleAdded($item->fresh() ?? $item);
+        } catch (\Throwable $e) {
+            Log::warning('RequestItemPersister: catalog rematch after clarification failed (non-fatal)', [
+                'item_id' => $item->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

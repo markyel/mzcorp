@@ -594,6 +594,9 @@ class Detail extends Component
                 }
                 if ($dirty) {
                     $item->save();
+                    if (is_string($addArt) && $addArt !== '') {
+                        \App\Services\Request\RequestItemPersister::rematchCatalog($item);
+                    }
                 }
             }
         }
