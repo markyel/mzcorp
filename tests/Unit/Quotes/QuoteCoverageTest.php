@@ -118,20 +118,20 @@ class QuoteCoverageTest extends TestCase
         $deferred->setRawAttributes([...$deferred->getAttributes(), 'quote_deferred_at' => \Illuminate\Support\Carbon::parse('2026-11-20 10:00')]);
         $items = collect([$this->item(1, 5178), $this->item(2), $deferred, $this->item(4, null, QuoteCoverageService::RESOLUTION_DECLINED), $this->item(5)]);
         $lines = collect([
-            (object) ['raw_name' => 'Башмак', 'matched_request_item_id' => 1, 'matched_catalog_item_id' => 5178, 'line_total' => 51185.54, 'document_number' => '374209', 'document_date' => '2026-11-20'],
-            (object) ['raw_name' => 'Ролик', 'matched_request_item_id' => 5, 'matched_catalog_item_id' => null, 'line_total' => 100, 'document_number' => '374209', 'document_date' => '2026-11-20'],
-            (object) ['raw_name' => 'Доставка Деловые Линии', 'matched_request_item_id' => 5, 'matched_catalog_item_id' => null, 'line_total' => 900, 'document_number' => '374209', 'document_date' => '2026-11-20'],
+            (object) ['raw_name' => 'Башмак', 'matched_request_item_id' => 1, 'matched_catalog_item_id' => 5178, 'position' => 1, 'document_number' => '374209', 'document_date' => '2026-11-20'],
+            (object) ['raw_name' => 'Ролик', 'matched_request_item_id' => 5, 'matched_catalog_item_id' => null, 'position' => 2, 'document_number' => '374209', 'document_date' => '2026-11-20'],
+            (object) ['raw_name' => 'Доставка Деловые Линии', 'matched_request_item_id' => 5, 'matched_catalog_item_id' => null, 'position' => 3, 'document_number' => '374209', 'document_date' => '2026-11-20'],
         ]);
 
         $marks = QuoteCoverageService::itemMarksOf($items, $lines);
 
         $this->assertSame('quoted', $marks[1]['state']);
-        $this->assertSame(51185.54, $marks[1]['total']);
+        $this->assertSame(['1'], array_map('strval', $marks[1]['positions']));
         $this->assertSame(['№374209 от 20.11'], $marks[1]['docs']);
         $this->assertSame('open', $marks[2]['state']);
         $this->assertSame('deferred', $marks[3]['state']);
         $this->assertSame('resolved', $marks[4]['state']);
         $this->assertSame('мы отказали', $marks[4]['label']);
-        $this->assertSame(100.0, $marks[5]['total'], 'доставка в сумму позиции не идёт');
+        $this->assertSame(['2'], array_map('strval', $marks[5]['positions']), 'строка доставки — не позиция КП товара');
     }
 }

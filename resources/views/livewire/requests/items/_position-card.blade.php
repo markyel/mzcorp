@@ -215,7 +215,7 @@
                 @endif
 
                 {{-- «в КП / нет в КП» (QuoteCoverageService::itemMarks, 20.11.2026, M-2026-21151): на какие позиции КП уже
-                     выдано — по тем же правилам, что и статус «Частичное КП». Сумма — строки КП этой позиции. --}}
+                     выдано — по тем же правилам, что и статус «Частичное КП». «поз. 7» — номер строки в КП. --}}
                 @php
                     $qm = $quoteMark ?? null;
                     $qmStyle = match ($qm['state'] ?? null) {
@@ -228,7 +228,7 @@
                 @if($qm)
                     <span class="text-border-strong">·</span>
                     <button type="button" wire:click="setTab('quotes')"
-                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]" style="{{ $qmStyle }}"
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]" style="{{ $qmStyle }};white-space:nowrap"
                             title="{{ match ($qm['state']) {
                                 'quoted' => 'Позиция в КП'.($qm['docs'] !== [] ? ' '.implode(', ', $qm['docs']) : '').($qm['lines'] > 1 ? ' — '.$qm['lines'].' строк' : ''),
                                 'open' => 'По позиции клиенту ещё не дали КП',
@@ -238,8 +238,7 @@
                             } }} — открыть «КП»">
                         @if($qm['state'] === 'quoted')
                             <span>✓ в КП</span>
-                            @if($qm['total'] > 0)<span class="mono font-semibold">{{ number_format($qm['total'], 2, '.', ' ') }} ₽</span>@endif
-                            @if($qm['lines'] > 1)<span style="opacity:.75">×{{ $qm['lines'] }}</span>@endif
+                            @if($qm['positions'] !== [])<span style="white-space:nowrap">· поз. {{ implode(', ', $qm['positions']) }}</span>@endif
                         @else
                             <span>{{ match ($qm['state']) { 'open' => 'нет в КП', 'deferred' => 'нет в КП · ответим позже', 'spare' => 'в КП — видимо, замена', default => $qm['label'] } }}</span>
                         @endif

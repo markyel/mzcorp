@@ -145,7 +145,7 @@ class QuoteCoverageService
      * Пометка у каждой позиции во вкладке «Позиции»: на какие КП уже выдано, а на какие нет (M-2026-21151, 20.11.2026:
      * «Частичное КП», а по списку не видно, чего не хватает). По тем же правилам, что и статус. Без КП — пусто.
      *
-     * @return array<int, array{state: string, total: float, lines: int, docs: list<string>, label: ?string}>
+     * @return array<int, array{state: string, positions: list<string>, lines: int, docs: list<string>, label: ?string}>
      */
     public function itemMarks(Request $request): array
     {
@@ -153,7 +153,8 @@ class QuoteCoverageService
         $lines = DB::table('outbound_quote_items as l')->join('outbound_quotes as q', 'q.id', '=', 'l.outbound_quote_id')
             ->where('q.request_id', $request->id)->where('q.document_type', 'outbound_quotation_full')
             ->whereIn('q.status', ['matched', 'parsed'])
-            ->get(['l.raw_name', 'l.raw_article', 'l.matched_request_item_id', 'l.matched_catalog_item_id', 'l.line_total', 'q.document_number', 'q.document_date']);
+            ->orderBy('q.id')->orderBy('l.position')
+            ->get(['l.raw_name', 'l.raw_article', 'l.matched_request_item_id', 'l.matched_catalog_item_id', 'l.position', 'q.document_number', 'q.document_date']);
         if ($lines->isEmpty() && $quoted === []) {
             return [];
         }
@@ -166,9 +167,9 @@ class QuoteCoverageService
      * Правило пометок — без базы, для тестов (то же, что uncoveredOf).
      *
      * @param  Collection<int, RequestItem>  $items  активные позиции
-     * @param  Collection<int, object>  $lines  строки КП: + line_total, document_number, document_date
+     * @param  Collection<int, object>  $lines  строки КП: + position, document_number, document_date
      * @param  list<int>  $quotedItemIds
-     * @return array<int, array{state: string, total: float, lines: int, docs: list<string>, label: ?string}>
+     * @return array<int, array{state: string, positions: list<string>, lines: int, docs: list<string>, label: ?string}>
      */
     public static function itemMarksOf(Collection $items, Collection $lines, array $quotedItemIds = []): array
     {
@@ -190,9 +191,12 @@ class QuoteCoverageService
             if ($state === null) {
                 continue;
             }
+            // Номер строки в КП (сумма путала: «8 828.80 ₽» переносилось, и «8» читалось отдельно — M-2026-21151); КП несколько — с номером КП.
+            $several = $mine->pluck('document_number')->unique()->count() > 1;
             $out[(int) $item->id] = [
                 'state' => $state,
-                'total' => round((float) $mine->sum(fn ($l) => (float) ($l->line_total ?? 0)), 2),
+                'positions' => $mine->filter(fn ($l) => ($l->position ?? null) !== null)
+                    ->map(fn ($l) => ($several ? '№'.($l->document_number ?? '?').' ' : '').$l->position)->unique()->values()->all(),
                 'lines' => $mine->count(),
                 'docs' => $mine->map(fn ($l) => trim('№'.($l->document_number ?? '?').(! empty($l->document_date) ? ' от '.date('d.m', strtotime((string) $l->document_date)) : '')))
                     ->unique()->values()->all(),
