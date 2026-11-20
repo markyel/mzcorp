@@ -66,14 +66,19 @@
                         <button type="button" x-on:click="edit = ! edit" class="pa-link" style="align-self: center; font-size: 13px; line-height: 1;" title="Задать правильную цену для 1С вручную">✎</button>
                     @endunless
                 </div>
-                <div x-show="edit" x-cloak x-on:click.outside="edit = false" x-on:keydown.escape.window="edit = false" style="position: relative; display: flex; flex-direction: column; gap: 4px; padding: 8px 8px 8px; padding-top: 18px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-surface); text-align: left; width: 176px;">
-                    <button type="button" x-on:click="edit = false" title="Закрыть" aria-label="Закрыть" style="position: absolute; top: 2px; right: 4px; border: 0; background: none; cursor: pointer; color: var(--fg-3); font-size: 14px; line-height: 1; padding: 2px;">✕</button>
-                    <label class="pa-meta" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">цена для 1С, {{ $r['currency'] }}
-                        <input type="text" inputmode="decimal" x-model="v" class="pa-input" style="width: 72px; height: 24px; text-align: right;"
-                               x-on:keydown.enter="$wire.setManualPrice({{ $r['id'] }}, v); edit = false"></label>
-                    <div style="display: flex; gap: 4px; justify-content: flex-end;">
-                        @if($r['manual'])<button type="button" class="pa-btn pa-btn-link" style="height: 24px;" x-on:click="$wire.setManualPrice({{ $r['id'] }}, ''); edit = false">снять</button>@endif
-                        <button type="button" class="pa-btn pa-btn-secondary" style="height: 24px;" x-on:click="$wire.setManualPrice({{ $r['id'] }}, v); edit = false">Применить</button>
+                <div x-show="edit" x-cloak x-on:click.outside="edit = false" x-on:keydown.escape.window="edit = false" class="pa-pop">
+                    <div class="pa-pop-head">
+                        <span class="pa-pop-title">Цена для 1С</span>
+                        <button type="button" x-on:click="edit = false" class="pa-pop-x" title="Закрыть" aria-label="Закрыть">✕</button>
+                    </div>
+                    <label class="pa-pop-field">
+                        <input type="text" inputmode="decimal" x-model="v" class="pa-input" aria-label="Цена для 1С"
+                               x-on:keydown.enter="$wire.setManualPrice({{ $r['id'] }}, v); edit = false">
+                        <span class="pa-pop-unit">{{ $r['currency'] }}</span>
+                    </label>
+                    <div class="pa-pop-actions">
+                        @if($r['manual'])<button type="button" class="pa-btn pa-btn-link" style="height: 26px; padding: 0 4px;" x-on:click="$wire.setManualPrice({{ $r['id'] }}, ''); edit = false" title="Вернуть цену поставщика">снять</button>@else<span></span>@endif
+                        <button type="button" class="pa-btn pa-btn-secondary" style="height: 26px;" x-on:click="$wire.setManualPrice({{ $r['id'] }}, v); edit = false">Применить</button>
                     </div>
                 </div>
             </div>
@@ -97,15 +102,18 @@
                 <div x-data="{ open: false, from: @js($num($uFrom)), to: @js($r['unit'] ? $num($uTo) : '') }" style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
                     <button type="button" class="pa-link" style="align-self: flex-end;" x-on:click="open = ! open"
                             title="Поставщик дал цену не за нашу единицу (за штуку вместо комплекта, за кусок вместо метра) — пересчитать для выгрузки в 1С">⇄ {{ $r['unit'] ? 'пересчёт' : 'пересчитать' }}</button>
-                    <div x-show="open" x-cloak x-on:click.outside="open = false" x-on:keydown.escape.window="open = false" style="position: relative; display: flex; flex-direction: column; gap: 4px; padding: 8px; padding-top: 18px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-surface); text-align: left; width: 176px;">
-                        <button type="button" x-on:click="open = false" title="Закрыть" aria-label="Закрыть" style="position: absolute; top: 2px; right: 4px; border: 0; background: none; cursor: pointer; color: var(--fg-3); font-size: 14px; line-height: 1; padding: 2px;">✕</button>
-                        <label class="pa-meta" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">цена поставщика за
-                            <input type="text" inputmode="decimal" x-model="from" class="pa-input" style="width: 56px; height: 24px; text-align: right;"></label>
-                        <label class="pa-meta" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">в нашей позиции
-                            <input type="text" inputmode="decimal" x-model="to" placeholder="10" class="pa-input" style="width: 56px; height: 24px; text-align: right;"></label>
-                        <div style="display: flex; gap: 4px; justify-content: flex-end;">
-                            @if($r['unit'])<button type="button" class="pa-btn pa-btn-link" style="height: 24px;" x-on:click="$wire.setUnit({{ $r['id'] }}, null, null); open = false">снять</button>@endif
-                            <button type="button" class="pa-btn pa-btn-secondary" style="height: 24px;" x-on:click="$wire.setUnit({{ $r['id'] }}, from, to); open = false">Применить</button>
+                    <div x-show="open" x-cloak x-on:click.outside="open = false" x-on:keydown.escape.window="open = false" class="pa-pop">
+                        <div class="pa-pop-head">
+                            <span class="pa-pop-title">Пересчёт единицы</span>
+                            <button type="button" x-on:click="open = false" class="pa-pop-x" title="Закрыть" aria-label="Закрыть">✕</button>
+                        </div>
+                        <label class="pa-pop-row">цена поставщика за
+                            <input type="text" inputmode="decimal" x-model="from" class="pa-input"></label>
+                        <label class="pa-pop-row">нужна цена за
+                            <input type="text" inputmode="decimal" x-model="to" class="pa-input"></label>
+                        <div class="pa-pop-actions">
+                            @if($r['unit'])<button type="button" class="pa-btn pa-btn-link" style="height: 26px; padding: 0 4px;" x-on:click="$wire.setUnit({{ $r['id'] }}, null, null); open = false" title="Убрать пересчёт">снять</button>@else<span></span>@endif
+                            <button type="button" class="pa-btn pa-btn-secondary" style="height: 26px;" x-on:click="$wire.setUnit({{ $r['id'] }}, from, to); open = false">Применить</button>
                         </div>
                     </div>
                 </div>

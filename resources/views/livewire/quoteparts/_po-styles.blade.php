@@ -98,4 +98,16 @@
         .pa-bar-btn.is-primary:not([disabled]):hover{background:var(--accent-600)}
         .pa-bar-add{height:32px;padding:0 12px;border:0;border-radius:6px;background:transparent;font-size:12px;font-weight:600;color:var(--emerald-700);cursor:pointer}
         .pa-bar-add:hover{background:var(--emerald-50)}
+        /* Окошко у цены: «✎ цена для 1С», «⇄ пересчитать» — заголовок с крестиком, поля, кнопки. */
+        .pa-pop{display:flex;flex-direction:column;gap:8px;width:208px;box-sizing:border-box;padding:10px 12px 12px;border:1px solid var(--border-strong);border-radius:8px;background:var(--bg-surface);box-shadow:var(--shadow-sm);text-align:left}
+        .pa-pop-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+        .pa-pop-title{font-size:12px;font-weight:600;color:var(--fg-1)}
+        .pa-pop-x{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:0;border-radius:4px;background:none;color:var(--fg-3);font-size:13px;line-height:1;cursor:pointer}
+        .pa-pop-x:hover{background:var(--bg-hover);color:var(--fg-1)}
+        .pa-pop-field{display:flex;align-items:center;gap:6px}
+        .pa-pop-field .pa-input{flex:1;height:28px;text-align:right;font-feature-settings:'tnum'}
+        .pa-pop-unit{font-size:12px;color:var(--fg-3);white-space:nowrap}
+        .pa-pop-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--fg-2);white-space:nowrap}
+        .pa-pop-row .pa-input{width:52px;flex:none;height:26px;text-align:right}
+        .pa-pop-actions{display:flex;align-items:center;justify-content:space-between;gap:6px}
     </style>
