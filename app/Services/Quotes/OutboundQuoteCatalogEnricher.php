@@ -24,9 +24,8 @@ use Illuminate\Support\Facades\Log;
  * `payload.manual_edits[]` с `source=outbound_quote` и `action=auto_link_from_quote`
  * (формат совместим с UI Activity-tab фильтрами).
  *
- * Идемпотентность: если catalog_item_id уже стоит (любой), enrich пропускается.
- * Намеренно не перезаписываем существующий resolve — manual_link / use-case A/B
- * приоритетнее.
+ * Идемпотентность: та же карточка — пропуск. Другая карточка — КП её перебивает только по quoteOverridesCard
+ * (одна строка КП на позицию, карточку ставил не человек — или строку привязал человек), с 20.11.2026.
  */
 class OutboundQuoteCatalogEnricher
 {
@@ -47,6 +46,8 @@ class OutboundQuoteCatalogEnricher
             return $stats;
         }
 
+        $linesByItem = $candidates->groupBy('matched_request_item_id');
+
         foreach ($candidates as $qi) {
             $ri = $qi->requestItem;
             $catalog = $qi->catalogItem;
@@ -55,14 +56,14 @@ class OutboundQuoteCatalogEnricher
 
                 continue;
             }
-            if ($ri->catalog_item_id !== null) {
-                // Уже сматчено — не перезаписываем (manual / A / B / C priority).
+            $replaced = $ri->catalog_item_id;
+            if ($replaced !== null && ($replaced === $catalog->id || ! self::quoteOverridesCard($qi, $ri, $linesByItem->get($ri->id)))) {
                 $stats['skipped_already_linked']++;
 
                 continue;
             }
 
-            DB::transaction(function () use ($ri, $catalog, $qi, $quote) {
+            DB::transaction(function () use ($ri, $catalog, $qi, $quote, $replaced) {
                 $ri->catalog_item_id = $catalog->id;
 
                 $payload = is_array($ri->quality_assessment_payload) ? $ri->quality_assessment_payload : [];
@@ -75,7 +76,7 @@ class OutboundQuoteCatalogEnricher
                     'source' => 'outbound_quote',
                     'outbound_quote_id' => $quote->id,
                     'outbound_quote_item_id' => $qi->id,
-                ];
+                ] + ($replaced !== null ? ['replaced_catalog_item_id' => $replaced] : []);
                 $payload['catalog'] = [
                     'catalog_item_id' => $catalog->id,
                     'sku' => $catalog->sku,
@@ -90,7 +91,8 @@ class OutboundQuoteCatalogEnricher
 
                 $audit = is_array($payload['manual_edits'] ?? null) ? $payload['manual_edits'] : [];
                 $audit[] = [
-                    'action' => 'auto_link_from_quote',
+                    'action' => $replaced !== null ? 'relink_from_quote' : 'auto_link_from_quote',
+                    'old' => ['catalog_item_id' => $replaced],
                     'source' => 'outbound_quote',
                     'outbound_quote_id' => $quote->id,
                     'outbound_quote_item_id' => $qi->id,
@@ -113,9 +115,33 @@ class OutboundQuoteCatalogEnricher
                 'catalog_sku' => $catalog->sku,
                 'outbound_quote_id' => $quote->id,
                 'outbound_quote_item_id' => $qi->id,
+                'replaced_catalog_item_id' => $replaced,
             ]);
         }
 
         return $stats;
+    }
+
+    /**
+     * КП перебивает карточку позиции: что предложили клиенту — то и позиция (MZ2026-02473, 20.11.2026: у «Пускателя
+     * LC1DS32» осталась автопривязка M32038, хотя в КП — замена M04160; «ЗАМЕНЕНО на M03809», «снят с производства»,
+     * автопривязка к D587 при КП на D557). Только когда ясно, что строка — про эту позицию:
+     *  - к позиции привязана одна строка КП с карточкой: две и больше — это вариант + аксессуар («канат» и «барабан для
+     *    каната», левая и правая гребёнка) или выбор из нескольких поручней, а не замена;
+     *  - карточку позиции ставил не человек — разве что и строку КП к позиции привязал человек.
+     *
+     * @param  \Illuminate\Support\Collection<int, OutboundQuoteItem>|null  $linesOfItem  строки этого КП с карточкой на этой позиции
+     */
+    public static function quoteOverridesCard(OutboundQuoteItem $qi, RequestItem $ri, ?\Illuminate\Support\Collection $linesOfItem): bool
+    {
+        if (! $ri->is_active || $linesOfItem === null || $linesOfItem->count() !== 1) {
+            return false;
+        }
+        if ($qi->match_source === OutboundQuoteItem::MATCH_SOURCE_MANUAL) {
+            return true;
+        }
+        $payload = is_array($ri->quality_assessment_payload) ? $ri->quality_assessment_payload : [];
+
+        return ($payload['catalog_match']['method'] ?? null) !== 'manual_link';
     }
 }

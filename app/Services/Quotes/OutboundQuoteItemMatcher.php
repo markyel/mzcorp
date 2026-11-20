@@ -380,49 +380,52 @@ class OutboundQuoteItemMatcher
         if ($activeReqItems->isEmpty()) {
             return;
         }
+        // Позиции, которые строка этого КП уже покрыла своей же карточкой (Step 2), — в последнюю очередь: замену
+        // «Контактор 32 A» M04160 связало с позицией «Контактор 9 A», уже покрытой своей строкой M01499 (0.66 по
+        // названию), а не с «Пускателем LC1DS32» (MZ2026-02473, 20.11.2026).
+        $taken = $items->filter(fn (OutboundQuoteItem $it) => in_array($it->match_source, [
+            OutboundQuoteItem::MATCH_SOURCE_CATALOG_TO_REQUEST,
+            OutboundQuoteItem::MATCH_SOURCE_SKU_TO_REQUEST,
+        ], true))->pluck('matched_request_item_id')->filter()->map(fn ($v) => (int) $v)->all();
+        // Карточка позиции — второе имя позиции: у «Пускателя LC1DS32» в каталоге «КОНТАКТОР D TeSys Deca 3Р,32 A…»,
+        // и с заменой «КОНТАКТОР D 3Р,32 A…» её роднит именно оно, а не слова клиента.
+        $itemCatalogNames = CatalogItem::whereIn('id', $activeReqItems->pluck('catalog_item_id')->filter()->unique()->all())
+            ->pluck('name', 'id');
 
         foreach ($candidates as $qi) {
             $catalogItem = $catalogById->get($qi->matched_catalog_item_id);
             $catalogName = $catalogItem?->name;
             $rawName = (string) $qi->raw_name;
 
-            $bestRiId = null;
-            $bestScore = 0.0;
-            $bestNameSource = null; // 'catalog' | 'raw'
+            $best = ['free' => [null, 0.0, null], 'taken' => [null, 0.0, null]]; // [request_item_id, score, 'catalog'|'raw'|'item_catalog']
 
             foreach ($activeReqItems as $ri) {
-                $reqName = (string) $ri->parsed_name;
-                if ($reqName === '') {
-                    continue;
-                }
-                // Сильнее: catalog.name vs request — это «каноничное имя нашего товара».
-                if ($catalogName !== null && $catalogName !== '') {
-                    $score = $this->nameSimilarity($catalogName, $reqName);
-                    if ($score > $bestScore) {
-                        $bestRiId = $ri->id;
-                        $bestScore = $score;
-                        $bestNameSource = 'catalog';
+                $slot = in_array((int) $ri->id, $taken, true) ? 'taken' : 'free';
+                $names = array_filter([
+                    'catalog' => $catalogName !== null && $catalogName !== '' ? [$catalogName, (string) $ri->parsed_name] : null,
+                    'raw' => [$rawName, (string) $ri->parsed_name],
+                    'item_catalog' => $catalogName && $ri->catalog_item_id && isset($itemCatalogNames[$ri->catalog_item_id])
+                        ? [$catalogName, (string) $itemCatalogNames[$ri->catalog_item_id]] : null,
+                ]);
+                foreach ($names as $source => [$a, $b]) {
+                    if ($b === '') {
+                        continue;
+                    }
+                    $score = $this->nameSimilarity($a, $b);
+                    if ($score > $best[$slot][1]) {
+                        $best[$slot] = [$ri->id, $score, $source];
                     }
                 }
-                // Также: raw_name КП vs request — даёт сигнал на нестандартные описания.
-                $rawScore = $this->nameSimilarity($rawName, $reqName);
-                if ($rawScore > $bestScore) {
-                    $bestRiId = $ri->id;
-                    $bestScore = $rawScore;
-                    $bestNameSource = 'raw';
-                }
             }
+            [$bestRiId, $bestScore, $bestNameSource] = $best['free'][1] >= self::CATALOG_NAME_THRESHOLD ? $best['free'] : $best['taken'];
 
             if ($bestRiId !== null && $bestScore >= self::CATALOG_NAME_THRESHOLD) {
                 $qi->matched_request_item_id = $bestRiId;
                 $qi->match_score = round($bestScore, 4);
                 $qi->match_source = OutboundQuoteItem::MATCH_SOURCE_CATALOG_NAME_TO_REQUEST;
-                $qi->match_reason = sprintf(
-                    '%s.name ≈ request_item#%d.parsed_name (%.2f)',
-                    $bestNameSource === 'catalog' ? 'catalog' : 'raw',
-                    $bestRiId,
-                    $bestScore
-                );
+                $qi->match_reason = $bestNameSource === 'item_catalog'
+                    ? sprintf('catalog.name ≈ request_item#%d catalog card name (%.2f)', $bestRiId, $bestScore)
+                    : sprintf('%s.name ≈ request_item#%d.parsed_name (%.2f)', $bestNameSource === 'catalog' ? 'catalog' : 'raw', $bestRiId, $bestScore);
                 $qi->save();
             }
         }
