@@ -63,4 +63,16 @@ class RequestDelegation extends Model
     {
         return static::query()->where('request_id', $requestId)->whereNull('ended_at')->update(['ended_at' => now()]);
     }
+
+    /**
+     * Кому класть письма клиента по заявке в личный ящик: пока действует делегирование — исполняющему, иначе —
+     * ответственному. Раньше письма шли отсутствующему ответственному, и исполняющий их не видел у себя
+     * (M-2026-9463, Ежов → Агрызков, 20.11.2026: 14 писем клиента, исполняющему — ни одного).
+     */
+    public static function mailTargetUserId(Request $request): ?int
+    {
+        $acting = static::query()->where('request_id', $request->id)->whereNull('ended_at')->orderByDesc('id')->value('acting_user_id');
+
+        return $acting !== null ? (int) $acting : ($request->assigned_user_id !== null ? (int) $request->assigned_user_id : null);
+    }
 }

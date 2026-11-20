@@ -221,6 +221,7 @@ class ManagerUnavailabilityService
                             ],
                         ]);
                     });
+                    $this->deliverMailToActing($req, $actingId);
 
                     $delegated++;
                 }
@@ -246,6 +247,37 @@ class ManagerUnavailabilityService
      * Идемпотентно (active delegation уже есть → no-op). Возвращает acting_user_id
      * или null (не open / нет доступных / уже делегирована).
      */
+    /** Сколько последних ответов клиента класть исполняющему вместе с письмом, с которого началась заявка. */
+    private const ACTING_RECENT_LETTERS = 3;
+
+    /**
+     * Исполняющему — письма клиента по заявке в личный ящик: письмо, с которого она началась, и последние ответы
+     * клиента. Чтобы он отвечал обычным «Ответить» из своей почты; раньше делегирование писем не клало вовсе
+     * (M-2026-9463, Ежов → Агрызков, 20.11.2026). Доставка — DeliverToManagerInboxJob (идемпотентна, письма из личного
+     * ящика доступного коллеги не перекладывает). Non-fatal.
+     *
+     * @return int сколько писем поставлено в доставку
+     */
+    public function deliverMailToActing(Request $req, int $actingId): int
+    {
+        try {
+            $ids = \App\Models\EmailMessage::query()->where('related_request_id', $req->id)
+                ->where('direction', \App\Enums\MailDirection::Inbound->value)->whereNull('supplier_inquiry_id')
+                ->whereIn('category', [\App\Enums\EmailCategory::ClientRequest->value, \App\Enums\EmailCategory::ThreadReply->value, \App\Enums\EmailCategory::PostSale->value])
+                ->orderByDesc('id')->limit(self::ACTING_RECENT_LETTERS)->pluck('id')
+                ->push($req->email_message_id)->filter()->unique()->sort()->values();
+            foreach ($ids as $id) {
+                \App\Jobs\Mail\DeliverToManagerInboxJob::dispatch((int) $id, $actingId);
+            }
+
+            return $ids->count();
+        } catch (\Throwable $e) {
+            Log::warning('ManagerUnavailabilityService: mail to acting failed (non-fatal)', ['request_id' => $req->id, 'acting_user_id' => $actingId, 'error' => $e->getMessage()]);
+
+            return 0;
+        }
+    }
+
     /**
      * Кому отдать заявку отсутствующего — пропорционально проценту нагрузки.
      *
@@ -352,6 +384,8 @@ class ManagerUnavailabilityService
                 ],
             ]);
         });
+
+        $this->deliverMailToActing($req, $actingId);
 
         Log::info('ManagerUnavailabilityService: delegateOne done', [
             'request_id' => $req->id,

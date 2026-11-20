@@ -73,14 +73,16 @@ final class PostSaleRoutingSupport
             ]);
         }
 
-        if ($request->assigned_user_id) {
+        // Пока заявка делегирована — исполняющему (RequestDelegation::mailTargetUserId).
+        $mailTarget = \App\Models\RequestDelegation::mailTargetUserId($request);
+        if ($mailTarget) {
             try {
-                DeliverToManagerInboxJob::chainWithRouting($message->id, $request->assigned_user_id);
+                DeliverToManagerInboxJob::chainWithRouting($message->id, $mailTarget);
             } catch (\Throwable $e) {
                 Log::warning('MailRouter: dispatch post-sale routing/delivery failed (non-fatal)', [
                     'email_message_id' => $message->id,
                     'request_id' => $request->id,
-                    'manager_id' => $request->assigned_user_id,
+                    'manager_id' => $mailTarget,
                     'error' => $e->getMessage(),
                 ]);
             }

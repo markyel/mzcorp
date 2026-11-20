@@ -89,6 +89,8 @@ class MailDeliverBackfillCommand extends Command
                     return false; // stop chunking
                 }
 
+                // Пока заявка делегирована — исполняющему (RequestDelegation::mailTargetUserId).
+                $target = \App\Models\RequestDelegation::mailTargetUserId($req);
                 $email = EmailMessage::find($req->email_message_id);
                 if (! $email) {
                     $missing++;
@@ -104,7 +106,7 @@ class MailDeliverBackfillCommand extends Command
                 $deliveries = (array) ($artifacts['inbox_deliveries'] ?? []);
                 $alreadyDelivered = false;
                 foreach ($deliveries as $d) {
-                    if ((int) ($d['user_id'] ?? 0) === (int) $req->assigned_user_id) {
+                    if ((int) ($d['user_id'] ?? 0) === (int) $target) {
                         $alreadyDelivered = true;
                         break;
                     }
@@ -118,13 +120,13 @@ class MailDeliverBackfillCommand extends Command
                     // Снимаем marker для этого user_id, чтобы service пропустил idempotency-check.
                     $artifacts['inbox_deliveries'] = array_values(array_filter(
                         $deliveries,
-                        fn ($d) => (int) ($d['user_id'] ?? 0) !== (int) $req->assigned_user_id,
+                        fn ($d) => (int) ($d['user_id'] ?? 0) !== (int) $target,
                     ));
                     $email->forceFill(['detected_artifacts' => $artifacts])->save();
                 }
 
                 if ($apply) {
-                    DeliverToManagerInboxJob::dispatch($email->id, $req->assigned_user_id);
+                    DeliverToManagerInboxJob::dispatch($email->id, $target);
                 }
                 $dispatched++;
             }

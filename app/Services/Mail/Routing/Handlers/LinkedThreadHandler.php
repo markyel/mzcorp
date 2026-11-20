@@ -269,14 +269,16 @@ final class LinkedThreadHandler implements InboundRoutingHandler
         // Доставка reply'я в личный INBOX менеджера + перенос в подпапку
         // MZ|{Lastname} общего ящика — цепочкой Deliver → Route (Route меняет
         // UID, по которому Deliver re-fetch'ит RFC822). Кейс M-2026-1928.
-        if ($linkedRequest->assigned_user_id) {
+        // Пока заявка делегирована — исполняющему: ответственный в отпуске письмо у себя не откроет (M-2026-9463).
+        $mailTarget = \App\Models\RequestDelegation::mailTargetUserId($linkedRequest);
+        if ($mailTarget) {
             try {
-                DeliverToManagerInboxJob::chainWithRouting($message->id, $linkedRequest->assigned_user_id);
+                DeliverToManagerInboxJob::chainWithRouting($message->id, $mailTarget);
             } catch (\Throwable $e) {
                 Log::warning('MailRouter: dispatch reply routing/delivery failed (non-fatal)', [
                     'email_message_id' => $message->id,
                     'request_id' => $linkedRequest->id,
-                    'manager_id' => $linkedRequest->assigned_user_id,
+                    'manager_id' => $mailTarget,
                     'error' => $e->getMessage(),
                 ]);
             }
