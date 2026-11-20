@@ -114,7 +114,7 @@
 
     {{-- HEADER --}}
     <div class="grid items-center px-[12px] {{ $isExpanded ? 'py-2 border-b border-border-subtle' : 'py-1' }} gap-2.5 min-h-[44px]"
-         style="grid-template-columns: 28px 44px minmax(0,1fr) 130px 80px 90px 80px 90px 28px 24px">
+         style="grid-template-columns: 28px 44px minmax(0,1fr) 118px 130px 80px 90px 80px 90px 28px 24px">
         {{-- Position number + dedup-merged иконка (если есть схлопнутые дубли) --}}
         @php
             $_mergedFrom = is_array($item->parsing_merged_from) ? $item->parsing_merged_from : [];
@@ -214,36 +214,6 @@
                     <span class="chip chip-sky text-[10.5px]" title="Отправлен запрос расценки поставщику — ждём предложение">📦 ждём поставщика</span>
                 @endif
 
-                {{-- «в КП / нет в КП» (QuoteCoverageService::itemMarks, 20.11.2026, M-2026-21151): на какие позиции КП уже
-                     выдано — по тем же правилам, что и статус «Частичное КП». «поз. 7» — номер строки в КП. --}}
-                @php
-                    $qm = $quoteMark ?? null;
-                    $qmStyle = match ($qm['state'] ?? null) {
-                        'quoted' => 'background:#ecfdf5;color:#047857;border-color:#a7f3d0',
-                        'open' => 'background:#fffbeb;color:#92400e;border-color:#fcd34d',
-                        'deferred' => 'background:#fff7ed;color:#9a3412;border-color:#fed7aa',
-                        default => 'background:var(--bg-surface-2,#f4f4f5);color:var(--fg-3,#52525b);border-color:var(--border,#e4e4e7)',
-                    };
-                @endphp
-                @if($qm)
-                    <span class="text-border-strong">·</span>
-                    <button type="button" wire:click="setTab('quotes')"
-                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]" style="{{ $qmStyle }};white-space:nowrap"
-                            title="{{ match ($qm['state']) {
-                                'quoted' => 'Позиция в КП'.($qm['docs'] !== [] ? ' '.implode(', ', $qm['docs']) : '').($qm['lines'] > 1 ? ' — '.$qm['lines'].' строк' : ''),
-                                'open' => 'По позиции клиенту ещё не дали КП',
-                                'deferred' => 'Клиенту сказали, что по позиции ответим позже',
-                                'spare' => 'Строка КП с позицией не связана, но в КП есть предложенная замена',
-                                default => 'Позиция закрыта отметкой менеджера',
-                            } }} — открыть «КП»">
-                        @if($qm['state'] === 'quoted')
-                            <span>✓ в КП</span>
-                            @if($qm['positions'] !== [])<span style="white-space:nowrap">· поз. {{ implode(', ', $qm['positions']) }}</span>@endif
-                        @else
-                            <span>{{ match ($qm['state']) { 'open' => 'нет в КП', 'deferred' => 'нет в КП · ответим позже', 'spare' => 'в КП — видимо, замена', default => $qm['label'] } }}</span>
-                        @endif
-                    </button>
-                @endif
             </div>
 
             {{-- Строка 3: сматченный товар каталога MyLift (полное название). --}}
@@ -350,6 +320,39 @@
                         <span class="mono text-amber-900">#{{ $dup->position }}</span>{{ $sim !== null ? ' (' . round($sim * 100) . '%)' : '' }}{{ ! $loop->last ? ',' : '' }}
                     @endforeach
                 </div>
+            @endif
+        </div>
+
+        {{-- Колонка «в КП»: пометки одна под другой, у артикула и цены (20.11.2026). --}}
+        <div class="min-w-0" style="display:flex;justify-content:flex-end">
+            {{-- «в КП / нет в КП» (QuoteCoverageService::itemMarks, 20.11.2026, M-2026-21151): на какие позиции КП уже
+                 выдано — по тем же правилам, что и статус «Частичное КП». «поз. 7» — номер строки в КП. --}}
+            @php
+                $qm = $quoteMark ?? null;
+                $qmStyle = match ($qm['state'] ?? null) {
+                    'quoted' => 'background:#ecfdf5;color:#047857;border-color:#a7f3d0',
+                    'open' => 'background:#fffbeb;color:#92400e;border-color:#fcd34d',
+                    'deferred' => 'background:#fff7ed;color:#9a3412;border-color:#fed7aa',
+                    default => 'background:var(--bg-surface-2,#f4f4f5);color:var(--fg-3,#52525b);border-color:var(--border,#e4e4e7)',
+                };
+            @endphp
+            @if($qm)
+                <button type="button" wire:click="setTab('quotes')"
+                        class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]" style="{{ $qmStyle }};text-align:right;line-height:1.25;flex-wrap:wrap;justify-content:flex-end"
+                        title="{{ match ($qm['state']) {
+                            'quoted' => 'Позиция в КП'.($qm['docs'] !== [] ? ' '.implode(', ', $qm['docs']) : '').($qm['lines'] > 1 ? ' — '.$qm['lines'].' строк' : ''),
+                            'open' => 'По позиции клиенту ещё не дали КП',
+                            'deferred' => 'Клиенту сказали, что по позиции ответим позже',
+                            'spare' => 'Строка КП с позицией не связана, но в КП есть предложенная замена',
+                            default => 'Позиция закрыта отметкой менеджера',
+                        } }} — открыть «КП»">
+                    @if($qm['state'] === 'quoted')
+                        <span style="white-space:nowrap">✓ в КП</span>
+                        @if($qm['positions'] !== [])<span style="white-space:nowrap">· поз. {{ implode(', ', $qm['positions']) }}</span>@endif
+                    @else
+                        <span>{{ match ($qm['state']) { 'open' => 'нет в КП', 'deferred' => 'ответим позже', 'spare' => 'в КП — замена?', default => $qm['label'] } }}</span>
+                    @endif
+                </button>
             @endif
         </div>
 
