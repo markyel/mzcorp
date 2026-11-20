@@ -16,6 +16,7 @@ class QuotesRelinkItemsCommand extends Command
 {
     protected $signature = 'quotes:relink-items
         {--days=60 : КП за последние N дней}
+        {--except=* : Номера заявок, которые не трогать (сомнительные связки строк КП)}
         {--dry-run : Только показать, какие позиции сменят карточку}';
 
     protected $description = 'Карточки позиций заявок — по строкам отправленных КП, где КП предложил другой товар';
@@ -25,6 +26,7 @@ class QuotesRelinkItemsCommand extends Command
         $dry = (bool) $this->option('dry-run');
         $total = 0;
         $requests = [];
+        $except = array_map('trim', (array) $this->option('except'));
 
         OutboundQuote::query()->where('created_at', '>=', now()->subDays(max(1, (int) $this->option('days'))))
             ->whereNotNull('request_id')
@@ -37,7 +39,7 @@ class QuotesRelinkItemsCommand extends Command
                 $changes = $lines->filter(fn (OutboundQuoteItem $qi) => $qi->requestItem !== null && $qi->catalogItem !== null
                     && $qi->requestItem->catalog_item_id !== null && $qi->requestItem->catalog_item_id !== $qi->matched_catalog_item_id
                     && OutboundQuoteCatalogEnricher::quoteOverridesCard($qi, $qi->requestItem, $byItem->get($qi->matched_request_item_id)));
-                if ($changes->isEmpty()) {
+                if ($changes->isEmpty() || in_array((string) $quote->request?->internal_code, $except, true)) {
                     return;
                 }
                 foreach ($changes as $qi) {
