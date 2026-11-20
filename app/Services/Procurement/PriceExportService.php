@@ -376,7 +376,10 @@ class PriceExportService
         $parts = [];
         // Пересчёт снабжения на нашу единицу — первым делом: в файле цена уже наша, а поставщик дал другую.
         // Иначе — цена не за единицу по словам поставщика (канат Драко M24638: 32 355 руб за кусок 135 м).
-        if (($conv = $o->unitConversionNote()) !== null) {
+        // Цена вручную — главнее всего: в файле она, поставщик назвал другую (UniSystem M16131, 20.11.2026).
+        if (($manual = $o->manualPriceNote()) !== null) {
+            $parts[] = $manual;
+        } elseif (($conv = $o->unitConversionNote()) !== null) {
             $parts[] = $conv;
         } elseif (($for = $o->priceForNote()) !== null) {
             $parts[] = $for;

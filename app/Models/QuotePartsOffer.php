@@ -61,6 +61,10 @@ class QuotePartsOffer extends Model
         'unit_from_qty',
         'unit_to_qty',
         'unit_set_by_user_id',
+        // Цена для 1С вручную (снабжение/менеджер): главнее цены поставщика и пересчёта единицы.
+        'manual_price',
+        'manual_price_by_user_id',
+        'manual_price_at',
     ];
 
     /** Разбор отклонения (не оригинала): ждёт, принято к закупке, отклонено. */
@@ -77,6 +81,8 @@ class QuotePartsOffer extends Model
         'price_for_qty' => 'decimal:3',
         'unit_from_qty' => 'decimal:3',
         'unit_to_qty' => 'decimal:3',
+        'manual_price' => 'decimal:4',
+        'manual_price_at' => 'datetime',
         'valid_until' => 'date',
         'superseded' => 'boolean',
         'remote_updated_at' => 'datetime',
@@ -190,10 +196,33 @@ class QuotePartsOffer extends Model
         return abs($this->unitFactor() - 1.0) > 1e-9;
     }
 
-    /** Цена нашей единицы — в выгрузку 1С, выбор поставщика и сравнение; без пересчёта — цена поставщика. */
+    /**
+     * Цена нашей единицы — в выгрузку 1С, выбор поставщика и сравнение: заданная вручную (UniSystem M16131, 20.11.2026:
+     * разбор взял итог с доставкой и НДС), иначе цена поставщика с пересчётом единицы.
+     */
     public function exportPrice(): ?float
     {
+        if ($this->manual_price !== null) {
+            return round((float) $this->manual_price, 4);
+        }
+
         return $this->price !== null ? round((float) $this->price * $this->unitFactor(), 4) : null;
+    }
+
+    public function hasManualPrice(): bool
+    {
+        return $this->manual_price !== null;
+    }
+
+    /** «цена поставщика 901,47 EUR, в 1С — 746,64 (указана вручную)» — в комментарий 1С; null — не задана. */
+    public function manualPriceNote(): ?string
+    {
+        if ($this->manual_price === null) {
+            return null;
+        }
+        $num = fn ($v) => rtrim(rtrim(number_format((float) $v, 4, ',', ' '), '0'), ',');
+
+        return 'цена поставщика '.($this->price !== null ? $num($this->price).' '.$this->currency : '—').', в 1С — '.$num($this->manual_price).' (указана вручную)';
     }
 
     /** «цена поставщика 62,90 USD за 1, пересчитано на 10» — в комментарий 1С; null — пересчёта нет. */

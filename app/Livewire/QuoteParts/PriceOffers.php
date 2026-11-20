@@ -395,6 +395,27 @@ class PriceOffers extends Component
         $this->forget();
     }
 
+    /** «✎ цена для 1С»: правильная цена вручную (пусто — снять, снова цена поставщика). */
+    public function setManualPrice(int $offerId, mixed $value, PriceActualizationService $service): void
+    {
+        $clean = str_replace([',', ' ', "\u{00A0}"], ['.', '', ''], trim((string) $value));
+        $price = $clean === '' ? null : (is_numeric($clean) ? (float) $clean : false);
+        if ($price === false) {
+            $this->dispatch('toast', type: 'error', message: 'Цена — число, например 746,64.');
+
+            return;
+        }
+        try {
+            $service->setManualPrice(QuotePartsOffer::query()->findOrFail($offerId), $price, auth()->user());
+        } catch (\DomainException $e) {
+            $this->dispatch('toast', type: 'error', message: $e->getMessage());
+
+            return;
+        }
+        $this->exportNote = null;
+        $this->forget();
+    }
+
     public function ignore(int $offerId, bool $ignore, QuotePartsPriceService $prices): void
     {
         $prices->ignore(QuotePartsOffer::query()->findOrFail($offerId), $ignore, auth()->user());
@@ -1398,6 +1419,8 @@ class PriceOffers extends Component
             'price' => $o->exportPrice(),
             // Пересчёт на нашу единицу: цена поставщика как есть и «за from — нужна за to».
             'unit' => $o->hasUnitConversion() ? ['from' => (float) $o->unit_from_qty, 'to' => (float) $o->unit_to_qty, 'supplier_price' => (float) $o->price] : null,
+            // Цена для 1С вручную: в строке — она, цена поставщика — строкой ниже.
+            'manual' => $o->hasManualPrice() ? ['supplier_price' => $o->price !== null ? (float) $o->price : null] : null,
             'price_for_qty' => $o->price_for_qty !== null ? (float) $o->price_for_qty : null,
             'currency' => $o->currency,
             'rub' => $rub['known'] ? $rub['rub'] : null,

@@ -49,12 +49,35 @@
 
         <div class="pa-col pa-price" style="opacity: {{ $ignored || $r['stale'] ? .55 : 1 }}">
             <span class="pa-kind {{ $kind === 'original' ? 'is-orig' : 'is-dev' }}">{{ $kind === 'original' ? 'оригинал' : mb_strtolower(\App\Models\QuotePartsOffer::kindLabel($kind)) }}</span>
-            @if($tiers->count() > 1)
-                @foreach($tiers as $t)
-                    <span class="pa-amount">{{ $money($t['price']) }} {{ $r['currency'] }}<span class="pa-from"> от {{ $num($t['min_qty'] ?? 1) }}</span></span>
-                @endforeach
-            @else
-                <span class="pa-amount">{{ $r['price'] !== null ? $money($r['price']).' '.$r['currency'] : '—' }}</span>
+            {{-- Цена и «✎» рядом: правильная цена для 1С вручную (UniSystem M16131, 20.11.2026: разбор взял итог с
+                 доставкой и НДС). Заданная вручную — в строке, цена поставщика — ниже. --}}
+            <div x-data="{ edit: false, v: @js($r['manual'] ? $money($r['price']) : '') }" style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
+                <div style="display: flex; align-items: baseline; gap: 4px; justify-content: flex-end;">
+                    <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                        @if($tiers->count() > 1 && ! $r['manual'])
+                            @foreach($tiers as $t)
+                                <span class="pa-amount">{{ $money($t['price']) }} {{ $r['currency'] }}<span class="pa-from"> от {{ $num($t['min_qty'] ?? 1) }}</span></span>
+                            @endforeach
+                        @else
+                            <span class="pa-amount" @if($r['manual']) style="color: var(--sky-700);" title="Цена для 1С указана вручную" @endif>{{ $r['price'] !== null ? $money($r['price']).' '.$r['currency'] : '—' }}</span>
+                        @endif
+                    </div>
+                    @unless($r['stale'])
+                        <button type="button" x-on:click="edit = ! edit" class="pa-link" style="align-self: center; font-size: 13px; line-height: 1;" title="Задать правильную цену для 1С вручную">✎</button>
+                    @endunless
+                </div>
+                <div x-show="edit" x-cloak style="display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg-surface); text-align: left; width: 176px;">
+                    <label class="pa-meta" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">цена для 1С, {{ $r['currency'] }}
+                        <input type="text" inputmode="decimal" x-model="v" placeholder="746,64" class="pa-input" style="width: 72px; height: 24px; text-align: right;"
+                               x-on:keydown.enter="$wire.setManualPrice({{ $r['id'] }}, v); edit = false"></label>
+                    <div style="display: flex; gap: 4px; justify-content: flex-end;">
+                        @if($r['manual'])<button type="button" class="pa-btn pa-btn-link" style="height: 24px;" x-on:click="$wire.setManualPrice({{ $r['id'] }}, ''); edit = false">снять</button>@endif
+                        <button type="button" class="pa-btn pa-btn-secondary" style="height: 24px;" x-on:click="$wire.setManualPrice({{ $r['id'] }}, v); edit = false">Применить</button>
+                    </div>
+                </div>
+            </div>
+            @if($r['manual'])
+                <span class="pa-meta" title="Цена поставщика как пришла; в 1С уйдёт цена выше">поставщик: {{ $r['manual']['supplier_price'] !== null ? $money($r['manual']['supplier_price']).' '.$r['currency'] : '—' }} · вручную</span>
             @endif
             @if($r['rub'] !== null)<span class="pa-meta">≈ {{ number_format($r['rub'], 0, ',', ' ') }} ₽</span>@endif
             {{-- Пересчёт на нашу единицу (M31632: OTI дал цену за 1 ступень, позиция — комплект на 10): выше — цена нашей

@@ -272,6 +272,31 @@ class PriceActualizationService
     }
 
     /**
+     * Цена для 1С вручную: поставщик назвал одно (итог с доставкой и НДС), а правильная цена товара — другая (UniSystem
+     * M16131, 20.11.2026). null — снять, снова цена поставщика. Выбранное к закупке — с новой ценой, выгрузку повторить.
+     */
+    public function setManualPrice(QuotePartsOffer $offer, ?float $price, User $by): void
+    {
+        if ($price !== null && ($price <= 0 || $price > 100000000)) {
+            throw new \DomainException('Цена — больше нуля.');
+        }
+        DB::transaction(function () use ($offer, $price, $by) {
+            $offer->forceFill([
+                'manual_price' => $price,
+                'manual_price_by_user_id' => $price !== null ? $by->id : null,
+                'manual_price_at' => $price !== null ? now() : null,
+            ])->save();
+
+            $key = SupplierChoiceService::itemKey($offer->catalog_item_id, $offer->sku);
+            $choice = $key !== null ? $this->choices->forKeys([$key])->get($key) : null;
+            if ($choice !== null && $choice->source === 'quoteparts' && (int) $choice->offer_ref === (int) $offer->id) {
+                $choice->forceFill(['price' => $offer->exportPrice()])->save();
+            }
+            PricePosition::query()->where('sku', $offer->catalogItem?->sku ?? $offer->sku)->whereNotNull('exported_at')->update(['exported_at' => null]);
+        });
+    }
+
+    /**
      * «Вернуть в работу»: сбор цен по позиции снова открыт — она возвращается в «Готово» / «Ждём» со всеми
      * предложениями (12.11.2026, M23123: завершили на OSS, а цену YuanQi на аналог хотели пересмотреть).
      * Отметка о прошлой выгрузке (exported_at, closed_offer) остаётся.
