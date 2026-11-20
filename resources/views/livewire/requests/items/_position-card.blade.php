@@ -214,23 +214,34 @@
                     <span class="chip chip-sky text-[10.5px]" title="Отправлен запрос расценки поставщику — ждём предложение">📦 ждём поставщика</span>
                 @endif
 
-                {{-- Phase 7: chip «📨 в КП» — сумма позиции в исходящих КП.
-                     Несколько строк КП на одну позицию = split delivery. --}}
+                {{-- «в КП / нет в КП» (QuoteCoverageService::itemMarks, 20.11.2026, M-2026-21151): на какие позиции КП уже
+                     выдано — по тем же правилам, что и статус «Частичное КП». Сумма — строки КП этой позиции. --}}
                 @php
-                    $quoteItems = $item->relationLoaded('outboundQuoteItems') ? $item->outboundQuoteItems : collect();
-                    $quoteSum = (float) $quoteItems->sum(fn ($qi) => (float) ($qi->line_total ?? 0));
-                    $quoteLines = $quoteItems->count();
+                    $qm = $quoteMark ?? null;
+                    $qmStyle = match ($qm['state'] ?? null) {
+                        'quoted' => 'background:#ecfdf5;color:#047857;border-color:#a7f3d0',
+                        'open' => 'background:#fffbeb;color:#92400e;border-color:#fcd34d',
+                        'deferred' => 'background:#fff7ed;color:#9a3412;border-color:#fed7aa',
+                        default => 'background:var(--bg-surface-2,#f4f4f5);color:var(--fg-3,#52525b);border-color:var(--border,#e4e4e7)',
+                    };
                 @endphp
-                @if($quoteLines > 0)
+                @if($qm)
                     <span class="text-border-strong">·</span>
-                    <button type="button"
-                            wire:click="setTab('quotes')"
-                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100 transition-colors text-[11px]"
-                            title="Открыть таб «КП»{{ $quoteLines > 1 ? ' (split delivery: ' . $quoteLines . ' строк)' : '' }}">
-                        📨 в КП:
-                        <span class="mono font-semibold">{{ number_format($quoteSum, 2, '.', ' ') }} ₽</span>
-                        @if($quoteLines > 1)
-                            <span class="text-fg-3">×{{ $quoteLines }}</span>
+                    <button type="button" wire:click="setTab('quotes')"
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px]" style="{{ $qmStyle }}"
+                            title="{{ match ($qm['state']) {
+                                'quoted' => 'Позиция в КП'.($qm['docs'] !== [] ? ' '.implode(', ', $qm['docs']) : '').($qm['lines'] > 1 ? ' — '.$qm['lines'].' строк' : ''),
+                                'open' => 'По позиции клиенту ещё не дали КП',
+                                'deferred' => 'Клиенту сказали, что по позиции ответим позже',
+                                'spare' => 'Строка КП с позицией не связана, но в КП есть предложенная замена',
+                                default => 'Позиция закрыта отметкой менеджера',
+                            } }} — открыть «КП»">
+                        @if($qm['state'] === 'quoted')
+                            <span>✓ в КП</span>
+                            @if($qm['total'] > 0)<span class="mono font-semibold">{{ number_format($qm['total'], 2, '.', ' ') }} ₽</span>@endif
+                            @if($qm['lines'] > 1)<span style="opacity:.75">×{{ $qm['lines'] }}</span>@endif
+                        @else
+                            <span>{{ match ($qm['state']) { 'open' => 'нет в КП', 'deferred' => 'нет в КП · ответим позже', 'spare' => 'в КП — видимо, замена', default => $qm['label'] } }}</span>
                         @endif
                     </button>
                 @endif

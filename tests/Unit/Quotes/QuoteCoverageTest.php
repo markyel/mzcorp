@@ -110,4 +110,28 @@ class QuoteCoverageTest extends TestCase
         $this->assertSame([4], $this->ids(QuoteCoverageService::uncoveredOf($items, $lines)));
         $this->assertSame([], $this->ids(QuoteCoverageService::uncoveredOf($items, $lines, [4])));
     }
+
+    public function test_each_item_is_marked_quoted_open_deferred_or_resolved(): void
+    {
+        // M-2026-21151: «Частичное КП», а по списку позиций не видно, на что КП уже выдано.
+        $deferred = $this->item(3);
+        $deferred->setRawAttributes([...$deferred->getAttributes(), 'quote_deferred_at' => \Illuminate\Support\Carbon::parse('2026-11-20 10:00')]);
+        $items = collect([$this->item(1, 5178), $this->item(2), $deferred, $this->item(4, null, QuoteCoverageService::RESOLUTION_DECLINED), $this->item(5)]);
+        $lines = collect([
+            (object) ['raw_name' => 'Башмак', 'matched_request_item_id' => 1, 'matched_catalog_item_id' => 5178, 'line_total' => 51185.54, 'document_number' => '374209', 'document_date' => '2026-11-20'],
+            (object) ['raw_name' => 'Ролик', 'matched_request_item_id' => 5, 'matched_catalog_item_id' => null, 'line_total' => 100, 'document_number' => '374209', 'document_date' => '2026-11-20'],
+            (object) ['raw_name' => 'Доставка Деловые Линии', 'matched_request_item_id' => 5, 'matched_catalog_item_id' => null, 'line_total' => 900, 'document_number' => '374209', 'document_date' => '2026-11-20'],
+        ]);
+
+        $marks = QuoteCoverageService::itemMarksOf($items, $lines);
+
+        $this->assertSame('quoted', $marks[1]['state']);
+        $this->assertSame(51185.54, $marks[1]['total']);
+        $this->assertSame(['№374209 от 20.11'], $marks[1]['docs']);
+        $this->assertSame('open', $marks[2]['state']);
+        $this->assertSame('deferred', $marks[3]['state']);
+        $this->assertSame('resolved', $marks[4]['state']);
+        $this->assertSame('мы отказали', $marks[4]['label']);
+        $this->assertSame(100.0, $marks[5]['total'], 'доставка в сумму позиции не идёт');
+    }
 }

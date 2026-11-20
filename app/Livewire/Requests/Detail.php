@@ -697,6 +697,24 @@ class Detail extends Component
     }
 
     /**
+     * Пометка «в КП / нет в КП» у позиций (QuoteCoverageService::itemMarks): строки КП считаем заново, а не из
+     * items.outboundQuoteItems — после любого действия на странице заявка перезагружается без них, и чип пропадал.
+     *
+     * @return array<int, array{state: string, total: float, lines: int, docs: list<string>, label: ?string}>
+     */
+    #[Computed]
+    public function quoteMarks(): array
+    {
+        try {
+            return app(\App\Services\Quotes\QuoteCoverageService::class)->itemMarks($this->request);
+        } catch (\Throwable $e) {
+            Log::warning('Detail: quote marks failed (non-fatal)', ['request_id' => $this->request->id, 'error' => $e->getMessage()]);
+
+            return [];
+        }
+    }
+
+    /**
      * Snapshot sticky-привязок (Phase 2 sticky visibility).
      *
      * Самый свежий `request_assignments` с reason, начинающимся на

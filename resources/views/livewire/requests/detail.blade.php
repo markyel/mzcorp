@@ -2367,6 +2367,7 @@
                                 $inhLinksMap = $this->inheritanceItemLinks;
                                 $isInhChild = $req->isInheritanceChild();
                                 $requestedSupplierItemIds = $this->requestedItemIds;
+                                $quoteMarks = $this->quoteMarks;
                             @endphp
                             @foreach($items as $item)
                                 @php
@@ -2385,6 +2386,7 @@
                                     'inheritanceLink' => $inhLinkForItem,
                                     'inheritanceIsChild' => $isInhChild,
                                     'awaitingSupplier' => $requestedSupplierItemIds->contains($item->id),
+                                    'quoteMark' => $quoteMarks[$item->id] ?? null,
                                 ])
                             @endforeach
                             </div>

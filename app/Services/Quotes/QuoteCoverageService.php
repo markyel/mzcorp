@@ -130,6 +130,79 @@ class QuoteCoverageService
         return $open->count() <= $spare ? collect() : $open;
     }
 
+    public const MARK_QUOTED = 'quoted';
+
+    public const MARK_OPEN = 'open';
+
+    public const MARK_DEFERRED = 'deferred';
+
+    public const MARK_RESOLVED = 'resolved';
+
+    /** Не связана ни с одной строкой, но непокрытых не больше «лишних» строк КП — видимо, дали замену. */
+    public const MARK_SPARE = 'spare';
+
+    /**
+     * Пометка у каждой позиции во вкладке «Позиции»: на какие КП уже выдано, а на какие нет (M-2026-21151, 20.11.2026:
+     * «Частичное КП», а по списку не видно, чего не хватает). По тем же правилам, что и статус. Без КП — пусто.
+     *
+     * @return array<int, array{state: string, total: float, lines: int, docs: list<string>, label: ?string}>
+     */
+    public function itemMarks(Request $request): array
+    {
+        $quoted = $this->sentQuotationItemIds($request);
+        $lines = DB::table('outbound_quote_items as l')->join('outbound_quotes as q', 'q.id', '=', 'l.outbound_quote_id')
+            ->where('q.request_id', $request->id)->where('q.document_type', 'outbound_quotation_full')
+            ->whereIn('q.status', ['matched', 'parsed'])
+            ->get(['l.raw_name', 'l.raw_article', 'l.matched_request_item_id', 'l.matched_catalog_item_id', 'l.line_total', 'q.document_number', 'q.document_date']);
+        if ($lines->isEmpty() && $quoted === []) {
+            return [];
+        }
+        $items = RequestItem::query()->where('request_id', $request->id)->where('is_active', true)->with('catalogItem:id,sku')->get();
+
+        return self::itemMarksOf($items, $lines, $quoted);
+    }
+
+    /**
+     * Правило пометок — без базы, для тестов (то же, что uncoveredOf).
+     *
+     * @param  Collection<int, RequestItem>  $items  активные позиции
+     * @param  Collection<int, object>  $lines  строки КП: + line_total, document_number, document_date
+     * @param  list<int>  $quotedItemIds
+     * @return array<int, array{state: string, total: float, lines: int, docs: list<string>, label: ?string}>
+     */
+    public static function itemMarksOf(Collection $items, Collection $lines, array $quotedItemIds = []): array
+    {
+        $goods = $lines->reject(fn ($l) => preg_match(self::SERVICE_LINE, (string) ($l->raw_name ?? '')) === 1)->values();
+        $open = self::uncoveredOf($items, $lines, $quotedItemIds)->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $out = [];
+        foreach ($items as $item) {
+            $sku = $item->relationLoaded('catalogItem') ? strtoupper((string) $item->catalogItem?->sku) : '';
+            $mine = $goods->filter(fn ($l) => (int) ($l->matched_request_item_id ?? 0) === (int) $item->id
+                || ($item->catalog_item_id !== null && (int) ($l->matched_catalog_item_id ?? 0) === (int) $item->catalog_item_id)
+                || ($sku !== '' && self::lineSku($l) === $sku));
+            $state = match (true) {
+                $item->quote_resolution !== null => self::MARK_RESOLVED,
+                $mine->isNotEmpty() || in_array((int) $item->id, $quotedItemIds, true) => self::MARK_QUOTED,
+                preg_match(self::NOT_GOODS_ITEM, (string) $item->parsed_name) === 1 => null,
+                in_array((int) $item->id, $open, true) => $item->quote_deferred_at !== null ? self::MARK_DEFERRED : self::MARK_OPEN,
+                default => self::MARK_SPARE,
+            };
+            if ($state === null) {
+                continue;
+            }
+            $out[(int) $item->id] = [
+                'state' => $state,
+                'total' => round((float) $mine->sum(fn ($l) => (float) ($l->line_total ?? 0)), 2),
+                'lines' => $mine->count(),
+                'docs' => $mine->map(fn ($l) => trim('№'.($l->document_number ?? '?').(! empty($l->document_date) ? ' от '.date('d.m', strtotime((string) $l->document_date)) : '')))
+                    ->unique()->values()->all(),
+                'label' => $item->quote_resolution !== null ? (self::LABELS[$item->quote_resolution] ?? $item->quote_resolution) : null,
+            ];
+        }
+
+        return $out;
+    }
+
     /** M-артикул строки КП (артикул, иначе в названии); кириллическая «М» — как латинская. */
     private static function lineSku(object $line): ?string
     {
