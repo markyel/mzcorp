@@ -33,7 +33,7 @@ class QuotesRelinkItemsCommand extends Command
             ->whereHas('items', fn ($q) => $q->whereNotNull('matched_catalog_item_id')->whereNotNull('matched_request_item_id'))
             ->with(['request:id,internal_code', 'items.catalogItem:id,sku,name', 'items.requestItem.catalogItem:id,sku,name'])
             ->orderBy('id')
-            ->each(function (OutboundQuote $quote) use ($enricher, $dry, &$total, &$requests) {
+            ->each(function (OutboundQuote $quote) use ($enricher, $dry, $except, &$total, &$requests) {
                 $lines = $quote->items->filter(fn (OutboundQuoteItem $qi) => $qi->matched_catalog_item_id !== null && $qi->matched_request_item_id !== null);
                 $byItem = $lines->groupBy('matched_request_item_id');
                 $changes = $lines->filter(fn (OutboundQuoteItem $qi) => $qi->requestItem !== null && $qi->catalogItem !== null
