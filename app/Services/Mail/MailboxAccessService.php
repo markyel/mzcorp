@@ -12,11 +12,12 @@ use Illuminate\Support\Collection;
 /**
  * Какие почтовые ящики видит менеджер в разделе «Почта».
  *
- * Продуктовое решение: «всё доступное ему» —
- *   1. личные ящики, где он владелец (mailbox.owner_user_id = user.id);
- *   2. общие ящики (info@ / order@ — type=shared, синкаемые);
- *   3. делегированные — личные ящики менеджеров, у которых есть АКТИВНАЯ
- *      делегация заявок на этого пользователя (он замещающий).
+ * Продуктовое решение: менеджер видит
+ *   1. свой личный ящик (mailbox.owner_user_id = user.id);
+ *   2. общие ящики (info@ / order@ — type=shared, синкаемые).
+ * Чужие личные ящики менеджер не видит — и как исполняющий по делегированным заявкам тоже (решение заказчика
+ * 20.11.2026: Агрызков видел ящик Ежова). Письма делегированной заявки кладутся в ящик исполняющего
+ * (ManagerUnavailabilityService::deliverMailToActing, RequestDelegation::mailTargetUserId).
  *
  * Всё в пределах scopeSyncable (неактивные/несинкаемые ящики не показываем).
  * Привилегированные роли (РОП/директор/админ) видят те же три группы для себя
@@ -51,24 +52,19 @@ class MailboxAccessService
                 ->get();
         }
 
-        $delegatedOwnerIds = $this->delegatedOwnerIds($user);
-
         $all = Mailbox::query()
             ->syncable()
-            ->where(function ($q) use ($user, $delegatedOwnerIds) {
+            ->where(function ($q) use ($user) {
                 $q->where('owner_user_id', $user->id)
                     ->orWhere('type', MailboxType::Shared->value);
-                if ($delegatedOwnerIds !== []) {
-                    $q->orWhereIn('owner_user_id', $delegatedOwnerIds);
-                }
             })
             ->with('owner:id,name')
             ->orderByRaw("CASE type WHEN 'personal' THEN 0 ELSE 1 END")
             ->orderBy('email')
             ->get();
 
-        // Стабильный порядок групп: свой личный → общие → делегированные.
-        $sorted = $all->sortBy(fn (Mailbox $m) => match ($this->kindOf($m, $user, $delegatedOwnerIds)) {
+        // Стабильный порядок групп: свой личный → общие.
+        $sorted = $all->sortBy(fn (Mailbox $m) => match ($this->kindOf($m, $user, [])) {
             'personal' => 0,
             'shared' => 1,
             default => 2,
