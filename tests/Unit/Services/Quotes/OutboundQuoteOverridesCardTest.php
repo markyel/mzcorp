@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Services\Quotes;
 
+use App\Models\CatalogItem;
 use App\Models\OutboundQuoteItem;
 use App\Models\RequestItem;
 use App\Prompts\Quotes\MatchOutboundQuoteItemsPrompt;
@@ -22,15 +23,18 @@ class OutboundQuoteOverridesCardTest extends TestCase
         $ri = new RequestItem;
         $ri->is_active = $active;
         $ri->catalog_item_id = 18205;
+        $ri->parsed_name = 'Пускатель Schneider Electric LC1DS32';
+        $ri->setRelation('catalogItem', new CatalogItem(['name' => 'КОНТАКТОР D TeSys Deca 3Р,32 A,НО+НЗ,110VAC 50/60ГЦ,ЗАЖИМ ПОД ВИНТ']));
         $ri->quality_assessment_payload = $method ? ['catalog_match' => ['method' => $method]] : [];
 
         return $ri;
     }
 
-    private function line(string $source): OutboundQuoteItem
+    private function line(string $source, string $offered = 'КОНТАКТОР D 3Р,32 A,НО+НЗ,110VAC 50/60ГЦ,ЗАЖИМ ПОД ВИНТ'): OutboundQuoteItem
     {
         $qi = new OutboundQuoteItem;
         $qi->match_source = $source;
+        $qi->setRelation('catalogItem', new CatalogItem(['name' => $offered]));
 
         return $qi;
     }
@@ -60,6 +64,17 @@ class OutboundQuoteOverridesCardTest extends TestCase
 
         $this->assertFalse(OutboundQuoteCatalogEnricher::quoteOverridesCard($b, $this->item('B_brand_article'), collect([$a, $b])));
         $this->assertFalse(OutboundQuoteCatalogEnricher::quoteOverridesCard($b, $this->item('B_brand_article', active: false), collect([$b])));
+    }
+
+    public function test_a_line_about_another_product_does_not_override(): void
+    {
+        // «КВШ D=600» и «Барабан для канатов» КП — промах связки LLM, не замена.
+        $qi = $this->line(OutboundQuoteItem::MATCH_SOURCE_LLM, 'Барабан (бобина, катушка) для канатов / тросов D=600мм');
+        $this->assertFalse(OutboundQuoteCatalogEnricher::quoteOverridesCard($qi, $this->item('B_brand_article'), collect([$qi])));
+
+        // Связали по совпадению карточек, а карточку позиции потом сменили.
+        $exact = $this->line(OutboundQuoteItem::MATCH_SOURCE_CATALOG_TO_REQUEST);
+        $this->assertFalse(OutboundQuoteCatalogEnricher::quoteOverridesCard($exact, $this->item('B_brand_article'), collect([$exact])));
     }
 
     public function test_the_replacement_is_closer_to_the_items_own_card_than_to_the_neighbour(): void

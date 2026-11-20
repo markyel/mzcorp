@@ -140,8 +140,25 @@ class OutboundQuoteCatalogEnricher
         if ($qi->match_source === OutboundQuoteItem::MATCH_SOURCE_MANUAL) {
             return true;
         }
+        // Строку связали по совпадению карточек, а карточку позиции потом сменили — её сменили сознательно.
+        if ($qi->match_source === OutboundQuoteItem::MATCH_SOURCE_CATALOG_TO_REQUEST) {
+            return false;
+        }
         $payload = is_array($ri->quality_assessment_payload) ? $ri->quality_assessment_payload : [];
+        if (($payload['catalog_match']['method'] ?? null) === 'manual_link') {
+            return false;
+        }
 
-        return ($payload['catalog_match']['method'] ?? null) !== 'manual_link';
+        // Строка КП и позиция — про один товар: у карточки из КП с позицией (или её нынешней карточкой) хотя бы два
+        // общих слова. Иначе это промах связки, не замена: «КВШ D=600» ↔ «Барабан для канатов», «Плата энкодера» ↔
+        // «Датчик положения» (прогон по КП за 60 дней, 20.11.2026).
+        $offered = (string) $qi->catalogItem?->name;
+        foreach ([(string) $ri->parsed_name, (string) $ri->catalogItem?->name] as $name) {
+            if ($offered !== '' && $name !== '' && OutboundQuoteItemMatcher::nameSimilarity($offered, $name) > 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

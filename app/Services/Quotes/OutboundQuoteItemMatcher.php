@@ -693,10 +693,10 @@ class OutboundQuoteItemMatcher
      * Name similarity: пересечение значащих токенов (length ≥ 3, без стоп-слов)
      * плюс similar_text bonus. Возвращает 0..1.
      */
-    private function nameSimilarity(string $a, string $b): float
+    public static function nameSimilarity(string $a, string $b): float
     {
-        $tokensA = $this->meaningfulTokens($a);
-        $tokensB = $this->meaningfulTokens($b);
+        $tokensA = self::meaningfulTokens($a);
+        $tokensB = self::meaningfulTokens($b);
         if (empty($tokensA) || empty($tokensB)) {
             return 0.0;
         }
@@ -722,7 +722,7 @@ class OutboundQuoteItemMatcher
      *
      * @return array<int, string>
      */
-    private function meaningfulTokens(string $value): array
+    private static function meaningfulTokens(string $value): array
     {
         static $stop = [
             'для', 'или', 'без', 'при', 'под', 'над', 'это', 'тип', 'вид',
