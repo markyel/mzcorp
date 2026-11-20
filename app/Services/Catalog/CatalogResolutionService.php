@@ -131,6 +131,9 @@ class CatalogResolutionService
         // Разбиваем по запятой/слэшу — клиент может прислать «GAA638JR1, 3RT2016-2GG22»
         // (наш парсер сам тоже так пишет — см. ParseItemsPrompt v5).
         $tokens = preg_split('/\s*[,\/]\s*/', $article) ?: [$article];
+        // Наш M-артикул — первым: «XO-508, M27285» (уточнение клиента дописало M-код) уводило по коду модели XO-508
+        // к датчику M11915 вместо слайдера M27285 (проверка 20.11.2026).
+        usort($tokens, fn ($a, $b) => (int) (preg_match('/^\s*[MМ]\d{5}\s*$/u', (string) $b) === 1) <=> (int) (preg_match('/^\s*[MМ]\d{5}\s*$/u', (string) $a) === 1));
         foreach ($tokens as $tok) {
             // Локальные коды поставщика (LW-..., см. LocalSupplierCodePattern)
             // в каталоге заведомо отсутствуют (там лежит оригинальный
