@@ -1919,6 +1919,18 @@
                             </span>
                         @endif
                         <span class="flex-1"></span>
+                        @php
+                            $_qmStates = collect($this->quoteMarks)->pluck('state');
+                            $_canSplit = $_qmStates->contains(fn ($s) => in_array($s, ['open', 'deferred'], true))
+                                && $_qmStates->contains(fn ($s) => ! in_array($s, ['open', 'deferred'], true));
+                        @endphp
+                        @if($_canSplit || $splitByQuote)
+                            <label class="inline-flex items-center gap-1.5 text-[12px] text-fg-2 cursor-pointer select-none"
+                                   title="Сверху — позиции, на которые КП ещё не выдано; ниже — с КП. Номера позиций прежние">
+                                <input type="checkbox" wire:click="toggleSplitByQuote" @checked($splitByQuote)>
+                                разделить по КП
+                            </label>
+                        @endif
                         <span class="text-[11.5px] text-fg-3">источник: {{ $items->first()?->data_source ?? '—' }}</span>
                         @if($deletedCount > 0)
                             <button wire:click="toggleDeletedItems" class="btn btn-sm">
@@ -2368,8 +2380,23 @@
                                 $isInhChild = $req->isInheritanceChild();
                                 $requestedSupplierItemIds = $this->requestedItemIds;
                                 $quoteMarks = $this->quoteMarks;
+                                // «разделить по КП»: сверху без КП (нет в КП, ответим позже), ниже остальное; порядок и номера — прежние.
+                                $quoteGroups = [['title' => null, 'items' => $items]];
+                                if ($splitByQuote && $quoteMarks !== []) {
+                                    [$_inWork, $_quotedItems] = $items->partition(fn ($i) => in_array($quoteMarks[$i->id]['state'] ?? null, ['open', 'deferred'], true));
+                                    $quoteGroups = [
+                                        ['title' => 'В работе — КП не выдано', 'items' => $_inWork, 'tone' => 'color:#92400e'],
+                                        ['title' => 'КП выдано', 'items' => $_quotedItems, 'tone' => 'color:#047857'],
+                                    ];
+                                }
                             @endphp
-                            @foreach($items as $item)
+                            @foreach($quoteGroups as $_group)
+                            @if($_group['title'])
+                                <div class="px-1 pt-2 pb-1 text-[12px] font-semibold" style="{{ $_group['tone'] }}{{ $loop->first ? '' : ';margin-top:10px' }}">
+                                    {{ $_group['title'] }} · {{ $_group['items']->count() }}
+                                </div>
+                            @endif
+                            @foreach($_group['items'] as $item)
                                 @php
                                     $slots = $slotResolver->resolve($item);
                                     $inhLinkForItem = $inhLinksMap->get($item->id);
@@ -2388,6 +2415,7 @@
                                     'awaitingSupplier' => $requestedSupplierItemIds->contains($item->id),
                                     'quoteMark' => $quoteMarks[$item->id] ?? null,
                                 ])
+                            @endforeach
                             @endforeach
                             </div>
 

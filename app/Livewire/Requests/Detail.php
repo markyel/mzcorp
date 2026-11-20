@@ -106,6 +106,13 @@ class Detail extends Component
     public bool $includeStickyItems = false;
 
     /**
+     * «Частичное КП»: позиции двумя блоками — сверху без КП (ещё в работе), ниже с КП. Номера позиций прежние
+     * (M-2026-21151, 20.11.2026). В адресе — чтобы обновление страницы не сбрасывало.
+     */
+    #[Url(as: 'split', except: false)]
+    public bool $splitByQuote = false;
+
+    /**
      * Foundation §6.2 комбо-режим: map item_id => true для позиций
      * раскрытых в expanded-вид (со slot-grid, quick-chips, free-text
      * textarea, history). Остальные позиции — compact-row.
@@ -1623,6 +1630,11 @@ class Detail extends Component
     }
 
     /* ---------------- Priority 1 — ручные действия с позициями ---------------- */
+
+    public function toggleSplitByQuote(): void
+    {
+        $this->splitByQuote = ! $this->splitByQuote;
+    }
 
     public function toggleDeletedItems(): void
     {
