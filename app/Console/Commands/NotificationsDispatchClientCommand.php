@@ -230,8 +230,9 @@ class NotificationsDispatchClientCommand extends Command
         // каждый статус — со своим порогом тишины.
         $candidates = Request::with(['emailMessage'])
             ->where(function ($q) use ($quotedCutoff, $underReviewCutoff) {
+                // «Частичное КП» — как «КП отправлено» (23.11.2026); «ответим позже» отсеивается ниже.
                 $q->where(function ($x) use ($quotedCutoff) {
-                    $x->where('status', RequestStatus::Quoted->value)
+                    $x->whereIn('status', [RequestStatus::Quoted->value, RequestStatus::PartiallyQuoted->value])
                         ->where('updated_at', '<', $quotedCutoff);
                 })->orWhere(function ($x) use ($underReviewCutoff) {
                     $x->where('status', RequestStatus::UnderReview->value)
@@ -243,6 +244,10 @@ class NotificationsDispatchClientCommand extends Command
         $result = [];
         foreach ($candidates as $request) {
             if (! $request->client_email) {
+                continue;
+            }
+            // Мяч у нас: клиенту обещали ответ по позиции — не торопим его.
+            if ($request->status === RequestStatus::PartiallyQuoted && \App\Services\Quotes\QuoteCoverageService::weOweAnswer($request)) {
                 continue;
             }
 

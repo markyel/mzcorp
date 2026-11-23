@@ -72,6 +72,16 @@ class QuoteCoverageService
 
     public function __construct(private readonly RequestStateService $states) {}
 
+    /**
+     * Мяч у нас: по позиции без КП клиенту сказали «ответим позже». Такую заявку в «Частичном КП» не закрываем по
+     * молчанию клиента и не напоминаем ему (23.11.2026) — в остальном «Частичное КП» живёт по таймерам «КП отправлено».
+     */
+    public static function weOweAnswer(Request $request): bool
+    {
+        return RequestItem::query()->where('request_id', $request->id)->where('is_active', true)
+            ->whereNull('quote_resolution')->whereNotNull('quote_deferred_at')->exists();
+    }
+
     /** Ушло ли по заявке хоть одно КП (из 1С с разобранными строками или собранное в mzCorp). */
     public function hasQuote(Request $request): bool
     {
@@ -122,10 +132,17 @@ class QuoteCoverageService
         }
 
         // «Лишние» строки: не закрыли ни одной позиции ни напрямую, ни по каталогу — предложенная замена.
+        // Заменой не считаем товар, уже предложенный по другой позиции, и дубли: MZ2026-00786 — КП 373053 разобрано дважды,
+        // две строки, привязанные в одной копии, в другой остались «лишними» и закрыли две непокрытые кнопки разом
+        // (20.11.2026). Считаем разные товары, а не строки.
         $itemIds = $items->pluck('id')->map(fn ($id) => (int) $id)->all();
         $itemCatalog = $items->pluck('catalog_item_id')->filter()->map(fn ($id) => (int) $id)->all();
+        $offered = $lines->filter(fn ($l) => in_array((int) ($l->matched_request_item_id ?? 0), $itemIds, true))
+            ->pluck('matched_catalog_item_id')->filter()->map(fn ($id) => (int) $id)->all();
         $spare = $lines->filter(fn ($l) => ! in_array((int) ($l->matched_request_item_id ?? 0), $itemIds, true)
-            && ! ($l->matched_catalog_item_id && in_array((int) $l->matched_catalog_item_id, $itemCatalog, true)))->count();
+            && ! ($l->matched_catalog_item_id && in_array((int) $l->matched_catalog_item_id, [...$itemCatalog, ...$offered], true)))
+            ->map(fn ($l) => $l->matched_catalog_item_id ? 'c'.$l->matched_catalog_item_id : 'n'.mb_strtolower(trim((string) ($l->raw_name ?? ''))))
+            ->unique()->count();
 
         return $open->count() <= $spare ? collect() : $open;
     }

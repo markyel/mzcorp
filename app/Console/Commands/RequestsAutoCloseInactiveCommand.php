@@ -166,9 +166,11 @@ class RequestsAutoCloseInactiveCommand extends Command
 
         // (b) Молчание после КП. Якорь — clientSilenceAnchor (молчание КЛИЕНТА;
         // наши действия/смена статуса-самоперехода таймер НЕ сбрасывают).
+        // «Частичное КП» — так же (23.11.2026, MZ2026-02370: КП и вопросы клиенту по остальным позициям одним письмом,
+        // заявка висела бы вечно), если только по позиции без КП не обещали «ответим позже» — тогда мяч у нас.
         if ($quoteDays > 0 && ! $reachedLimit()) {
             $reqs = Request::query()
-                ->where('status', RequestStatus::Quoted->value)
+                ->whereIn('status', [RequestStatus::Quoted->value, RequestStatus::PartiallyQuoted->value])
                 ->where('created_at', '<', now()->subDays($quoteDays))
                 ->get();
             foreach ($reqs as $req) {
@@ -176,6 +178,9 @@ class RequestsAutoCloseInactiveCommand extends Command
                     break;
                 }
                 if (! $this->isClosable($req)) {
+                    continue;
+                }
+                if ($req->status === RequestStatus::PartiallyQuoted && \App\Services\Quotes\QuoteCoverageService::weOweAnswer($req)) {
                     continue;
                 }
                 if (! $this->dueBusiness($cal, $this->clientSilenceAnchor($req), $quoteDays)

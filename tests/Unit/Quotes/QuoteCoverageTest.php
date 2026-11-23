@@ -36,6 +36,19 @@ class QuoteCoverageTest extends TestCase
         $this->assertSame([], $this->ids(QuoteCoverageService::uncoveredOf($items, $lines)));
     }
 
+    public function test_a_duplicate_of_an_offered_product_is_not_a_substitution(): void
+    {
+        // MZ2026-00786: КП разобрано дважды; «ТРЕВОГА» и «удержание» привязаны в одной копии, в другой — «лишние».
+        // Две кнопки без КП («этаж 2», «этаж -1») этими строками не закрываются.
+        $items = collect([$this->item(4, 8299), $this->item(8), $this->item(10, 19300), $this->item(11, 26985)]);
+        $lines = collect([
+            $this->line('ТРЕВОГА', 4, 8299), $this->line('удержание открытым', 8, 16056),
+            $this->line('ТРЕВОГА', null, 8299), $this->line('удержание открытым', null, 16056),
+        ]);
+
+        $this->assertSame([10, 11], $this->ids(QuoteCoverageService::uncoveredOf($items, $lines)));
+    }
+
     public function test_an_extra_line_is_a_substitution_for_an_uncovered_item(): void
     {
         // MZ2026-01343: просили поручень SDS (карточка 3944), в КП три других поручня — замена.
