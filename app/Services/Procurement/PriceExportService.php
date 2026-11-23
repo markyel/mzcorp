@@ -52,9 +52,9 @@ class PriceExportService
 
     /**
      * Выгрузка по списку позиций «Актуализации цен»: все действующие цены поставщиков по этим
-     * позициям, выбранное предложение — 1 в колонке «Выбор». У поставщика по позиции одна
-     * строка: выбранное предложение, иначе оригинал, иначе последнее (копию 3 USD рядом с
-     * оригиналом 6 USD того же поставщика в 1С не грузим, пока её не выбрали).
+     * позициям, выбранное предложение — 1 в колонке «Выбор». У поставщика по позиции — строка на
+     * каждый вариант: оригинал 6 USD и копия 3 USD — две строки, что за копия — в комментарии
+     * (23.11.2026; раньше копию до выбора не грузили).
      *
      * Цены из писем мимо QuoteParts ($mail, строки MailPriceOffers) — тем поставщикам, у кого по позиции нет
      * предложения QuoteParts, или когда выбрана именно цена из письма; аналог из письма — только выбранный.
@@ -68,24 +68,28 @@ class PriceExportService
         // $draftSkus: новые позиции без карточки — код T-… => M-артикул (PriceDraftSkuService).
         $key = fn (QuotePartsOffer $o) => SupplierChoiceService::itemKey($o->catalog_item_id, $o->sku);
         $offers = $offers->filter(fn (QuotePartsOffer $o) => ($o->catalogItem !== null || isset($draftSkus[(string) $o->sku]))
-            && (float) $o->price > 0 && $o->countsAsItemPrice());
+            // Копия, аналог, замена — тоже, с пометкой в комментарии, и не только принятые к закупке (23.11.2026: копии не
+            // попадали в выгрузку). Дал поставщик два варианта (оригинал и копию) — обе строки.
+            && (float) $o->price > 0 && $o->ignored_at === null);
         $choices = app(SupplierChoiceService::class)->forKeys($offers->map($key)->merge($mail->pluck('cid'))->unique()->values()->all());
         $chosen = $choices->filter(fn ($c) => $c->source === 'quoteparts')->map(fn ($c) => (int) $c->offer_ref);
         $chosenMail = $choices->filter(fn ($c) => $c->source === 'email')->map(fn ($c) => (int) $c->offer_ref);
 
-        $prices = $offers->groupBy(fn (QuotePartsOffer $o) => $key($o).'|'.$o->supplier_key)
+        // Строка — поставщик × вариант (оригинал / копия / аналог с брендом и артикулом); повтор того же варианта (ответ на
+        // второй запрос) — один: выбранный, иначе последний.
+        $prices = $offers->groupBy(fn (QuotePartsOffer $o) => $key($o).'|'.$o->supplier_key.'|'.self::variantKey($o))
             ->map(fn (Collection $g) => $g->first(fn ($o) => ($chosen[$key($o)] ?? null) === (int) $o->id)
-                ?? $g->where('kind', 'original')->sortByDesc('remote_updated_at')->first()
                 ?? $g->sortByDesc('remote_updated_at')->first())
             ->map(fn (QuotePartsOffer $o) => self::quotePartsPrice($o, $draftSkus));
         foreach ($mail as $m) {
             $isChosen = ($chosenMail[$m['cid']] ?? null) === (int) $m['id'];
-            $slot = $m['cid'].'|'.$m['key'];
+            $slot = $m['cid'].'|'.$m['key'].'|'.self::variantKey(null);
             if ((! $isChosen && ($prices->has($slot) || $m['deviation']))) {
                 continue;
             }
             $prices->put($slot, ['cid' => (int) $m['cid'], 'sku' => (string) $m['sku'], 'key' => $m['key'], 'fallback' => (string) $m['supplier'],
-                'price' => (float) $m['price'], 'currency' => $m['currency'], 'date' => Carbon::parse($m['at']), 'comment' => $m['comment']]);
+                'price' => (float) $m['price'], 'currency' => $m['currency'], 'date' => Carbon::parse($m['at']), 'comment' => $m['comment'],
+                'variant' => self::variantKey(null), 'ref' => ['email', (int) $m['id']]]);
         }
         $prices = $prices->values();
 
@@ -207,13 +211,13 @@ class PriceExportService
         $codes = app(SupplierOnecCodeService::class);
         $codeByKey = $codes->codesFor($keys, $names);
 
-        // По поставщику и позиции — последняя цена периода.
+        // По поставщику, позиции и варианту (оригинал / копия / аналог) — последняя цена периода.
         $latest = $prices->map(function ($p) use ($names, $codeByKey, $codes) {
             $name = $p['key'] !== null ? ($names[$p['key']] ?? $p['fallback']) : $p['fallback'];
             $code = $p['key'] !== null ? ($codeByKey[$p['key']]['code'] ?? null) : $codes->codeForName($p['fallback']);
 
             return $p + ['name' => $name, 'code' => $code];
-        })->sortBy('date')->keyBy(fn ($p) => $p['sku'].'|'.($p['key'] ?? 'name:'.$p['name']))->sortBy(fn ($p) => [$p['sku'], $p['name']])->values();
+        })->sortBy('date')->keyBy(fn ($p) => $p['sku'].'|'.($p['key'] ?? 'name:'.$p['name']).'|'.($p['variant'] ?? self::variantKey(null)))->sortBy(fn ($p) => [$p['sku'], $p['name']])->values();
 
         $choices = app(SupplierChoiceService::class)->forKeys($latest->pluck('cid')->unique()->values()->all());
 
@@ -226,7 +230,9 @@ class PriceExportService
         foreach ($latest as $p) {
             $choice = $choices->get($p['cid']);
             // Выбранное снабжением предложение («Закупаем здесь») — 1 в колонке «Выбор».
-            $chosen = $choice && $p['key'] !== null && $choice->supplier_key === $p['key'];
+            // У поставщика два варианта — 1 только у выбранного предложения.
+            $chosen = $choice && $p['key'] !== null && $choice->supplier_key === $p['key']
+                && (! isset($p['ref']) || $choice->offer_ref === null || ($choice->source === $p['ref'][0] && (int) $choice->offer_ref === $p['ref'][1]));
             $comment = implode('; ', array_filter([
                 $p['code'] === null ? 'поставщик '.$p['name'].' (нет кода 1С)' : null,
                 $p['comment'] ?? null,
@@ -258,12 +264,12 @@ class PriceExportService
                 : ['Период', $from->format('d.m.Y H:i').' – '.$to->format('d.m.Y H:i').' (по дате письма / предложения поставщика)'],
             ['Сформировано', now()->format('d.m.Y H:i').($by ? ' · '.$by->name : '')],
             ['', ''],
-            ['Артикул', 'M-артикул позиции. Строка — позиция × поставщик: последняя цена поставщика по позиции за период, за единицу, в валюте поставщика. Принятые к закупке аналог / восстановленное и т. п. — как цена самой позиции; что предложено — в комментарии.'],
+            ['Артикул', 'M-артикул позиции. Строка — позиция × поставщик × вариант: последняя цена поставщика по позиции за период, за единицу, в валюте поставщика. Аналог, копия, замена, восстановленное — отдельной строкой: дал поставщик оригинал и копию — две строки; что предложено — в комментарии.'],
             ['Поставщик', 'Код контрагента из справочника 1С УНФ. Нет кода — поставщик не привязан к контрагенту 1С: его название в комментарии, привязать можно в «Выгрузке цен».'],
             ['Выбор', '1 — предложение, выбранное снабжением к закупке («Закупаем здесь»); у остальных поставщиков пусто.'],
             ['Комментарий', 'Что важно знать о предложении: вместо запрошенного (аналог, копия, замена, восстановленное) — с брендом и артикулом; у агента — реальный поставщик; минимальная партия и ступени цены, срок поставки, примечание поставщика; для ответов письмом — фрагмент письма с ценой.'],
             $positions
-                ? ['Не выгружено', 'Копии и аналоги, которые не выбраны к закупке; предложения, отмеченные «Игнорировать».']
+                ? ['Не выгружено', 'Предложения, отмеченные «Игнорировать».']
                 : ['Не выгружено', $skipped.' ответ(ов) рассылки с аналогом / копией в тексте — их нужно разобрать по письму.'],
             ['Без кода 1С', $noCode->isEmpty() ? '—' : $noCode->implode(', ')],
             ['Итого', ($r - 2).' строк, '.$latest->pluck('sku')->unique()->count().' артикулов, '.$latest->pluck('name')->unique()->count().' поставщиков'],
@@ -332,12 +338,13 @@ class PriceExportService
             ]);
         }
 
-        // QuoteParts: оригинал — сразу, отклонение — когда принято к закупке (тогда и попадает в период).
+        // QuoteParts: оригинал и отклонение (копия, аналог, замена — своей строкой с пометкой в комментарии, 23.11.2026).
+        // «Игнорировать» — не выгружаем.
         $qp = QuotePartsOffer::query()->with('catalogItem:id,sku')->whereNotNull('catalog_item_id')->where('price', '>', 0)
             ->where(fn ($q) => $q->whereBetween('remote_updated_at', [$from, $to])->orWhereBetween('reviewed_at', [$from, $to]))
             ->get();
         foreach ($qp as $o) {
-            if (! $o->countsAsItemPrice() || $o->catalogItem === null) {
+            if ($o->ignored_at !== null || $o->catalogItem === null) {
                 continue;
             }
             $out->push(self::quotePartsPrice($o));
@@ -363,6 +370,8 @@ class PriceExportService
             'date' => Carbon::parse($o->remote_updated_at ?? $o->created_at),
             // Поправленный снабжением комментарий — как есть, иначе собранный.
             'comment' => $o->export_comment ?? self::offerComment($o),
+            'variant' => self::variantKey($o),
+            'ref' => ['quoteparts', (int) $o->id],
         ];
     }
 
@@ -438,6 +447,19 @@ class PriceExportService
         }
 
         return $parts === [] ? null : implode('; ', $parts);
+    }
+
+    /**
+     * Вариант предложения: оригинал — один, отклонение — вид + бренд + артикул («копия|ksd|kc0229»). Разные варианты
+     * поставщика — разные строки выгрузки (23.11.2026); null — цена из письма (как оригинал).
+     */
+    public static function variantKey(?QuotePartsOffer $o): string
+    {
+        if ($o === null || ($o->kind ?? 'original') === 'original') {
+            return 'original';
+        }
+
+        return $o->kind.'|'.mb_strtolower(trim((string) $o->brand)).'|'.preg_replace('/[^\p{L}\p{N}]+/u', '', mb_strtolower((string) $o->part_number));
     }
 
     /** «Аналог (другой производитель, не оригинал): Fermator FR-60 — комментарий поставщика» — что вместо запрошенного. */
