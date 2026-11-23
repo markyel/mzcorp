@@ -82,6 +82,25 @@ class QuoteCoverageService
             ->whereNull('quote_resolution')->whereNotNull('quote_deferred_at')->exists();
     }
 
+    /**
+     * Таймеры «КП отправлено» (напоминание клиенту, закрытие по молчанию) для «Частичного КП» — только по КП, ушедшим
+     * после включения правила: 35 заявок, висевших с 18–19.11, клиентам не напоминаем (решение 23.11.2026).
+     */
+    public const PARTIAL_TIMERS_SINCE = '2026-11-23 09:45:00';
+
+    /** «Частичное КП» живёт по таймерам «КП отправлено»: КП ушло после PARTIAL_TIMERS_SINCE и мяч не у нас. */
+    public static function partialFollowsQuoteTimers(Request $request): bool
+    {
+        if (self::weOweAnswer($request)) {
+            return false;
+        }
+        $since = \Illuminate\Support\Carbon::parse(self::PARTIAL_TIMERS_SINCE, 'Europe/Moscow');
+
+        return DB::table('outbound_quotes')->where('request_id', $request->id)->where('document_type', 'outbound_quotation_full')
+            ->whereIn('status', ['matched', 'parsed'])->where('created_at', '>=', $since)->exists()
+            || DB::table('quotations')->where('request_id', $request->id)->where('sent_at', '>=', $since)->exists();
+    }
+
     /** Ушло ли по заявке хоть одно КП (из 1С с разобранными строками или собранное в mzCorp). */
     public function hasQuote(Request $request): bool
     {

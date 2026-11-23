@@ -246,8 +246,8 @@ class NotificationsDispatchClientCommand extends Command
             if (! $request->client_email) {
                 continue;
             }
-            // Мяч у нас: клиенту обещали ответ по позиции — не торопим его.
-            if ($request->status === RequestStatus::PartiallyQuoted && \App\Services\Quotes\QuoteCoverageService::weOweAnswer($request)) {
+            // «Частичное КП»: мяч у нас («ответим позже») или КП ушло до включения правила — не напоминаем.
+            if ($request->status === RequestStatus::PartiallyQuoted && ! \App\Services\Quotes\QuoteCoverageService::partialFollowsQuoteTimers($request)) {
                 continue;
             }
 
