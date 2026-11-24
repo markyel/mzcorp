@@ -64,6 +64,19 @@
                 <b class="tnum">{{ $it['purchase'] !== null ? $rub($it['purchase']).' ₽' : '—' }}</b>
                 <span class="pa-dim">@if($last)· {{ $last->supplier_name_1c }}{{ $last->priced_at ? ', '.$last->priced_at->format('d.m.Y') : '' }}@elseif($it['purchase'] === null)закупок не было@endif</span>
             </span>
+            {{-- Спросили у части группы поставщиков — дослать остальным (24.11.2026): откроется «Запрос поставщикам» с
+                 позицией и отмеченными поставщиками группы; уходит, когда нажмут «Отправить». Не в карточке заявки —
+                 там панели запроса нет. --}}
+            @if(($it['group_gaps'] ?? []) !== [] && $this->requestId === null && $section !== 'closed' && \App\Livewire\QuoteParts\PriceRequest::canSend())
+                <span style="display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; flex-basis: 100%">
+                    @foreach($it['group_gaps'] as $gap)
+                        <span class="pa-dim">группа «{{ $gap['name'] }}»: спросили {{ $gap['asked'] }} из {{ $gap['total'] }}</span>
+                        <button type="button" wire:click="requestGroup({{ (int) $it['cid'] }}, @js($gap['missing']))" class="pa-btn pa-btn-secondary" style="height: 24px"
+                                title="Открыть «Запрос поставщикам»: позиция и {{ count($gap['missing']) }} поставщик(ов) группы, кого не спрашивали, — отмечены. Письма уйдут, когда нажмёте «Отправить»">
+                            дослать остальным {{ count($gap['missing']) }}</button>
+                    @endforeach
+                </span>
+            @endif
         </div>
         <div class="pa-head-side">
             {{-- В «Ждём» — только когда выбрана цена из письма: такая позиция в «Готово» не попадает (готовность считает QuoteParts). --}}

@@ -732,6 +732,63 @@ class PriceOffers extends Component
             ->get();
     }
 
+    /**
+     * Группы поставщиков («Китай 6 все»): ключ организации (как у QuoteParts) => кому слать — её представитель
+     * (первый контакт «Расценка»). По ним позиция подсказывает, кого из группы не спросили (24.11.2026, M00866).
+     *
+     * @return list<array{id: int, name: string, keys: array<string, int>}>
+     */
+    #[Computed]
+    public function supplierGroupKeys(): array
+    {
+        return \App\Models\SupplierGroup::query()->orderBy('sort_order')->orderBy('name')
+            ->with(['suppliers' => fn ($q) => $q->whereNotNull('email')->where('email', '!=', '')->notArchived()->with('organization:id,qp_key')])
+            ->get()
+            ->map(fn ($g) => [
+                'id' => (int) $g->id,
+                'name' => (string) $g->name,
+                'keys' => $g->suppliers->groupBy(fn ($s) => $s->quotepartsKey())
+                    ->map(fn ($rows) => (int) \App\Services\Supplier\SupplierMatchService::representatives($rows)->first()->id)->all(),
+            ])
+            ->filter(fn ($g) => $g['keys'] !== [])->values()->all();
+    }
+
+    /**
+     * Группы, из которых позицию спросили не у всех: поставщик группы спрошен, остальные — нет.
+     *
+     * @param  list<string>  $askedKeys
+     * @return list<array{id: int, name: string, asked: int, total: int, missing: list<int>}>
+     */
+    private function groupGaps(array $askedKeys): array
+    {
+        $out = [];
+        foreach ($this->supplierGroupKeys as $g) {
+            $asked = array_intersect(array_keys($g['keys']), $askedKeys);
+            $missing = array_diff_key($g['keys'], array_flip($askedKeys));
+            if ($asked !== [] && $missing !== []) {
+                $out[] = ['id' => $g['id'], 'name' => $g['name'], 'asked' => count($asked), 'total' => count($g['keys']), 'missing' => array_values($missing)];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * «Дослать группе»: панель «Запрос поставщикам» с этой позицией и не спрошенными поставщиками группы — отмеченными.
+     * Письма уходят, только когда снабженец нажмёт «Отправить».
+     *
+     * @param  list<int>  $supplierIds
+     */
+    public function requestGroup(int $cid, array $supplierIds): void
+    {
+        abort_unless(PriceRequest::canSend(), 403);
+        $ids = array_values(array_filter(array_map('intval', $supplierIds), fn ($id) => $id > 0));
+        if ($cid <= 0 || $ids === []) {
+            return;
+        }
+        $this->dispatch('qp-price-request', cids: [$cid], suppliers: $ids)->to(PriceRequest::class);
+    }
+
     /** @return array<string, string> ключ поставщика => название */
     #[Computed]
     public function supplierNames(): array
@@ -1133,6 +1190,8 @@ class PriceOffers extends Component
                     'waiting' => $st ? array_values(array_map(fn ($k) => $this->supplierNames[$k] ?? $k,
                         array_diff($st['asked'], $st['offered'], $st['declined'], $offers->pluck('key')->filter()->all(), $mail['offered'] ?? [], $mail['declined'] ?? []))) : [],
                     'postponed' => $postponed->get($sku, isset($aliases[$sku]) ? $postponed->get($aliases[$sku], []) : []),
+                    // Спросили у части группы — подсказка «дослать остальным» (только каталожной позиции).
+                    'group_gaps' => $first['cid'] !== null ? $this->groupGaps(array_values(array_unique(array_merge($st['asked'] ?? [], $mail['asked'] ?? [])))) : [],
                     'at' => $offers->merge($itemDeclines)->merge($mailOffers)->max('at') ?? $unansweredBySku->get($sku)?->max('at'),
                 ];
             })

@@ -31,15 +31,29 @@ class PriceRequest extends Component
         ]);
     }
 
-    /** @param  list<int>  $cids */
+    /**
+     * @param  list<int>  $cids
+     * @param  list<int>  $suppliers  сразу отметить («дослать группе» из «Предложений», 24.11.2026)
+     */
     #[On('qp-price-request')]
-    public function openFor(array $cids): void
+    public function openFor(array $cids, array $suppliers = []): void
     {
         abort_unless(self::canSend(), 403);
         foreach ($cids as $cid) {
             if ((int) $cid > 0) {
                 $this->selected[(int) $cid] = true;
             }
+        }
+        foreach ($suppliers as $id) {
+            if ((int) $id > 0) {
+                $this->selectedSuppliers[(int) $id] = true;
+                if (! in_array((int) $id, $this->addedSupplierIds, true)) {
+                    $this->addedSupplierIds[] = (int) $id;
+                }
+            }
+        }
+        if ($suppliers !== []) {
+            unset($this->supplierGroups);
         }
         if ($this->qpReplyBy === '') {
             $this->qpReplyBy = now()->addDays(7)->toDateString();
