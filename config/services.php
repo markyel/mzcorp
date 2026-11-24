@@ -80,6 +80,9 @@ return [
         // Замены JSON по нашей модели {"gpt-4o-mini":"…"}; дальше default_model, пустой — та же модель OpenAI.
         'models' => env('ROUTERAI_MODELS', '{}'),
         'default_model' => env('ROUTERAI_DEFAULT_MODEL', ''),
+        // Картинки обложек медиаплана (OpenAIImageService): модель у RouterAI; пусто — картинки напрямую в OpenAI.
+        // gpt-image-1.5 у RouterAI нет (24.11.2026); gpt-image-2 держит форму деталей без input_fidelity.
+        'image_model' => env('ROUTERAI_IMAGE_MODEL', 'openai/gpt-image-2'),
         'timeout' => (int) env('ROUTERAI_TIMEOUT', 120),
         // Соединение дольше — RouterAI лежит; затем пауза предохранителя (минуты) — сразу в OpenAI.
         'connect_timeout' => (int) env('ROUTERAI_CONNECT_TIMEOUT', 5),
