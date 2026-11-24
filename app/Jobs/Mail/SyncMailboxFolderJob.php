@@ -430,6 +430,23 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
 
                 $saved++;
 
+                // Старое письмо, появившееся в папке сейчас (архив переложили в «Отправленные»: 24.11.2026 у
+                // dmitry.rumiantsev — 12,5 тыс. писем 2020–2021 с новыми UID), — архив, а не свежая почта: без
+                // привязки к заявкам и детекторов КП/счетов, иначе старые КП ложатся в текущие заявки клиента и
+                // двигают их статусы. Видно в «Почте», как история ящика.
+                $staleDays = (int) config('services.mail.stale_letter_days', 14);
+                if ($staleDays > 0 && $email->sent_at !== null && $email->sent_at->lt(now()->subDays($staleDays))) {
+                    $email->forceFill(['is_history' => true])->saveQuietly();
+                    try {
+                        app(\App\Services\Mail\MailDecisionRecorder::class)->record($email, 'stale_history', null,
+                            ['reason' => 'Письмо от '.$email->sent_at->format('d.m.Y').' появилось в папке только сейчас — архив, не разбираем']);
+                    } catch (\Throwable $ignore) {
+                        // Журнал — не повод ронять синхронизацию.
+                    }
+
+                    continue;
+                }
+
                 // Phase 1.5: применить правила маршрутизации к свежесохранённому
                 // inbound-письму. Outbound (Sent) пропускаются внутри MailRouter.
                 // Разбор письма фиксируем в журнале решений ВСЕГДА — и когда

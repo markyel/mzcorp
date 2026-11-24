@@ -25,6 +25,7 @@ class MailDecisionRecorder
         'quoteparts_mirror' => ['supplier', 'Копия ответа поставщика из QuoteParts (дублирование переписки)'],
         'rfq_inbox' => ['supplier', 'Ящик rfq@: копия переписки с поставщиком'],
         'outbound' => ['outbound', 'Наше исходящее письмо'],
+        'stale_history' => ['skipped', 'Старое письмо появилось в папке только сейчас — архив, не разбираем'],
         'not_inbound' => ['skipped', 'Не входящее письмо'],
         'loop_forward' => ['skipped', 'Петля пересылки MyLift'],
         'procurement_mailbox' => ['supplier', 'Ящик снабжения: переписка с поставщиком'],
