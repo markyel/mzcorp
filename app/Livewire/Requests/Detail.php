@@ -207,9 +207,13 @@ class Detail extends Component
         // отсортированы по sent_at для естественной хронологии. NULL sent_at
         // (редкие письма без Date header) уходят в конец.
         // Phase 1.9: visibleTo фильтрует чужие черновики (свои показываются).
+        // Наследник без связи с родителем (родитель сам наследник — цепочки связь не держит, MZ2026-02686, 24.11.2026):
+        // письмо-основание показываем так же, как у связанного наследника.
+        $successor = $this->request->email_message_id && ($this->request->inheritance_parent_id
+            || \App\Models\RequestStateChange::query()->where('request_id', $this->request->id)->where('event', 'created_successor_from_email')->exists());
         $thread = EmailMessage::query()
             ->withoutRawSource()
-            ->where(function ($q) {
+            ->where(function ($q) use ($successor) {
                 $q->where('related_request_id', $this->request->id);
                 // Заявка-наследник заведена по письму родителя: письмо осталось
                 // в треде родителя (одно письмо может породить несколько
@@ -217,7 +221,7 @@ class Detail extends Component
                 // наследника выглядит пустой — основание работы не видно.
                 // Только для наследников: у обычной заявки письмо-основание и
                 // так привязано, а у разъединённой оно законно уехало в другую.
-                if ($this->request->inheritance_parent_id && $this->request->email_message_id) {
+                if ($successor) {
                     $q->orWhere('id', $this->request->email_message_id);
                 }
             })
