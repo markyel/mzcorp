@@ -139,6 +139,12 @@ class InternalSenderDetectorAddressedToClientTest extends TestCase
         yield 'заказчик на нашем домене (ошибка данных) — домен не считаем' => [
             ['other@myzip.ru'], [], 'someone@myzip.ru', false,
         ];
+        yield 'MZ2026-02687: заявку переслал коллега, КП ушло наружу — заказчику' => [
+            ['order@liftway.store'], [], 'andrey.boev@myzip.ru', true,
+        ];
+        yield 'заявку переслал коллега, письмо только другим своим — не заказчику' => [
+            ['manager@myzip.ru'], ['rop@myzip.ru'], 'andrey.boev@myzip.ru', false,
+        ];
         yield 'e-mail заказчика не заполнен — подтвердить нечем, не блокируем' => [
             ['anyone@example.com'], [], null, true,
         ];

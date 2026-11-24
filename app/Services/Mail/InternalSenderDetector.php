@@ -157,6 +157,12 @@ class InternalSenderDetector
         }
 
         $clientDomain = (string) substr((string) strrchr($client, '@'), 1);
+        // Заявку завёл коллега пересылкой — «клиент» в ней наш же адрес, настоящий заказчик в заявке не записан.
+        // КП/счёт ушли наружу — значит, ему (MZ2026-02687, 24.11.2026: КП на order@liftway.store не распознавалось).
+        // Коллеге (только наши адреса) документ по-прежнему статус не двигает.
+        if ($clientDomain !== '' && $this->isInternalDomain($clientDomain) && $external !== []) {
+            return true;
+        }
         if ($clientDomain === ''
             || $this->isPublicMailDomain($clientDomain)
             || $this->isInternalDomain($clientDomain)) {
