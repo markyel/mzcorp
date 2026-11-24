@@ -435,7 +435,11 @@ class SyncMailboxFolderJob implements ShouldQueue, ShouldBeUnique
                 // привязки к заявкам и детекторов КП/счетов, иначе старые КП ложатся в текущие заявки клиента и
                 // двигают их статусы. Видно в «Почте», как история ящика.
                 $staleDays = (int) config('services.mail.stale_letter_days', 14);
-                if ($staleDays > 0 && $email->sent_at !== null && $email->sent_at->lt(now()->subDays($staleDays))) {
+                // Не архив — копия письма, которое уже живёт в mzCorp: доставка исполняющему менеджеру при делегировании
+                // («первое письмо + последние 3 письма клиента» — бывают и месячной давности).
+                if ($staleDays > 0 && $email->sent_at !== null && $email->sent_at->lt(now()->subDays($staleDays))
+                    && ! \App\Models\EmailMessage::query()->where('message_id', $email->message_id)->whereKeyNot($email->id)
+                        ->where('is_history', false)->exists()) {
                     $email->forceFill(['is_history' => true])->saveQuietly();
                     try {
                         app(\App\Services\Mail\MailDecisionRecorder::class)->record($email, 'stale_history', null,
