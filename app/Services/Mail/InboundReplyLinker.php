@@ -224,6 +224,15 @@ class InboundReplyLinker
                         return $terminalRequest;
                     }
 
+                    // Из этого закрытого треда уже заведена открытая заявка — ответ туда,
+                    // а не в ещё одну новую (MZ2026-03064 / MZ2026-03078 из треда M-2026-19174).
+                    $successor = $terminalRequest
+                        ? $this->openSuccessorOfClosedThread($message, $terminalRequest, $ownerScopeUserId)
+                        : null;
+                    if ($successor) {
+                        return $this->attach($message, $successor, $ownerScopeUserId, 'closed_thread_successor', $terminalParent);
+                    }
+
                     $this->rememberInheritanceCandidate(
                         $message,
                         $terminalRequest,
@@ -360,11 +369,25 @@ class InboundReplyLinker
                 return $request;
             }
 
+            $successor = $this->openSuccessorOfClosedThread($message, $request, $ownerScopeUserId);
+            if ($successor) {
+                return $this->attach($message, $successor, $ownerScopeUserId, 'closed_thread_successor', $matched);
+            }
+
             $this->rememberInheritanceCandidate($message, $request, (string) $matchedBy);
 
             return null;
         }
 
+        return $this->attach($message, $request, $ownerScopeUserId, $matchedBy, $matched);
+    }
+
+    /**
+     * Привязать письмо к заявке: related_request_id, делегированный тред, событие
+     * «ответ клиента» (или поставщика) в пуле.
+     */
+    private function attach(EmailMessage $message, Request $request, ?int $ownerScopeUserId, ?string $matchedBy, ?EmailMessage $matched): Request
+    {
         $message->forceFill(['related_request_id' => $request->id])->save();
         $this->markDelegatedThread($message, $request, $ownerScopeUserId);
 
@@ -830,6 +853,48 @@ class InboundReplyLinker
      * Phase 2.1 — записать кандидата в наследование (hint).
      * Дёргается из tryLink() когда matched-request имеет terminal статус.
      */
+    /**
+     * Открытая заявка, уже заведённая из ответа в тот же закрытый (closed_lost) тред.
+     *
+     * Ответ в тред закрытой заявки становится новой заявкой с кандидатом наследования
+     * (rememberInheritanceCandidate). Следующий ответ клиента в тот же тред ссылается
+     * заголовками на закрытую заявку, а не на новую, — без этой проверки он заводил
+     * ещё одну (MZ2026-03078 рядом с открытой MZ2026-03064, обе из M-2026-19174).
+     * Связь — тот же тред и тот же отправитель, не «любая открытая заявка клиента».
+     */
+    private function openSuccessorOfClosedThread(EmailMessage $message, Request $closed, ?int $ownerScopeUserId): ?Request
+    {
+        $from = mb_strtolower(trim((string) $message->from_email));
+        if ($from === '' || $closed->status !== RequestStatus::ClosedLost) {
+            return null;
+        }
+
+        $candidates = Request::query()
+            ->where('id', '!=', $closed->id)
+            ->whereNull('merged_into_id')
+            ->whereNotIn('status', [RequestStatus::ClosedWon->value, RequestStatus::ClosedLost->value])
+            ->whereRaw('LOWER(client_email) = ?', [$from])
+            ->whereNotNull('email_message_id')
+            ->where('email_message_id', '!=', $message->id)
+            ->where('created_at', '>=', $closed->closed_at ?? $closed->created_at)
+            ->orderByDesc('id')
+            ->limit(20)
+            ->get();
+        if ($candidates->isEmpty()) {
+            return null;
+        }
+
+        $fromThread = EmailMessage::query()
+            ->whereIn('id', $candidates->pluck('email_message_id'))
+            ->get(['id', 'detected_artifacts'])
+            ->filter(fn (EmailMessage $m): bool => (int) (($m->detected_artifacts ?? [])['inheritance_candidate_id'] ?? 0) === $closed->id)
+            ->pluck('id')
+            ->all();
+
+        return $candidates->first(fn (Request $r): bool => in_array($r->email_message_id, $fromThread, true)
+            && ($ownerScopeUserId === null || $this->isRequestInScope($r, $ownerScopeUserId)));
+    }
+
     private function rememberInheritanceCandidate(EmailMessage $message, Request $candidate, string $matchedBy): void
     {
         $artifacts = (array) ($message->detected_artifacts ?? []);
