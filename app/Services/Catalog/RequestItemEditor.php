@@ -257,6 +257,16 @@ class RequestItemEditor
             return $item;
         }
 
+        // Бренд поправили руками — и бренд справочника (его показывает карточка): MZ2026-02962, KONE → Canny, а на
+        // экране оставался KONE от распознавания. Нет бренда в справочнике — привязку снимаем, виден введённый текст.
+        if (isset($changes['parsed_brand'])) {
+            $brandId = app(\App\Services\Kb\BrandResolutionService::class)->idForName($item->parsed_brand);
+            if ((int) $item->manufacturer_brand_id !== (int) $brandId) {
+                $changes['manufacturer_brand_id'] = ['old' => $item->manufacturer_brand_id, 'new' => $brandId];
+                $item->manufacturer_brand_id = $brandId;
+            }
+        }
+
         DB::transaction(function () use ($item, $changes, $author) {
             foreach ($changes as $field => $diff) {
                 $this->appendAudit($item, [

@@ -78,6 +78,14 @@ class BrandResolutionService
         return null;
     }
 
+    /** Бренд справочника по названию бренда в позиции (ручная правка «Бренд»); не нашли — null. */
+    public function idForName(?string $name): ?int
+    {
+        $name = trim((string) $name);
+
+        return $name === '' ? null : $this->findBrandByNameOrAlias($name)?->id;
+    }
+
     private function findBrandByNameOrAlias(string $needle): ?ManufacturerBrand
     {
         $normalized = mb_strtolower(trim($needle));
