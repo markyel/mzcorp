@@ -58,4 +58,15 @@ class ClientReplySignalTest extends TestCase
         $this->assertTrue($this->signal()->isSystemSender('noreply@example.com'));
         $this->assertFalse($this->signal()->isSystemSender('msabirov@meteor.ru'));
     }
+    public function test_a_supplier_answer_to_our_request_is_not_a_client_reply(): void
+    {
+        // MZ2026-02323: ответ UniSystem на запрос QuoteParts лёг в заявку по номеру в теме и стал «Ответом клиента».
+        $reply = new EmailMessage(['from_email' => 'info@unisystem.si', 'subject' => 'Re: MyZip: request for quotation, 1 item [MZ2026-02323]']);
+        $reply->forceFill(['category' => \App\Enums\EmailCategory::SupplierReply->value]);
+        $this->assertTrue($this->signal()->isSupplierLetter($reply));
+
+        $toInquiry = new EmailMessage(['from_email' => 'sales@supplier.cn']);
+        $toInquiry->forceFill(['supplier_inquiry_id' => 42]);
+        $this->assertTrue($this->signal()->isSupplierLetter($toInquiry));
+    }
 }

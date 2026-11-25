@@ -12,6 +12,8 @@ use App\Models\EmailMessage;
  *  - автоответ: заголовки Auto-Submitted / X-Autoreply, тема или текст «в отпуске», «out of office» (M-2026-21339);
  *  - письмо от нас: коллега (InternalSenderDetector) или служебное уведомление mzCorp, например копия переписки с
  *    поставщиком в ящике менеджера (M-2026-21557, M-2026-21680);
+ *  - письмо поставщика — ответ на наш запрос цены, привязанный к заявке по номеру в теме (MZ2026-02323, 25.11.2026:
+ *    ответ UniSystem на запрос QuoteParts показался в списке «Ответом клиента», а в переписке клиента его нет);
  *  - одно «спасибо» / «получили» без вопроса и вложений — на КП (MZ2026-01278, MZ2026-01449). «Спасибо, ждём счёт»
  *    или «Спасибо, а есть аналог?» — ответ: кроме благодарности, приветствия и имени в письме ничего быть не должно.
  */
@@ -34,7 +36,7 @@ class ClientReplySignal
         private readonly InternalSenderDetector $internal = new InternalSenderDetector,
     ) {}
 
-    /** Причина, по которой письмо не ответ клиента (auto_reply / internal / system / thanks_only), иначе null. */
+    /** Причина, по которой письмо не ответ клиента (auto_reply / internal / system / thanks_only / supplier), иначе null. */
     public function notAClientReply(EmailMessage $message): ?string
     {
         if ($this->isAutoReply($message)) {
@@ -49,8 +51,30 @@ class ClientReplySignal
         if ($this->isThanksOnly($message)) {
             return 'thanks_only';
         }
+        if ($this->isSupplierLetter($message)) {
+            return 'supplier';
+        }
 
         return null;
+    }
+
+    /**
+     * Письмо поставщика: к запросу поставщику, помечено ответом поставщика или с адреса из справочника поставщиков.
+     * Поставщик бывает и клиентом — его письмо в свою же заявку остаётся ответом клиента.
+     */
+    public function isSupplierLetter(EmailMessage $message): bool
+    {
+        $category = $message->category instanceof \App\Enums\EmailCategory ? $message->category->value : (string) $message->category;
+        if ($message->supplier_inquiry_id !== null || $category === \App\Enums\EmailCategory::SupplierReply->value) {
+            return true;
+        }
+        $from = mb_strtolower(trim((string) $message->from_email));
+        if ($from === '' || ! \App\Models\Supplier::query()->whereRaw('lower(email) = ?', [$from])->exists()) {
+            return false;
+        }
+        $client = $message->related_request_id ? mb_strtolower(trim((string) \App\Models\Request::query()->whereKey($message->related_request_id)->value('client_email'))) : '';
+
+        return $client !== $from;
     }
 
     public function isAutoReply(EmailMessage $message): bool
