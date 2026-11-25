@@ -35,6 +35,15 @@ class OutboundDeclineGuardTest extends TestCase
     {
         $this->assertNull(OutboundDocumentDetector::followupIn('Добрый день. К сожалению по вашему запросу мы не сможем предоставить вам предложение.'));
         $this->assertNull(OutboundDocumentDetector::followupIn('Не наша номенклатура, к сожалению.'));
+        // MZ2026-02742: «можем предложить» внутри «Не сможем предложить» принимался за встречное предложение.
+        $this->assertNull(OutboundDocumentDetector::followupIn("Добрый день!\nНе сможем предложить"));
+        $this->assertNull(OutboundDocumentDetector::followupIn('К сожалению, не можем предложить. Не готовы поставлять поштучно.'));
+    }
+
+    public function test_an_offer_after_a_refusal_is_still_a_followup(): void
+    {
+        $this->assertSame('но можем', OutboundDocumentDetector::followupIn('Оригинал не сможем предложить, но можем привезти копию.'));
+        $this->assertSame('можем предложить', OutboundDocumentDetector::followupIn('Этот снят с производства. Можем предложить замену.'));
     }
 
     public function test_a_decline_with_a_followup_becomes_a_clarification_not_a_loss(): void

@@ -395,10 +395,22 @@ class OutboundDocumentDetector
     /** То же по готовому тексту (для проверки без письма). */
     public static function followupIn(string $text): ?string
     {
-        $text = str_replace('ё', 'е', mb_strtolower($text));
+        $text = (string) preg_replace('/\s+/u', ' ', str_replace('ё', 'е', mb_strtolower($text)));
         foreach (self::DECLINE_FOLLOWUP_KEYWORDS as $kw) {
             $normalized = str_replace('ё', 'е', mb_strtolower($kw));
-            if ($normalized !== '' && str_contains($text, $normalized)) {
+            if ($normalized === '') {
+                continue;
+            }
+            if ($normalized === '?') {
+                if (str_contains($text, '?')) {
+                    return $kw;
+                }
+
+                continue;
+            }
+            // С начала слова и без «не» перед маркером: «Не сможем предложить» содержит «можем предложить», а
+            // «не готовы» — «готовы»; отказ принимался за встречное предложение и не закрывал заявку (MZ2026-02742).
+            if (preg_match('/(?<![\p{L}\p{N}])(?<!не )'.preg_quote($normalized, '/').'/u', $text) === 1) {
                 return $kw;
             }
         }
