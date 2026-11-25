@@ -70,6 +70,8 @@ class MergeDialog extends Component
         RequestStatus::InProgress,
         RequestStatus::AwaitingClientClarification,
         RequestStatus::Quoted,
+        // Частичное КП — заявка в работе (MZ2026-03078 → M-2026-19174 не находилась поиском).
+        RequestStatus::PartiallyQuoted,
         RequestStatus::UnderReview,
         RequestStatus::PostponedUntil,
         RequestStatus::AwaitingInvoice,
@@ -319,8 +321,8 @@ class MergeDialog extends Component
 
     /**
      * Кандидаты в режиме «другой e-mail отправителя»: ищем по НОМЕРУ заявки /
-     * теме / почте среди ВСЕХ заявок (любой client_email) + подмешиваем заявки
-     * той же организации, что и winner. Статусы — активные + closed_lost:
+     * теме / почте среди ВСЕХ заявок (любой client_email); пока строки поиска
+     * нет — заявки той же организации, что и winner. Статусы — активные + closed_lost:
      * дубль часто уже закрыт (авто-закрытие или руками), его и надо вложить.
      *
      * Без строки поиска и без организации у winner — пусто: иначе это был бы
@@ -343,15 +345,17 @@ class MergeDialog extends Component
             ->where('id', '!=', $winner->id)
             ->whereIn('status', $statuses)
             ->where(function ($w) use ($search, $orgId) {
-                if ($orgId !== null) {
-                    $w->orWhere('organization_id', $orgId);
+                // Строка поиска СУЖАЕТ выдачу; заявки организации — список по
+                // умолчанию, пока поиска нет (иначе они забивали выдачу по номеру).
+                if ($search === '') {
+                    $w->where('organization_id', $orgId);
+
+                    return;
                 }
-                if ($search !== '') {
-                    $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
-                    $w->orWhere('internal_code', 'ilike', $needle)
-                        ->orWhere('subject', 'ilike', $needle)
-                        ->orWhere('client_email', 'ilike', $needle);
-                }
+                $needle = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
+                $w->where('internal_code', 'ilike', $needle)
+                    ->orWhere('subject', 'ilike', $needle)
+                    ->orWhere('client_email', 'ilike', $needle);
             })
             ->withCount(['items' => fn ($q) => $q->where('is_active', true)])
             ->with([
