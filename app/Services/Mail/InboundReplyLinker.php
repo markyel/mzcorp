@@ -379,6 +379,9 @@ class InboundReplyLinker
                 \App\Enums\RequestActivityType::ClientReplied,
                 $message->sent_at ?: now(),
             );
+        } elseif ($notReply === 'supplier') {
+            // Ответ поставщика на наш запрос (MZ2026-02323): в списке — «Ответ поставщика», не «Ответ клиента».
+            $this->activity->touch($request, \App\Enums\RequestActivityType::SupplierReplied, $message->sent_at ?: now());
         } else {
             Log::info('InboundReplyLinker: linked, but not a client reply — the ball stays', [
                 'email_message_id' => $message->id,
