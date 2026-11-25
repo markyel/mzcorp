@@ -9,7 +9,9 @@ use App\Models\OutboundToneReview;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Prompts\Mail\OutboundToneAuditPrompt;
+use App\Services\AI\AiUsageMeter;
 use App\Services\AI\OpenAIChatService;
+use App\Services\AI\RouterAiGateway;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -169,6 +171,7 @@ class OutboundToneAuditService
         $out = [];
         foreach ($letters->chunk(self::BATCH)->values()->chunk(max(1, $concurrency)) as $wave) {
             $wave = $wave->values();
+            $router = $this->viaRouterAi();
             $responses = Http::pool(fn (Pool $pool) => $wave->map(
                 fn (Collection $batch, int $i) => $this->request($pool->as((string) $i), $system, $batch, $model)
             )->all());
@@ -178,6 +181,12 @@ class OutboundToneAuditService
                 $content = ($res instanceof \Illuminate\Http\Client\Response && $res->successful())
                     ? (string) ($res->json('choices.0.message.content') ?? '')
                     : null;
+                if ($content === '') {
+                    $content = null;
+                }
+                if ($content !== null) {
+                    AiUsageMeter::record($router ? RouterAiGateway::modelFor($model) : (string) ($res->json('model') ?? $model), (array) ($res->json('usage') ?? []), $router ? 'routerai' : 'primary');
+                }
                 // Пачка не прошла — один повтор обычным путём, с ретраями на 429.
                 if ($content === null) {
                     try {
@@ -319,6 +328,12 @@ class OutboundToneAuditService
 
     private function request(\Illuminate\Http\Client\PendingRequest $req, string $system, Collection $batch, string $model)
     {
+        $payload = ['model' => $model, 'messages' => $this->messages($system, $batch)] + $this->options();
+        // Основной канал — RouterAI; пачка не прошла — повтор через OpenAIChatService (RouterAI → OpenAI), см. ask().
+        if ($this->viaRouterAi()) {
+            return RouterAiGateway::client($req)->post(RouterAiGateway::url('/chat/completions'), RouterAiGateway::prepare($payload));
+        }
+
         $headers = ['Authorization' => 'Bearer '.config('services.openai.api_key')];
         if ((string) config('services.openai.proxy_key') !== '') {
             $headers['X-Proxy-Key'] = config('services.openai.proxy_key');
@@ -328,10 +343,12 @@ class OutboundToneAuditService
         $route = app(\App\Services\AI\OpenAIProxyPool::class)->current();
 
         return $route->apply($req, $headers)->timeout(120)
-            ->post($route->url.'/v1/chat/completions', [
-                'model' => $model,
-                'messages' => $this->messages($system, $batch),
-            ] + $this->options());
+            ->post($route->url.'/v1/chat/completions', $payload);
+    }
+
+    private function viaRouterAi(): bool
+    {
+        return app(RouterAiGateway::class)->enabled() && ! RouterAiGateway::isDown();
     }
 
     /** @return list<array{role: string, content: string}> */

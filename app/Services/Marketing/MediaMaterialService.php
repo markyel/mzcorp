@@ -105,6 +105,11 @@ class MediaMaterialService
     {
         $model = (string) config('services.openai.media_gateway_model', '');
         $gateway = app(\App\Services\AI\OpenAIFallbackGateway::class);
+        // Основной канал — RouterAI (25.11.2026): пост пишет та же модель (services.routerai.caller_defaults),
+        // RouterAI не ответил — основная модель напрямую в OpenAI. Шлюз Beget — только при выключенном RouterAI.
+        if (app(\App\Services\AI\RouterAiGateway::class)->enabled()) {
+            return null;
+        }
         if ($model === '' || ! $gateway->enabled()) {
             return null;
         }
@@ -189,8 +194,8 @@ class MediaMaterialService
             )],
         ];
 
-        // Пишет модель шлюза (gpt-6.1-sol): связнее и не путает факты; не ответила или ответила
-        // не по форме — пишет основная, как раньше.
+        // Пишет gpt-6.1-sol: связнее и не путает факты. Через RouterAI (caller_defaults), при выключенном
+        // RouterAI — через шлюз Beget; не ответила или ответила не по форме — пишет основная, как раньше.
         $response = $this->viaGateway($messages, $topic, $channel);
 
         try {

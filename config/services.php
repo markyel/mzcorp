@@ -77,6 +77,15 @@ return [
         'base_url' => env('ROUTERAI_BASE_URL', 'https://routerai.ru/api/v1'),
         // Замены JSON по задаче (класс, вызвавший модель): {"RequestItemParsingService":"google/gemini-3.1-flash-lite"}.
         'by_caller' => env('ROUTERAI_BY_CALLER', '{}'),
+        // Замены по задаче по умолчанию (ROUTERAI_BY_CALLER их перекрывает). Посты медиаплана — модель,
+        // которой их писал шлюз Beget (решение 2026-10-22: связнее и не путает факты).
+        'caller_defaults' => [
+            'MediaMaterialService' => env('ROUTERAI_MEDIA_MODEL', 'openai/gpt-6.1-sol'),
+        ],
+        // Эмбеддинги через RouterAI (та же openai/text-embedding-3-small — векторы совпадают с OpenAI); false — напрямую.
+        'embeddings' => filter_var(env('ROUTERAI_EMBEDDINGS', true), FILTER_VALIDATE_BOOLEAN),
+        // Остаток на счёте ниже порога (₽) — уведомление админам (llm:routerai-balance, раз в час, не чаще раза в 12 ч).
+        'balance_alert_rub' => (float) env('ROUTERAI_BALANCE_ALERT_RUB', 1500),
         // Замены JSON по нашей модели {"gpt-4o-mini":"…"}; дальше default_model, пустой — та же модель OpenAI.
         'models' => env('ROUTERAI_MODELS', '{}'),
         'default_model' => env('ROUTERAI_DEFAULT_MODEL', ''),

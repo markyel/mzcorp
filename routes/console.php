@@ -155,6 +155,13 @@ Schedule::command('llm:probe-routes')
     ->onOneServer()
     ->runInBackground();
 
+// Баланс RouterAI: на нуле все задачи ИИ уходили в OpenAI (18.11 и 23.11.2026) — предупреждаем заранее.
+Schedule::command('llm:routerai-balance')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Self-healing: подобрать письма, у которых категоризатор упал
 // (OpenAI 503/timeout / invalid JSON). Без этого письмо застревает
 // без category и не превращается в Request — кейс 25.05.2026 #3681.

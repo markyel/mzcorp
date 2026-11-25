@@ -54,6 +54,12 @@ class OpenAIEmbeddingService
         $proxyKey = config('services.openai.proxy_key');
         $model = $model ?: config('services.openai.embedding_model', 'text-embedding-3-small');
 
+        // Основной канал — RouterAI (та же модель OpenAI, векторы совпадают); не ответил — OpenAI, как раньше.
+        $viaRouter = $this->viaRouterAi($inputs, (string) $model);
+        if ($viaRouter !== null) {
+            return $viaRouter;
+        }
+
         if (empty($apiKey)) {
             throw new RuntimeException('OPENAI_API_KEY not configured');
         }
@@ -126,6 +132,55 @@ class OpenAIEmbeddingService
 
         $data = $response->json();
         AiUsageMeter::record((string) ($data['model'] ?? $model), (array) ($data['usage'] ?? []), isset($viaFallback) ? 'reserve' : 'primary');
+
+        return self::parse($data);
+    }
+
+    /**
+     * Эмбеддинги через RouterAI. Null — выключено, предохранитель RouterAI сработал, ошибка
+     * или ответ не на все строки: тогда запрос идёт в OpenAI.
+     *
+     * @param  list<string>  $inputs
+     * @return array{embeddings: list<list<float>>, usage: array, raw: array}|null
+     */
+    private function viaRouterAi(array $inputs, string $model): ?array
+    {
+        $router = app(RouterAiGateway::class);
+        if (! config('services.routerai.embeddings') || ! $router->enabled() || RouterAiGateway::isDown()) {
+            return null;
+        }
+        $routed = str_contains($model, '/') ? $model : 'openai/'.$model;
+        $response = null;
+        try {
+            $response = RouterAiGateway::client()
+                ->timeout(60)
+                ->retry(2, fn (int $attempt, $e) => OpenAIRetry::backoffMs($attempt, $e, 1000, 6000), function ($e) {
+                    return $e instanceof \Illuminate\Http\Client\RequestException && in_array($e->response?->status(), [429, 500, 502, 503], true);
+                }, throw: false)
+                ->post(RouterAiGateway::url('/embeddings'), ['model' => $routed, 'input' => $inputs]);
+            $data = $response->successful() ? (array) $response->json() : [];
+            if (count((array) ($data['data'] ?? [])) === count($inputs)) {
+                RouterAiGateway::recordSuccess();
+                AiUsageMeter::record($routed, (array) ($data['usage'] ?? []), 'routerai');
+
+                return self::parse($data);
+            }
+            $why = $response->status().' '.mb_substr($response->body(), 0, 300);
+        } catch (\Throwable $e) {
+            $why = $e->getMessage();
+        }
+        RouterAiGateway::recordFailure($response, $why);
+        Log::warning('RouterAI embeddings failed, falling back to OpenAI', ['model' => $routed, 'batch_size' => count($inputs), 'error' => mb_substr($why, 0, 300)]);
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array{embeddings: list<list<float>>, usage: array, raw: array}
+     */
+    private static function parse(array $data): array
+    {
         $items = $data['data'] ?? [];
         // API не гарантирует порядок — сортируем по index.
         usort($items, fn ($a, $b) => ($a['index'] ?? 0) <=> ($b['index'] ?? 0));

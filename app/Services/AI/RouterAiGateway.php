@@ -2,6 +2,7 @@
 
 namespace App\Services\AI;
 
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -86,7 +87,8 @@ class RouterAiGateway
      */
     public static function modelFor(string $model, ?string $caller = null, array $messages = []): string
     {
-        $byCaller = self::map('services.routerai.by_caller');
+        // ROUTERAI_BY_CALLER поверх замен по умолчанию (caller_defaults: посты медиаплана — своя модель).
+        $byCaller = self::map('services.routerai.by_caller') + array_filter((array) config('services.routerai.caller_defaults', []));
         $caller ??= AiUsageMeter::caller();
         if (isset($byCaller[$caller])) {
             return (string) $byCaller[$caller];
@@ -133,6 +135,39 @@ class RouterAiGateway
      */
     public function post(array $payload): Response
     {
+        return self::client()
+            ->retry(2, fn (int $attempt, $e) => OpenAIRetry::backoffMs($attempt, $e, 1500, 6000), function ($e) {
+                return $e instanceof \Illuminate\Http\Client\RequestException && in_array($e->response?->status(), [429, 500, 502, 503], true);
+            }, throw: false)
+            ->post(self::url('/chat/completions'), self::prepare($payload));
+    }
+
+    /**
+     * Ключ и таймауты RouterAI на запросе; $request — запрос из Http::pool (параллельные пачки).
+     * Соединение — быстро: лежащий RouterAI не должен держать запрос; ответ модели — долго (фото — 15 с+).
+     */
+    public static function client(?PendingRequest $request = null): PendingRequest
+    {
+        return ($request ?? Http::createPendingRequest())
+            ->withToken((string) config('services.routerai.api_key'))
+            ->acceptJson()
+            ->connectTimeout(max(1, (int) config('services.routerai.connect_timeout', 5)))
+            ->timeout(max(10, (int) config('services.routerai.timeout', 120)));
+    }
+
+    public static function url(string $path): string
+    {
+        return rtrim((string) config('services.routerai.base_url'), '/').$path;
+    }
+
+    /**
+     * Тело chat/completions для RouterAI: наша модель → модель RouterAI, рассуждения выключены, нижний предел max_tokens.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    public static function prepare(array $payload): array
+    {
         $payload['model'] = self::modelFor((string) ($payload['model'] ?? ''), null, (array) ($payload['messages'] ?? []));
         // Рассуждения выключены (ROUTERAI_REASONING): Qwen с ними разбирал письмо 20–270 с вместо 2 с,
         // на разборе позиций они не нужны.
@@ -150,15 +185,22 @@ class RouterAiGateway
             $payload['max_completion_tokens'] = max((int) $payload['max_completion_tokens'], $min);
         }
 
-        return Http::withToken((string) config('services.routerai.api_key'))
-            ->acceptJson()
-            // Соединение — быстро: лежащий RouterAI не должен держать запрос; ответ модели — долго (фото — 15 с+).
-            ->connectTimeout(max(1, (int) config('services.routerai.connect_timeout', 5)))
-            ->timeout(max(10, (int) config('services.routerai.timeout', 120)))
-            ->retry(2, fn (int $attempt, $e) => OpenAIRetry::backoffMs($attempt, $e, 1500, 6000), function ($e) {
-                return $e instanceof \Illuminate\Http\Client\RequestException && in_array($e->response?->status(), [429, 500, 502, 503], true);
-            }, throw: false)
-            ->post(rtrim((string) config('services.routerai.base_url'), '/').'/chat/completions', $payload);
+        return $payload;
+    }
+
+    /**
+     * Остаток на счёте RouterAI, ₽ (GET /credits). Null — не ответил.
+     */
+    public function credits(): ?float
+    {
+        try {
+            $response = self::client()->timeout(20)->get(self::url('/credits'));
+            $credits = $response->successful() ? $response->json('data.credits') : null;
+
+            return is_numeric($credits) ? (float) $credits : null;
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

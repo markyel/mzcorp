@@ -46,6 +46,46 @@ class RouterAiGatewayTest extends TestCase
         $this->assertSame('openai/gpt-4o-mini', RouterAiGateway::modelFor('gpt-4o-mini', 'MailCategoryClassifier'));
     }
 
+    public function test_media_posts_get_their_own_model_unless_overridden(): void
+    {
+        config(['services.routerai.caller_defaults' => ['MediaMaterialService' => 'openai/gpt-6.1-sol'], 'services.routerai.by_caller' => '{}']);
+        $this->assertSame('openai/gpt-6.1-sol', RouterAiGateway::modelFor('gpt-4o', 'MediaMaterialService'));
+        $this->assertSame('qwen/qwen3.6-27b', RouterAiGateway::modelFor('gpt-4o', 'MailCategoryClassifier'));
+
+        config(['services.routerai.by_caller' => '{"MediaMaterialService":"anthropic/claude-sonnet-5.5"}']);
+        $this->assertSame('anthropic/claude-sonnet-5.5', RouterAiGateway::modelFor('gpt-4o', 'MediaMaterialService'));
+    }
+
+    public function test_embeddings_go_through_router_with_the_same_openai_model(): void
+    {
+        config(['services.routerai.embeddings' => true]);
+        \Illuminate\Support\Facades\Cache::flush();
+        Http::fake(['router.test/*' => Http::response(['data' => [
+            ['index' => 1, 'embedding' => [0.3, 0.4]],
+            ['index' => 0, 'embedding' => [0.1, 0.2]],
+        ], 'usage' => []])]);
+
+        $res = app(\App\Services\AI\OpenAIEmbeddingService::class)->embedBatch(['a', 'b'], 'text-embedding-3-small');
+
+        $this->assertSame([[0.1, 0.2], [0.3, 0.4]], $res['embeddings']);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/embeddings') && $r['model'] === 'openai/text-embedding-3-small');
+        Http::assertSentCount(1);
+    }
+
+    public function test_embeddings_fall_back_to_openai_when_router_fails(): void
+    {
+        config(['services.routerai.embeddings' => true, 'services.openai.base_urls' => '', 'services.openai.base_url' => 'https://openai.test', 'services.openai.direct_proxies' => '']);
+        \Illuminate\Support\Facades\Cache::flush();
+        Http::fake([
+            'router.test/*' => Http::response(['error' => ['message' => 'Недостаточно средств']], 402),
+            'openai.test/*' => Http::response(['data' => [['index' => 0, 'embedding' => [0.5]]], 'usage' => []]),
+        ]);
+
+        $res = app(\App\Services\AI\OpenAIEmbeddingService::class)->embedBatch(['a'], 'text-embedding-3-small');
+
+        $this->assertSame([[0.5]], $res['embeddings']);
+    }
+
     public function test_disabled_without_key(): void
     {
         config(['services.routerai.api_key' => '']);
