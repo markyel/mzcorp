@@ -79,13 +79,21 @@ class RouterAiGateway
      * Название модели у RouterAI: замена по задаче (класс, вызвавший модель — «RequestItemParsingService»),
      * затем по нашей модели, затем модель по умолчанию; не задана — та же модель OpenAI (gpt-4o → openai/gpt-4o).
      * По задаче — потому что одна gpt-4o разбирает и позиции заявки, и цены поставщика.
+     * Запрос с картинкой — модель чтения фото (services.routerai.vision_model), если задана: на 40 фото позиций DeepSeek
+     * V4.1 Flash читала маркировку лучше Qwen 3.6 и втрое дешевле (25.11.2026, MZ2026-02962: KLE-MAU-02B прочитано как KLE-HAU-028).
+     *
+     * @param  list<array<string, mixed>>  $messages
      */
-    public static function modelFor(string $model, ?string $caller = null): string
+    public static function modelFor(string $model, ?string $caller = null, array $messages = []): string
     {
         $byCaller = self::map('services.routerai.by_caller');
         $caller ??= AiUsageMeter::caller();
         if (isset($byCaller[$caller])) {
             return (string) $byCaller[$caller];
+        }
+        $vision = trim((string) config('services.routerai.vision_model', ''));
+        if ($vision !== '' && self::hasImage($messages)) {
+            return $vision;
         }
         $map = self::map('services.routerai.models');
         if (isset($map[$model])) {
@@ -94,6 +102,20 @@ class RouterAiGateway
         $default = trim((string) config('services.routerai.default_model'));
 
         return $default !== '' ? $default : (str_contains($model, '/') ? $model : 'openai/'.$model);
+    }
+
+    /** @param  list<array<string, mixed>>  $messages */
+    public static function hasImage(array $messages): bool
+    {
+        foreach ($messages as $m) {
+            foreach ((array) ($m['content'] ?? []) as $part) {
+                if (is_array($part) && (($part['type'] ?? null) === 'image_url' || isset($part['image_url']))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /** @return array<string, string> */
@@ -111,7 +133,7 @@ class RouterAiGateway
      */
     public function post(array $payload): Response
     {
-        $payload['model'] = self::modelFor((string) ($payload['model'] ?? ''));
+        $payload['model'] = self::modelFor((string) ($payload['model'] ?? ''), null, (array) ($payload['messages'] ?? []));
         // Рассуждения выключены (ROUTERAI_REASONING): Qwen с ними разбирал письмо 20–270 с вместо 2 с,
         // на разборе позиций они не нужны.
         // GPT (openai/…) параметр не принимает: RouterAI шлёт его как reasoning_effort, OpenAI отвечает 400,

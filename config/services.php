@@ -80,6 +80,8 @@ return [
         // Замены JSON по нашей модели {"gpt-4o-mini":"…"}; дальше default_model, пустой — та же модель OpenAI.
         'models' => env('ROUTERAI_MODELS', '{}'),
         'default_model' => env('ROUTERAI_DEFAULT_MODEL', ''),
+        // Запросы с фото (чтение маркировки, классификация фото, ответы поставщиков с картинками) — своя модель; пусто — общие правила.
+        'vision_model' => env('ROUTERAI_VISION_MODEL', 'deepseek/deepseek-v4.1-flash'),
         // Картинки обложек медиаплана (OpenAIImageService): модель у RouterAI; пусто — картинки напрямую в OpenAI.
         // gpt-image-1.5 у RouterAI нет (24.11.2026); gpt-image-2 держит форму деталей без input_fidelity.
         'image_model' => env('ROUTERAI_IMAGE_MODEL', 'openai/gpt-image-2'),

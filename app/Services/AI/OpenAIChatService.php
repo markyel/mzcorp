@@ -44,9 +44,9 @@ class OpenAIChatService
                 $comparing || RouterAiGateway::recordSuccess();
                 $data = $response->json();
                 // Модель — как запрашивали (google/…): RouterAI отвечает без префикса, а цены — с ним.
-                AiUsageMeter::record(RouterAiGateway::modelFor($model), (array) ($data['usage'] ?? []), 'routerai');
-                self::tally(RouterAiGateway::modelFor($model), (array) ($data['usage'] ?? []));
-                LlmCapture::record(RouterAiGateway::modelFor($model), $messages, $options, (string) ($data['choices'][0]['message']['content'] ?? ''));
+                AiUsageMeter::record(RouterAiGateway::modelFor($model, null, $messages), (array) ($data['usage'] ?? []), 'routerai');
+                self::tally(RouterAiGateway::modelFor($model, null, $messages), (array) ($data['usage'] ?? []));
+                LlmCapture::record(RouterAiGateway::modelFor($model, null, $messages), $messages, $options, (string) ($data['choices'][0]['message']['content'] ?? ''));
 
                 return [
                     'content' => $data['choices'][0]['message']['content'] ?? '',
@@ -63,7 +63,7 @@ class OpenAIChatService
             RouterAiGateway::recordFailure($response, $error);
             Log::warning('RouterAI failed, falling back to OpenAI', [
                 'model' => $model,
-                'routed_model' => RouterAiGateway::modelFor($model),
+                'routed_model' => RouterAiGateway::modelFor($model, null, $messages),
                 'error' => $error,
             ]);
         }
