@@ -259,6 +259,21 @@ class QuotePartsClient
     }
 
     /**
+     * Снять все наши контакты со связи поставщика — его вклеили в другого (SupplierMergeService):
+     * люди, ни разу не входившие в кабинет, освобождаются, и их адреса может взять оставшийся поставщик.
+     */
+    public function releaseContacts(string $key): array
+    {
+        $response = $this->http()->delete('/api/v1/supplier-links/'.rawurlencode($key).'/contacts');
+
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts release contacts: HTTP '.$response->status().' '.mb_substr($response->body(), 0, 300));
+        }
+
+        return $response->json();
+    }
+
+    /**
      * Поставщик — агент (ищет поставщиков для нас): в каждой его цене — реальный поставщик, на позицию
      * несколько цен (по поставщику).
      *

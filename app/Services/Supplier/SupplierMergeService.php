@@ -7,6 +7,7 @@ use App\Models\SupplierOrganization;
 use App\Services\QuoteParts\QuotePartsClient;
 use App\Services\QuoteParts\QuotePartsSupplierService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -34,6 +35,7 @@ class SupplierMergeService
         $oldKey = (string) $from->qp_key;
         if ($oldKey !== '' && $from->qp_status !== null) {
             $this->client->updateSupplier($oldKey, ['external_id' => 'merged:'.$oldKey]);
+            $this->releaseMergedLink('merged:'.$oldKey, $into);
         }
 
         DB::transaction(function () use ($into, $from, $oldKey) {
@@ -64,6 +66,21 @@ class SupplierMergeService
         }
 
         return $into->refresh();
+    }
+
+    /**
+     * Связь вклеенного поставщика в QuoteParts отдаёт адреса и уходит в архив: иначе QuoteParts не даёт
+     * добавить её адреса оставшемуся («Адрес … уже у вашего поставщика», «Подий» 25.11.2026). Сбой не
+     * мешает склейке: адрес, который QuoteParts не отдал, останется только в нашей карточке.
+     */
+    private function releaseMergedLink(string $mergedKey, SupplierOrganization $into): void
+    {
+        try {
+            $this->client->releaseContacts($mergedKey);
+            $this->client->updateSupplier($mergedKey, ['archived' => true, 'archived_reason' => 'Объединён с '.($into->onec_code ?: $into->name)]);
+        } catch (\Throwable $e) {
+            Log::warning('SupplierMerge: merged link not released in QuoteParts', ['key' => $mergedKey, 'into_id' => $into->id, 'error' => $e->getMessage()]);
+        }
     }
 
     /**

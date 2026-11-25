@@ -106,6 +106,19 @@ class RouterAiGateway
         return $default !== '' ? $default : (str_contains($model, '/') ? $model : 'openai/'.$model);
     }
 
+    /**
+     * Модель запроса у RouterAI: заданная вызывающим (options.routerai_model — сверка фото двумя моделями,
+     * RequestItemParsingService::visionChat), иначе по правилам modelFor.
+     *
+     * @param  array<string, mixed>  $options  опции запроса (или всё тело с messages)
+     */
+    public static function routedModel(string $model, array $options, array $messages = []): string
+    {
+        $explicit = trim((string) ($options['routerai_model'] ?? ''));
+
+        return $explicit !== '' ? $explicit : self::modelFor($model, null, $messages ?: (array) ($options['messages'] ?? []));
+    }
+
     /** @param  list<array<string, mixed>>  $messages */
     public static function hasImage(array $messages): bool
     {
@@ -168,7 +181,8 @@ class RouterAiGateway
      */
     public static function prepare(array $payload): array
     {
-        $payload['model'] = self::modelFor((string) ($payload['model'] ?? ''), null, (array) ($payload['messages'] ?? []));
+        $payload['model'] = self::routedModel((string) ($payload['model'] ?? ''), $payload);
+        unset($payload['routerai_model']);
         // Рассуждения выключены (ROUTERAI_REASONING): Qwen с ними разбирал письмо 20–270 с вместо 2 с,
         // на разборе позиций они не нужны.
         // GPT (openai/…) параметр не принимает: RouterAI шлёт его как reasoning_effort, OpenAI отвечает 400,

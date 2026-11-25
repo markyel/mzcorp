@@ -91,6 +91,10 @@ return [
         'default_model' => env('ROUTERAI_DEFAULT_MODEL', ''),
         // Запросы с фото (чтение маркировки, классификация фото, ответы поставщиков с картинками) — своя модель; пусто — общие правила.
         'vision_model' => env('ROUTERAI_VISION_MODEL', 'deepseek/deepseek-v4.1-flash'),
+        // Позиции заявки по фото — две модели через запятую (первая — основная): артикул, прочитанный
+        // с фото, сохраняется, только если обе прочитали его одинаково (MZ2026-03100: DeepSeek выдумал
+        // KONE-код KM8534910 вместо FCU0735FI10 с этикетки). Одна модель или пусто — без сверки.
+        'vision_cross_check' => env('ROUTERAI_VISION_CROSS_CHECK', 'qwen/qwen3.6-27b,deepseek/deepseek-v4.1-flash'),
         // Картинки обложек медиаплана (OpenAIImageService): модель у RouterAI; пусто — картинки напрямую в OpenAI.
         // gpt-image-1.5 у RouterAI нет (24.11.2026); gpt-image-2 держит форму деталей без input_fidelity.
         'image_model' => env('ROUTERAI_IMAGE_MODEL', 'openai/gpt-image-2'),

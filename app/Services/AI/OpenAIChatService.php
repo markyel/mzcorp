@@ -43,10 +43,11 @@ class OpenAIChatService
             if (! RouterAiGateway::shouldFallback($response)) {
                 $comparing || RouterAiGateway::recordSuccess();
                 $data = $response->json();
+                $routedName = RouterAiGateway::routedModel($model, $options, $messages);
                 // Модель — как запрашивали (google/…): RouterAI отвечает без префикса, а цены — с ним.
-                AiUsageMeter::record(RouterAiGateway::modelFor($model, null, $messages), (array) ($data['usage'] ?? []), 'routerai');
-                self::tally(RouterAiGateway::modelFor($model, null, $messages), (array) ($data['usage'] ?? []));
-                LlmCapture::record(RouterAiGateway::modelFor($model, null, $messages), $messages, $options, (string) ($data['choices'][0]['message']['content'] ?? ''));
+                AiUsageMeter::record($routedName, (array) ($data['usage'] ?? []), 'routerai');
+                self::tally($routedName, (array) ($data['usage'] ?? []));
+                LlmCapture::record($routedName, $messages, $options, (string) ($data['choices'][0]['message']['content'] ?? ''));
 
                 return [
                     'content' => $data['choices'][0]['message']['content'] ?? '',
@@ -63,7 +64,7 @@ class OpenAIChatService
             RouterAiGateway::recordFailure($response, $error);
             Log::warning('RouterAI failed, falling back to OpenAI', [
                 'model' => $model,
-                'routed_model' => RouterAiGateway::modelFor($model, null, $messages),
+                'routed_model' => RouterAiGateway::routedModel($model, $options, $messages),
                 'error' => $error,
             ]);
         }
@@ -84,6 +85,8 @@ class OpenAIChatService
             $headers['X-Proxy-Key'] = $proxyKey;
         }
 
+        // Модель RouterAI (сверка фото двумя моделями) — не параметр OpenAI: напрямую идёт наша модель.
+        unset($options['routerai_model']);
         $payload = array_merge([
             'model' => $model,
             'messages' => $messages,

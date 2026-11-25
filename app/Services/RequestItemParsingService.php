@@ -484,6 +484,102 @@ class RequestItemParsingService
      * @param  array<int, array<string, mixed>>  $items
      * @return array<int, array<string, mixed>>
      */
+    /**
+     * Запрос с фото позиций — двум моделям (services.routerai.vision_cross_check, первая — основная).
+     * Возвращает ответ основной и позиции второй (null — сверки нет: одна модель, RouterAI выключен
+     * или вторая не ответила; тогда — как раньше, по одной модели).
+     *
+     * @param  list<array<string, mixed>>  $messages
+     * @param  array<string, mixed>  $options
+     * @return array{0: array{content: string, usage: array, raw: array}, 1: ?list<array<string, mixed>>}
+     */
+    private function visionChat(array $messages, array $options): array
+    {
+        $model = (string) config('services.openai.vision_model');
+        $pair = array_values(array_filter(array_map('trim', explode(',', (string) config('services.routerai.vision_cross_check', '')))));
+        if (count($pair) < 2 || ! app(\App\Services\AI\RouterAiGateway::class)->enabled()) {
+            return [$this->openai->chat($messages, $model, $options), null];
+        }
+
+        $primary = $this->openai->chat($messages, $model, $options + ['routerai_model' => $pair[0]]);
+        try {
+            $check = $this->openai->chat($messages, $model, $options + ['routerai_model' => $pair[1]]);
+            $items = json_decode((string) ($check['content'] ?? ''), true)['items'] ?? null;
+        } catch (\Throwable $e) {
+            Log::warning('visionChat: second model failed — articles not cross-checked', ['model' => $pair[1], 'error' => mb_substr($e->getMessage(), 0, 300)]);
+            $items = null;
+        }
+
+        return [$primary, is_array($items) ? array_values(array_filter($items, 'is_array')) : null];
+    }
+
+    /**
+     * Артикул, прочитанный с фото, — только если вторая модель прочитала его так же (MZ2026-03100:
+     * DeepSeek выдумал KONE-код KM8534910, на этикетке FCU0735FI10). Код, который есть в тексте письма
+     * ($text), проверять не нужно. Не совпало — артикула нет, оба прочтения — в заметке позиции, чтобы
+     * менеджер посмотрел фото сам.
+     *
+     * @param  list<array<string, mixed>>  $items  позиции основной модели (сырые, с image_index)
+     * @param  list<array<string, mixed>>  $verifierItems  позиции второй модели
+     * @return list<array<string, mixed>>
+     */
+    public static function keepAgreedArticles(array $items, array $verifierItems, string $text = ''): array
+    {
+        $norm = fn (string $s): string => (string) preg_replace('/[^A-Z0-9]/', '', strtr(mb_strtoupper($s), [
+            'А' => 'A', 'В' => 'B', 'Е' => 'E', 'К' => 'K', 'М' => 'M', 'Н' => 'H', 'О' => 'O', 'Р' => 'P', 'С' => 'C', 'Т' => 'T', 'Х' => 'X', 'У' => 'Y',
+        ]));
+        $split = fn ($article): array => array_values(array_filter(array_map('trim', preg_split('/[,;]+/u', (string) $article) ?: [])));
+        $haystack = $norm($text);
+        $theirs = [];
+        foreach ($verifierItems as $v) {
+            foreach ($split($v['article'] ?? '') as $code) {
+                $n = $norm($code);
+                if ($n !== '') {
+                    $theirs[$n] = true;
+                }
+            }
+        }
+        $agreed = function (string $code) use ($norm, $haystack, $theirs): bool {
+            $n = $norm($code);
+            if ($n === '' || (strlen($n) >= 4 && str_contains($haystack, $n)) || isset($theirs[$n])) {
+                return true;
+            }
+            foreach (array_keys($theirs) as $t) {
+                $short = strlen($t) < strlen($n) ? $t : $n;
+                if (strlen($short) >= 6 && (str_contains($t, $n) || str_contains($n, $t))) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        foreach ($items as $i => $item) {
+            $codes = $split($item['article'] ?? '');
+            if ($codes === []) {
+                continue;
+            }
+            $kept = array_values(array_filter($codes, $agreed));
+            if (count($kept) === count($codes)) {
+                continue;
+            }
+            $dropped = array_values(array_diff($codes, $kept));
+            $other = collect($verifierItems)
+                ->filter(fn ($v) => ($v['image_index'] ?? null) === ($item['image_index'] ?? null))
+                ->pluck('article')->filter()->implode(', ');
+            $items[$i]['article'] = $kept !== [] ? implode(', ', $kept) : null;
+            $items[$i]['note'] = trim(((string) ($item['note'] ?? '')).' Маркировка с фото не подтверждена: «'.implode(', ', $dropped).'»'
+                .($other !== '' ? ', вторая модель прочитала «'.$other.'»' : '').' — сверьте с фото.');
+            Log::info('keepAgreedArticles: photo article not confirmed by the second model', [
+                'name' => mb_substr((string) ($item['name'] ?? ''), 0, 80),
+                'dropped' => $dropped,
+                'second_model' => $other,
+            ]);
+        }
+
+        return $items;
+    }
+
     public static function splitMultiArticleItems(array $items): array
     {
         $out = [];
@@ -1824,12 +1920,11 @@ PROMPT;
             ];
         }
 
-        $result = $this->openai->chat(
+        [$result, $verifierItems] = $this->visionChat(
             [
                 ['role' => 'system', 'content' => ParseItemsUnifiedPrompt::systemMessage()],
                 ['role' => 'user', 'content' => $content],
             ],
-            config('services.openai.vision_model'),
             [
                 'temperature' => 0,
                 // photo_descriptions[] CoT + items[]: запас на ≤8 фото + ~10 items.
@@ -1840,6 +1935,9 @@ PROMPT;
 
         $parsed = json_decode($result['content'] ?? '', true);
         $items = $parsed['items'] ?? [];
+        if ($verifierItems !== null && is_array($items)) {
+            $items = self::keepAgreedArticles($items, $verifierItems, $userPromptText);
+        }
         $invoiceAnalysis = $parsed['invoice_analysis'] ?? null;
         $photoDescriptions = is_array($parsed['photo_descriptions'] ?? null)
             ? $parsed['photo_descriptions']
@@ -2169,9 +2267,8 @@ PROMPT;
             ];
         }
 
-        $result = $this->openai->chat(
+        [$result, $verifierItems] = $this->visionChat(
             [['role' => 'user', 'content' => $content]],
-            config('services.openai.vision_model'),
             [
                 'temperature' => 0,
                 // CoT-preamble (photo_descriptions[]) добавляет ~80-150 токенов
@@ -2183,6 +2280,9 @@ PROMPT;
 
         $parsed = json_decode($result['content'] ?? '', true);
         $items = $parsed['items'] ?? [];
+        if ($verifierItems !== null && is_array($items)) {
+            $items = self::keepAgreedArticles($items, $verifierItems, (string) $referenceText);
+        }
         $photoDescriptions = is_array($parsed['photo_descriptions'] ?? null)
             ? $parsed['photo_descriptions']
             : [];

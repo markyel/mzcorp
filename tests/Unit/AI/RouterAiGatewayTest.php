@@ -86,6 +86,20 @@ class RouterAiGatewayTest extends TestCase
         $this->assertSame([[0.5]], $res['embeddings']);
     }
 
+    public function test_explicit_router_model_is_used_and_never_reaches_openai(): void
+    {
+        \Illuminate\Support\Facades\Cache::flush();
+        Http::fake([
+            'router.test/*' => Http::response(['choices' => [['message' => ['content' => '']]]]),
+            '*' => Http::response(['model' => 'gpt-4o', 'choices' => [['message' => ['content' => 'от OpenAI']]], 'usage' => []]),
+        ]);
+
+        app(OpenAIChatService::class)->chat([['role' => 'user', 'content' => 'да?']], 'gpt-4o', ['routerai_model' => 'deepseek/deepseek-v4.1-flash']);
+
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'router.test') && $r['model'] === 'deepseek/deepseek-v4.1-flash' && ! isset($r['routerai_model']));
+        Http::assertSent(fn ($r) => ! str_contains($r->url(), 'router.test') && $r['model'] === 'gpt-4o' && ! isset($r['routerai_model']));
+    }
+
     public function test_disabled_without_key(): void
     {
         config(['services.routerai.api_key' => '']);
