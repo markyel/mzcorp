@@ -20,6 +20,9 @@
         <h2 class="text-[16px] font-semibold text-fg-1">{{ $org->name }}</h2>
         @if($org->onec_code)
             <span class="chip mono" title="Код контрагента в 1С — ключ поставщика в QuoteParts">1С {{ $org->onec_code }}</span>
+            @foreach((array) $org->onec_aliases as $alias)
+                <span class="chip mono" title="Код вклеенного дубля контрагента в 1С — поиск по нему находит этого поставщика">+ {{ $alias }}</span>
+            @endforeach
         @else
             <span class="chip chip-attn mono" title="Временный ключ до кода 1С">{{ $org->qp_key }}</span>
         @endif
@@ -271,7 +274,7 @@
     <div class="flex flex-wrap items-center gap-2 text-[12.5px]">
         <span class="text-fg-3">Это же поставщик:</span>
         <input type="text" wire:model="mergeQuery" wire:keydown.enter="mergeIn" placeholder="код 1С, название или e-mail" class="{{ $in }}" style="max-width:240px">
-        <button type="button" wire:click="mergeIn" wire:confirm="Присоединить найденного поставщика к «{{ $org->name }}»? Его адреса и история перейдут сюда." class="btn btn-xs">Объединить сюда</button>
+        <button type="button" wire:click="mergeIn" wire:confirm="Присоединить найденного поставщика к «{{ $org->name }}»? Его адреса и история перейдут сюда, его код 1С станет дополнительным кодом этого поставщика." class="btn btn-xs">Объединить сюда</button>
     </div>
 
     {{-- Архив: неактуальный поставщик не виден в реестре и не предлагается в запросах цен --}}

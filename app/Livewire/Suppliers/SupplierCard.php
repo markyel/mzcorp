@@ -301,7 +301,7 @@ class SupplierCard extends Component
     {
         $q = trim($this->mergeQuery);
         $found = $q === '' ? collect() : SupplierOrganization::query()->whereKeyNot($this->org->id)
-            ->where(fn ($w) => $w->where('onec_code', $q)->orWhere('qp_key', $q)->orWhere('name', 'ilike', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $q).'%')
+            ->where(fn ($w) => $w->withOnecCode($q)->orWhere('qp_key', $q)->orWhere('name', 'ilike', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $q).'%')
                 ->orWhereIn('id', Supplier::query()->select('supplier_organization_id')->whereRaw('lower(email) = ?', [mb_strtolower($q)])))
             ->limit(2)->get();
         if ($found->count() !== 1) {

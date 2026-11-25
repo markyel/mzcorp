@@ -105,6 +105,12 @@ class SuppliersOnecBindCommand extends Command
 
             // 3. Коды 1С существующим организациям.
             $usedCodes = SupplierOrganization::query()->whereNotNull('onec_code')->pluck('id', 'onec_code')->all();
+            // Коды вклеенных дублей (onec_aliases) — тоже заняты своей организацией: дубль не заводится заново.
+            foreach (SupplierOrganization::query()->whereNotNull('onec_aliases')->get(['id', 'onec_aliases']) as $aliased) {
+                foreach ((array) $aliased->onec_aliases as $alias) {
+                    $usedCodes[$alias] ??= $aliased->id;
+                }
+            }
             // Поставщики: организации; в отчёте (без --apply) одиночные адреса ещё без организаций — каждый сам по себе.
             $units = SupplierOrganization::query()->with('suppliers')->get()
                 ->map(fn ($o) => ['org' => $o, 'name' => $o->name, 'suppliers' => $o->suppliers]);
@@ -183,7 +189,7 @@ class SuppliersOnecBindCommand extends Command
             }
             $known = Supplier::query()->whereNotNull('email')->pluck('email')->map(fn ($e) => mb_strtolower($e))->flip()->all();
             foreach ($contactsByCode as $code => $emails) {
-                $org = $apply ? SupplierOrganization::query()->where('onec_code', $code)->first() : null;
+                $org = $apply ? SupplierOrganization::query()->withOnecCode((string) $code)->first() : null;
                 foreach ($emails as $email => $info) {
                     if (isset($known[$email])) {
                         continue;

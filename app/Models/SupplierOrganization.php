@@ -19,6 +19,8 @@ class SupplierOrganization extends Model
     protected $fillable = ['name', 'inn', 'notes', 'created_by_user_id',
         // Ключ в QuoteParts: код 1С или временный «mz:{id}» (см. миграцию add_qp_key_and_onec).
         'qp_key', 'onec_code', 'onec_name', 'onec_candidates', 'qp_status', 'qp_payload', 'qp_synced_at',
+        // Коды 1С вклеенных дублей контрагента (SupplierMergeService): поиск и привязка реестра 1С.
+        'onec_aliases',
         // Архив (SupplierArchiveService): не виден в реестре, не предлагается в запросах цен.
         'archived_at', 'archived_reason', 'archived_by_user_id'];
 
@@ -26,6 +28,7 @@ class SupplierOrganization extends Model
     {
         return [
             'onec_candidates' => 'array',
+            'onec_aliases' => 'array',
             'qp_payload' => 'array',
             'qp_synced_at' => 'datetime',
             'archived_at' => 'datetime',
@@ -47,6 +50,16 @@ class SupplierOrganization extends Model
     public function scopeArchived($query): void
     {
         $query->whereNotNull('archived_at');
+    }
+
+    /**
+     * Поставщик с этим кодом 1С — основным или кодом вклеенного дубля.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<SupplierOrganization>  $query
+     */
+    public function scopeWithOnecCode($query, string $code): void
+    {
+        $query->where(fn ($w) => $w->where('onec_code', $code)->orWhereJsonContains('onec_aliases', $code));
     }
 
     /** Связь поставщика есть в QuoteParts: правки (и архив) идут туда через API. */

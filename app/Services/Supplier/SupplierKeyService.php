@@ -25,7 +25,7 @@ class SupplierKeyService
             throw new RuntimeException('Укажите код 1С.');
         }
         $taken = SupplierOrganization::query()->whereKeyNot($org->id)
-            ->where(fn ($q) => $q->where('onec_code', $code)->orWhere('qp_key', $code))->value('name');
+            ->where(fn ($q) => $q->where('onec_code', $code)->orWhere('qp_key', $code)->orWhereJsonContains('onec_aliases', $code))->value('name');
         if ($taken !== null) {
             throw new RuntimeException("Код {$code} уже у поставщика «{$taken}» — это один поставщик, объедините их.");
         }

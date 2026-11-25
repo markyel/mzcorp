@@ -509,6 +509,7 @@ class Index extends Component
             $like = '%'.str_replace(['%', '_'], ['\\%', '\\_'], $s).'%';
             $q->where(fn ($w) => $w->where('name', 'ilike', $like)->orWhere('onec_name', 'ilike', $like)
                 ->orWhere('onec_code', 'ilike', $like)->orWhere('qp_key', 'ilike', $like)->orWhere('inn', 'ilike', $like)
+                ->orWhereRaw('onec_aliases::text ilike ?', [$like])
                 ->orWhereHas('suppliers', fn ($c) => $c->where('email', 'ilike', $like)->orWhere('domain', 'ilike', $like))
                 // Адреса поставщика в QuoteParts, в том числе сотрудники без карточки контакта: иначе ящик,
                 // засевший у другого поставщика, не находился (spareparts@paulschaab.de у Omer, 10.11.2026).
@@ -535,7 +536,7 @@ class Index extends Component
         if (! $asNew && $orgId === null) {
             $q = trim((string) ($this->candidateTarget[$id] ?? ''));
             $orgs = $q === '' ? collect() : \App\Models\SupplierOrganization::query()
-                ->where(fn ($w) => $w->where('onec_code', $q)->orWhere('qp_key', $q)->orWhere('name', 'ilike', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $q).'%'))
+                ->where(fn ($w) => $w->withOnecCode($q)->orWhere('qp_key', $q)->orWhere('name', 'ilike', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $q).'%'))
                 ->limit(2)->get(['id', 'name']);
             if ($orgs->count() !== 1) {
                 $this->dispatch('toast', message: $orgs->isEmpty() ? 'Поставщик не найден — укажите код 1С или точнее название.' : 'Под это подходят несколько поставщиков — уточните.', type: 'error');

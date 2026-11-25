@@ -15,7 +15,9 @@ use RuntimeException;
  * Адреса второго переезжают к первому, ссылки на его ключ (офферы, отказы, выбор по позиции,
  * снимки запросов) — на ключ первого, контакты первого в QuoteParts обновляются. Связь второго в
  * QuoteParts остаётся (её история — его), но под ключом «merged:{ключ}», чтобы ключ освободился.
- * Два разных кода 1С не объединяются: это разные контрагенты, решать — в 1С.
+ * Разные коды 1С объединяются (25.11.2026): в 1С бывают дубли одного контрагента («Подий» —
+ * 00-003020 «Поставщик» и 00-008624 «Покупатель»). Код первого остаётся основным, код второго —
+ * дополнительный (onec_aliases): поиск по нему находит карточку, привязка реестра 1С не заводит дубль.
  */
 class SupplierMergeService
 {
@@ -29,10 +31,6 @@ class SupplierMergeService
         if ($into->id === $from->id) {
             throw new RuntimeException('Это один и тот же поставщик.');
         }
-        if ($into->onec_code && $from->onec_code && $into->onec_code !== $from->onec_code) {
-            throw new RuntimeException("У поставщиков разные коды 1С ({$into->onec_code} и {$from->onec_code}) — это разные контрагенты.");
-        }
-
         $oldKey = (string) $from->qp_key;
         if ($oldKey !== '' && $from->qp_status !== null) {
             $this->client->updateSupplier($oldKey, ['external_id' => 'merged:'.$oldKey]);
@@ -45,6 +43,13 @@ class SupplierMergeService
                 $from->forceFill(['onec_code' => null, 'qp_key' => null])->save();
                 $this->keys->setOnecCode($into, $code, $from->onec_name);
             }
+            // Код дубля (и его прежние дополнительные) — дополнительными кодами оставшегося.
+            $aliases = self::aliasesAfterMerge($into, $from);
+            $into->forceFill([
+                'onec_aliases' => $aliases ?: null,
+                'inn' => $into->inn ?: $from->inn,
+            ])->save();
+            $from->forceFill(['onec_code' => null, 'onec_aliases' => null, 'inn' => null])->save();
             Supplier::query()->where('supplier_organization_id', $from->id)->update(['supplier_organization_id' => $into->id]);
             if ($oldKey !== '') {
                 $this->keys->remap($oldKey, (string) $into->fresh()->qp_key);
@@ -59,5 +64,19 @@ class SupplierMergeService
         }
 
         return $into->refresh();
+    }
+
+    /**
+     * Дополнительные коды 1С оставшегося после склейки: его прежние + основной и дополнительные
+     * вклеенного, без его собственного основного кода.
+     *
+     * @return list<string>
+     */
+    public static function aliasesAfterMerge(SupplierOrganization $into, SupplierOrganization $from): array
+    {
+        $codes = array_merge((array) $into->onec_aliases, [(string) $from->onec_code], (array) $from->onec_aliases);
+        $codes = array_map(fn ($c) => trim((string) $c), $codes);
+
+        return array_values(array_unique(array_filter($codes, fn ($c) => $c !== '' && $c !== (string) $into->onec_code)));
     }
 }
