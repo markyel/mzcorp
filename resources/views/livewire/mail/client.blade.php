@@ -1144,8 +1144,13 @@ body.mail-resizing iframe{pointer-events:none}
                             <span class="av">{{ $msg->is_draft ? '✎' : $initials($msg->from_name, $msg->from_email) }}</span>
                             <div class="who">
                                 <div class="nm">{{ $msg->from_name ?: $msg->from_email }} <span class="em">&lt;{{ $msg->from_email }}&gt;</span>@if($msg->is_draft)<span class="draft-badge">{{ $msg->send_status ? mb_strtolower($msg->send_status->label()) : 'черновик' }}</span>@elseif($msg->sent_via)<span class="draft-badge" title="Почтовый сервер Яндекса не отвечал — письмо ушло резервным каналом">через {{ $msg->sent_via }}</span>@endif</div>
-                                @php $to = collect($msg->to_recipients ?? [])->pluck('email')->filter()->take(3)->implode(', '); @endphp
-                                @if($to)<div class="tocc">кому: {{ $to }}</div>@endif
+                                {{-- Кому / копия / скрытая копия (последняя — только у наших исходящих, у входящих её не видно). --}}
+                                @foreach(['кому' => $msg->to_recipients, 'копия' => $msg->cc_recipients, 'скрытая копия' => $outbound ? $msg->bcc_recipients : []] as $label => $list)
+                                    @php $emails = collect($list ?? [])->pluck('email')->filter()->unique()->values(); @endphp
+                                    @if($emails->isNotEmpty())
+                                        <div class="tocc" title="{{ $emails->implode(', ') }}">{{ $label }}: {{ $emails->take(5)->implode(', ') }}@if($emails->count() > 5) и ещё {{ $emails->count() - 5 }}@endif</div>
+                                    @endif
+                                @endforeach
                             </div>
                             @unless($msg->is_draft)
                                 <span class="msg-acts">
