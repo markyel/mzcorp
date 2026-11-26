@@ -366,10 +366,26 @@ class QuoteCoverageService
     }
 
     /** @return Collection<int, object> строки отправленных КП из 1С по заявке */
-    private function lines(Request $request): Collection
+    /**
+     * Позиции без КП И без выставленного счёта — то, что переезжает в заявку-остаток после оплаты. Менеджер часто
+     * выставляет счёт без отдельного КП (клиент дописывает позиции «добавьте в счёт»): такие позиции оплачены, а не
+     * остались без ответа (MZ2026-02805: 13 из 15 позиций остатка — из оплаченного счёта 12070).
+     *
+     * @return Collection<int, RequestItem>
+     */
+    public function uncoveredByQuoteOrInvoice(Request $request): Collection
+    {
+        $items = RequestItem::query()->where('request_id', $request->id)->where('is_active', true)->with('catalogItem:id,sku')
+            ->orderBy('position')->orderBy('id')->get();
+
+        return self::uncoveredOf($items, $this->lines($request, ['outbound_quotation_full', 'outbound_invoice']), $this->sentQuotationItemIds($request));
+    }
+
+    /** @param  list<string>  $types  типы документов, чьи строки считаются ответом */
+    private function lines(Request $request, array $types = ['outbound_quotation_full']): Collection
     {
         return DB::table('outbound_quote_items as l')->join('outbound_quotes as q', 'q.id', '=', 'l.outbound_quote_id')
-            ->where('q.request_id', $request->id)->where('q.document_type', 'outbound_quotation_full')
+            ->where('q.request_id', $request->id)->whereIn('q.document_type', $types)
             ->whereIn('q.status', ['matched', 'parsed'])
             ->get(['l.raw_name', 'l.raw_article', 'l.matched_request_item_id', 'l.matched_catalog_item_id']);
     }

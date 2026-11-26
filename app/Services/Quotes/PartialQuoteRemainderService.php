@@ -71,7 +71,8 @@ class PartialQuoteRemainderService
         if (! $this->coverage->hasQuote($paid)) {
             return null;
         }
-        $open = $this->coverage->uncovered($paid);
+        // Позиции из выставленных счетов — не остаток: счёт без отдельного КП тоже ответ клиенту (MZ2026-02805).
+        $open = $this->coverage->uncoveredByQuoteOrInvoice($paid);
         if ($open->isEmpty()) {
             return null;
         }
@@ -87,7 +88,9 @@ class PartialQuoteRemainderService
             $child = DB::transaction(function () use ($paid, $root, $open, $trigger) {
                 $child = Request::create([
                     'internal_code' => $this->codeGenerator->next(),
-                    'email_message_id' => $paid->email_message_id,
+                    // Без письма-источника: первое письмо оплаченной заявки просило другие позиции, и карточка
+                    // остатка выдавала его за запрос (MZ2026-02805 показывала M03370/M11508/M12392 из КП 16.11).
+                    'email_message_id' => null,
                     'status' => RequestStatus::InProgress,
                     'subject' => mb_substr(sprintf('Остаток по %s', $paid->internal_code).($paid->subject ? ' — '.$paid->subject : ''), 0, 250),
                     'client_email' => $paid->client_email,
