@@ -14,11 +14,14 @@ use Livewire\WithPagination;
 
 /**
  * Раздел «IQOT» (/dashboard/iqot) — пул анализа цен по позициям каталога.
- * Доступ: head_of_sales / director / admin (см. routes/web.php).
+ * Доступ: ROLES (маршрут в routes/web.php, пункт меню — navigation.blade.php).
  */
 class Index extends Component
 {
     use WithPagination;
+
+    /** Кому открыт раздел: РОП, директорат, админ и снабжение (с 26.11.2026). */
+    public const ROLES = ['head_of_sales', 'director', 'admin', 'procurement'];
 
     #[Url(as: 'status', except: '')]
     public string $statusFilter = '';
@@ -35,9 +38,9 @@ class Index extends Component
     public function mount(): void
     {
         abort_unless(
-            auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'admin']),
+            auth()->user()?->hasAnyRole(self::ROLES),
             403,
-            'Раздел «IQOT» доступен РОПу, директорату и админам.',
+            'Раздел «IQOT» доступен РОПу, директорату, снабжению и админам.',
         );
     }
 
@@ -176,7 +179,7 @@ class Index extends Component
     private function assertManager(): void
     {
         abort_unless(
-            auth()->user()?->hasAnyRole(['head_of_sales', 'director', 'admin']),
+            auth()->user()?->hasAnyRole(self::ROLES),
             403,
         );
     }

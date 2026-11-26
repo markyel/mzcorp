@@ -505,18 +505,18 @@ Route::middleware('auth')->group(function () {
         ->whereNumber(['rfq', 'message', 'index'])
         ->name('quoteparts.rfq-file');
 
+    // Раздел «IQOT» — анализ цен конкурентов: пул позиций (из проигранных КП
+    // + ручные из каталога), статусы submission и отчёты по позициям. Снабжению открыт 26.11.2026.
+    Route::get('/dashboard/iqot', function () {
+        return view('iqot.index');
+    })->middleware('role:'.implode(',', \App\Livewire\Iqot\Index::ROLES))->name('iqot.index');
+
     // Mail routing rules — управление правилами для РОП и директора.
     Route::middleware('role:head_of_sales,director,admin')->group(function () {
         // «Боты» — диалоги ботов заявок Telegram/MAX: воронка и ленты для разбора.
         Route::get('/dashboard/bot-chats', function () {
             return view('admin.bot-chats.index');
         })->name('bot-chats.index');
-
-        // Раздел «IQOT» — анализ цен конкурентов: пул позиций (из проигранных КП
-        // + ручные из каталога), статусы submission и отчёты по позициям.
-        Route::get('/dashboard/iqot', function () {
-            return view('iqot.index');
-        })->name('iqot.index');
 
         // «Аудит матчинга» — расхождения авто-матча позиций с каталогом,
         // указанным менеджером в отправленном КП (кандидаты в ложные матчи).

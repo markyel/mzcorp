@@ -102,9 +102,11 @@
     if ($user) {
         $navLinks[] = ['route' => 'photos.index', 'label' => 'Фото', 'pattern' => 'photos.*'];
     }
-    // «IQOT» — анализ цен конкурентов (РОП / директорат / админ).
-    if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
+    // «IQOT» — анализ цен конкурентов (РОП / директорат / снабжение / админ).
+    if ($user?->hasAnyRole(\App\Livewire\Iqot\Index::ROLES)) {
         $navLinks[] = ['route' => 'iqot.index', 'label' => 'IQOT', 'pattern' => 'iqot.*'];
+    }
+    if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'catalog.match-audit', 'label' => 'Аудит матчинга', 'pattern' => 'catalog.match-audit'];
         // Скидки контрагентов — загрузка выгрузки и просмотр; питают цену в КП.
         $navLinks[] = ['route' => 'client-discounts.index', 'label' => 'Скидки', 'pattern' => 'client-discounts.*'];
