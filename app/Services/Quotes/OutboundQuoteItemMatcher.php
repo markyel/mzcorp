@@ -101,6 +101,9 @@ class OutboundQuoteItemMatcher
         // Step 3.2: новая карточка (артикул есть на mylift.ru) ↔ единственная свободная позиция без карточки.
         $this->matchNewSkusToItemsWithoutCard($items, $request);
 
+        // Step 3.3: аналог вместо запрошенного — одна строка ↔ одна свободная позиция, даже с карточкой оригинала.
+        $this->matchSingleAnalog($items, $request);
+
         // Step 3.5: строка КП резолвится в каталог (M-SKU), но ни одна позиция
         // заявки к ней не привязалась — клиент описал деталь своими словами и
         // без M-кода. Раньше такая строка оставалась «catalog hit без request
@@ -601,10 +604,52 @@ class OutboundQuoteItemMatcher
         }
     }
 
-    /** Строку с новой карточкой — только к позиции без карточки (другой товар каталога — не она). */
+    /**
+     * Строку с новой карточкой — только к позиции без карточки (другой товар каталога — не она). Аналог — исключение:
+     * его и предлагают вместо запрошенного, карточка у него своя (MZ2026-03007: CT60G M34950 вместо CPI48 M27101).
+     */
     private function mayLink(OutboundQuoteItem $qi, ?RequestItem $ri): bool
     {
-        return $ri !== null && (! isset($this->newSkuLines[(int) $qi->id]) || $ri->catalog_item_id === null);
+        return $ri !== null && (! isset($this->newSkuLines[(int) $qi->id]) || $ri->catalog_item_id === null || (bool) $qi->is_analog);
+    }
+
+    /**
+     * Step 3.3. Одна несвязанная строка-аналог ↔ одна свободная позиция заявки: аналог предложен вместо неё. Карточка
+     * у позиции может быть (оригинала) — у аналога своя, поэтому обычные шаги по каталогу и названию его не находят
+     * (MZ2026-03007; за 30 дней так осталась несвязанной 49 строк-аналогов из 175).
+     *
+     * @param  Collection<int, OutboundQuoteItem>  $items
+     */
+    private function matchSingleAnalog(Collection $items, Request $request): void
+    {
+        $pair = self::singleAnalogPair($items, $request->items);
+        if ($pair === null) {
+            return;
+        }
+        [$qi, $ri] = $pair;
+        $qi->matched_request_item_id = $ri->id;
+        $qi->match_score = 0.8;
+        $qi->match_source = OutboundQuoteItem::MATCH_SOURCE_SINGLE_PAIR;
+        $qi->match_reason = sprintf('аналог — единственная несвязанная строка КП ↔ единственная свободная позиция #%d', $ri->id);
+        $qi->save();
+    }
+
+    /**
+     * @param  Collection<int, OutboundQuoteItem>  $items
+     * @param  Collection<int, RequestItem>  $requestItems
+     * @return array{0: OutboundQuoteItem, 1: RequestItem}|null
+     */
+    public static function singleAnalogPair(Collection $items, Collection $requestItems): ?array
+    {
+        $open = $items->filter(fn (OutboundQuoteItem $it) => $it->matched_request_item_id === null)->values();
+        if ($open->count() !== 1 || ! $open->first()->is_analog) {
+            return null;
+        }
+        $taken = $items->pluck('matched_request_item_id')->filter()->all();
+        $free = $requestItems->where('is_active', true)
+            ->reject(fn (RequestItem $ri) => in_array($ri->id, $taken, true))->values();
+
+        return $free->count() === 1 ? [$open->first(), $free->first()] : null;
     }
 
     /**
