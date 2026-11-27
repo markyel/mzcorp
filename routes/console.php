@@ -162,6 +162,13 @@ Schedule::command('catalog:client-phrases-sync')
     ->onOneServer()
     ->runInBackground();
 
+// Справочник опознания деталей учится на письмах-уточнениях менеджеров (вопрос в 3 письмах — подсказка).
+Schedule::command('identification:learn')
+    ->dailyAt('04:40')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Баланс RouterAI: на нуле все задачи ИИ уходили в OpenAI (18.11 и 23.11.2026) — предупреждаем заранее.
 Schedule::command('llm:routerai-balance')
     ->hourly()

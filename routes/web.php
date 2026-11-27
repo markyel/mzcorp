@@ -529,6 +529,11 @@ Route::middleware('auth')->group(function () {
             return view('catalog.match-audit');
         })->name('catalog.match-audit');
 
+        // «Справочник опознания» — что спросить у клиента, чтобы опознать деталь; пополняется сам по письмам.
+        Route::get('/dashboard/catalog/identification', function () {
+            return view('catalog.identification-hints');
+        })->name('catalog.identification');
+
         Route::get('/dashboard/mail-rules', function () {
             return view('admin.mail-rules.index');
         })->name('mail-rules.index');

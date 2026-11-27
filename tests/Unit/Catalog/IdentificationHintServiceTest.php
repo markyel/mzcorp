@@ -10,7 +10,7 @@ class IdentificationHintServiceTest extends TestCase
 {
     private function type(string $name): ?string
     {
-        return app(IdentificationHintService::class)->forName($name)['key'] ?? null;
+        return IdentificationHintService::typeOf($name, IdentificationHintService::seedTypes())['key'] ?? null;
     }
 
     public function test_the_head_word_decides(): void
@@ -30,6 +30,7 @@ class IdentificationHintServiceTest extends TestCase
         $this->assertSame('sheave', $this->type('Канатоведущий шкив лебедки Ø240'));
         $this->assertSame('rope', $this->type('Канат DIN, диаметр 8 мм'));
         $this->assertSame('contactor', $this->type('Реле промежуточное РЭП 34'));
+        $this->assertSame('door_lock', $this->type('Замок ДШ OBM K01 левый'));
     }
 
     public function test_unknown_part_gets_no_hint(): void
@@ -40,7 +41,13 @@ class IdentificationHintServiceTest extends TestCase
 
     public function test_chain_asks_first_which_chain_it_is(): void
     {
-        $hint = app(IdentificationHintService::class)->forName('Цепь 16B-2');
+        $hint = IdentificationHintService::typeOf('Цепь 16B-2', IdentificationHintService::seedTypes());
         $this->assertSame('Какая цепь и где стоит', $hint['hints'][0]['label']);
+    }
+
+    public function test_a_broken_pattern_is_skipped_not_fatal(): void
+    {
+        $types = [['key' => 'bad', 'name' => 'x', 'pattern' => '/(/', 'hints' => []], ['key' => 'ok', 'name' => 'y', 'pattern' => '/кнопк/iu', 'hints' => []]];
+        $this->assertSame('ok', IdentificationHintService::typeOf('кнопка', $types)['key']);
     }
 }

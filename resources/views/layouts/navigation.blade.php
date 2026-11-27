@@ -108,6 +108,7 @@
     }
     if ($user?->hasAnyRole(['head_of_sales', 'director', 'admin'])) {
         $navLinks[] = ['route' => 'catalog.match-audit', 'label' => 'Аудит матчинга', 'pattern' => 'catalog.match-audit'];
+        $navLinks[] = ['route' => 'catalog.identification', 'label' => 'Опознание', 'pattern' => 'catalog.identification'];
         // Скидки контрагентов — загрузка выгрузки и просмотр; питают цену в КП.
         $navLinks[] = ['route' => 'client-discounts.index', 'label' => 'Скидки', 'pattern' => 'client-discounts.*'];
     }
