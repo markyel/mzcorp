@@ -131,6 +131,7 @@ class RequestItemPersister
         $newCountActive = 0;
         $newCountPending = 0;
         $newCountSkipped = 0;
+        $createdItems = [];
 
         foreach ($filtered['new'] as $item) {
             $suggestionStatus = null;
@@ -236,6 +237,11 @@ class RequestItemPersister
             if ($mergedFrom !== null) {
                 $this->appendParsingMetaDedup($existing, $createdItem->position, $mergedFrom);
             }
+            $createdItems[] = $createdItem;
+        }
+
+        if (! $isReplyContext && count($createdItems) === 1) {
+            $this->bindLetterPhotos($createdItems[0], $message);
         }
 
         // Audit для reply-парсинга: state_change с подсчётами, чтобы менеджер
@@ -563,6 +569,33 @@ class RequestItemPersister
      * CatalogResolutionService::applyCatalogToItem), здесь — страховка на
      * входе парсера. Общий фильтр в {@see \App\Support\HouseBrand}.
      */
+    /**
+     * Одна позиция в заявке, фото в письме несколько — все они про неё (MZ2026-03414: ролик снят с торца
+     * и четырежды со штангенциркулем, а привязалось одно фото — замеры в подсказках не видны). Главное —
+     * выбранное разбором, иначе первое.
+     */
+    private function bindLetterPhotos(RequestItem $item, EmailMessage $message): void
+    {
+        try {
+            $ids = \App\Models\EmailAttachment::query()->where('email_message_id', $message->id)->bindablePhotos()
+                ->orderBy('id')->pluck('id')->map(fn ($v) => (int) $v)->all();
+            if (count($ids) < 2 || $item->photos()->exists()) {
+                return;
+            }
+            $main = in_array((int) $item->image_attachment_id, $ids, true) ? (int) $item->image_attachment_id : $ids[0];
+            $sync = [];
+            foreach ($ids as $i => $aid) {
+                $sync[$aid] = ['is_main' => $aid === $main, 'sort_order' => $i];
+            }
+            $item->photos()->sync($sync);
+            if ((int) $item->image_attachment_id !== $main) {
+                $item->update(['image_attachment_id' => $main]);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('RequestItemPersister: binding letter photos failed', ['request_item_id' => $item->id, 'error' => $e->getMessage()]);
+        }
+    }
+
     private function sanitizeParsedBrand(?string $brand): ?string
     {
         return \App\Support\HouseBrand::filter($brand);
