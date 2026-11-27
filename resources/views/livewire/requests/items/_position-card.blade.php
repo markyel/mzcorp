@@ -241,6 +241,16 @@
                 </div>
             @endforeach
 
+            {{-- Не привязана и вариантов нет — что обычно нужно для опознания детали этого типа (свод уточнений
+                 менеджеров, config/identification_hints.php). Готовые вопросы — в развёрнутой карточке. --}}
+            @php $idHint = ! $ci && $catalogMissing === [] ? app(\App\Services\Catalog\IdentificationHintService::class)->forName($item->parsed_name) : null; @endphp
+            @if($idHint)
+                <div class="text-[11.5px] text-fg-3 mt-0.5"
+                     title="{{ implode("\n", array_column($idHint['hints'], 'question')) }}">
+                    💡 Для подбора обычно нужно: {{ implode(' · ', array_slice(array_column($idHint['hints'], 'label'), 0, 3)) }}
+                </div>
+            @endif
+
             {{-- Phase 2.1 — Строка 4: маппинг наследования.
                  child:  «↻ было в M-NNNN · поз. N · qty X шт» (с qty delta если отличается).
                  parent: «↻ продолжена в M-NNNN[, M-NNNN]» (children, ссылающиеся на эту позицию).
@@ -651,7 +661,22 @@
                  'tpl' => 'Уточните, пожалуйста, требуемое количество.'],
             ];
             $itemNameJs = trim((string) ($item->parsed_name ?: 'позиция #' . $item->position));
+            $typeHint = app(\App\Services\Catalog\IdentificationHintService::class)->forName($item->parsed_name);
         @endphp
+        {{-- Готовые вопросы по типу детали — что менеджеры спрашивают чаще всего (свод писем-уточнений). --}}
+        @if($typeHint)
+            <div class="px-[18px] py-2 bg-surface border-t border-border-subtle flex items-center gap-1.5 flex-wrap">
+                <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mr-1">Для «{{ $typeHint['name'] }}»:</span>
+                @foreach($typeHint['hints'] as $h)
+                    <button type="button"
+                            wire:click="$dispatch('clarification-add-slot-question', { itemId: {{ $item->id }}, slotKey: 'type:{{ $typeHint['key'] }}:{{ $loop->index }}', slotLabel: @js($h['label']), template: @js($h['question']), itemName: @js($itemNameJs) })"
+                            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-[11px] transition-colors"
+                            title="{{ $h['question'] }}">
+                        <span>{{ $h['label'] }}</span>
+                    </button>
+                @endforeach
+            </div>
+        @endif
         <div class="px-[18px] py-2 bg-surface border-t border-border-subtle flex items-center gap-1.5 flex-wrap">
             <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mr-1">Спросить:</span>
             @foreach($quickChips as $chip)

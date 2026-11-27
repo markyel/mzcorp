@@ -134,9 +134,50 @@ class ClarificationPanel extends Component
         // если уже был, иначе null. Базовые / KB слоты — перезаписываем.
         if ($slotKey !== null
             && $slotKey !== 'free'
-            && ! str_starts_with($slotKey, 'quick:')) {
+            && ! str_starts_with($slotKey, 'quick:')
+            && ! str_starts_with($slotKey, 'type:')) {
             $this->perItemSlotKey[$itemId] = $slotKey;
         }
+    }
+
+    /**
+     * Типовые вопросы по всем непривязанным позициям, по которым вопроса ещё нет: подбор остановился на
+     * вариантах одной модели — его вопрос с вариантами из каталога; иначе — два главных вопроса для этого типа
+     * детали (config/identification_hints.php, свод писем-уточнений менеджеров).
+     */
+    public function addTypicalForUnmatched(\App\Services\Catalog\IdentificationHintService $hints): void
+    {
+        $items = RequestItem::query()->where('request_id', $this->requestId)->where('is_active', true)
+            ->whereNull('catalog_item_id')->orderBy('position')->get();
+        $added = 0;
+        foreach ($items as $item) {
+            if (trim((string) ($this->perItem[$item->id] ?? '')) !== '') {
+                continue;
+            }
+            $missing = (array) (($item->quality_assessment_payload ?? [])['catalog_missing']['items'] ?? []);
+            if ($missing !== []) {
+                foreach ($missing as $i => $m) {
+                    $options = array_slice((array) ($m['options'] ?? []), 0, 10);
+                    $this->addSlotQuestion($item->id, 'type:missing:'.$i, (string) ($m['name'] ?? ''),
+                        trim((string) ($m['question'] ?? '')).($options !== [] ? ' (в каталоге есть: '.implode(', ', $options).')' : ''));
+                }
+                $added++;
+
+                continue;
+            }
+            $hint = $hints->forName($item->parsed_name);
+            if ($hint === null) {
+                continue;
+            }
+            foreach (array_slice($hint['hints'], 0, 2) as $i => $h) {
+                $this->addSlotQuestion($item->id, 'type:'.$hint['key'].':'.$i, $h['label'], $h['question']);
+            }
+            $added++;
+        }
+        $this->expanded = true;
+        $this->dispatch('toast', type: $added > 0 ? 'success' : 'info', message: $added > 0
+            ? 'Добавлены типовые вопросы по позициям: '.$added.'. Проверьте и поправьте перед отправкой.'
+            : 'Непривязанных позиций без вопросов и с известным типом детали нет.');
     }
 
     /**

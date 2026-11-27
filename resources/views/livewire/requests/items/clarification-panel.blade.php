@@ -21,6 +21,13 @@
         <span class="flex-1"></span>
 
         <button type="button"
+                wire:click="addTypicalForUnmatched"
+                class="btn btn-sm"
+                title="Для каждой непривязанной позиции без вопроса: что не хватило для выбора варианта, иначе — два главных вопроса для этого типа детали (из практики менеджеров)">
+            💡 Типовые вопросы
+        </button>
+
+        <button type="button"
                 wire:click="toggle"
                 class="btn btn-sm"
                 title="{{ $expanded ? 'Свернуть черновик' : 'Открыть редактор черновика — общий вопрос + правка всех вопросов' }}">
