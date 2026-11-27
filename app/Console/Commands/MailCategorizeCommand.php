@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\EmailCategory;
 use App\Models\EmailMessage;
+use App\Services\Mail\CitedOutboundQuoteRouter;
 use App\Services\Mail\IncomingMailProcessor;
 use App\Services\Mail\InboundReplyLinker;
 use App\Services\Mail\MailCategoryClassifier;
@@ -135,6 +136,7 @@ class MailCategorizeCommand extends Command
         // пакет писем 15:00-15:31 категоризован только в 15:45 (после
         // закрытия circuit breaker), но Request'ы для них не создавались.
         $linker = app(InboundReplyLinker::class);
+        $citedRouter = app(CitedOutboundQuoteRouter::class);
         $processor = app(IncomingMailProcessor::class);
         $stats['linked_to_existing'] = 0;
         $stats['request_created'] = 0;
@@ -159,6 +161,16 @@ class MailCategorizeCommand extends Command
                     ) {
                         try {
                             $linked = $linker->tryLink($m);
+                            // Клиент процитировал наш КП — заявка известна точно, как в LinkToRequestHandler
+                            // (там этот шаг пропускается, пока категории нет). Без него догон заводил новую
+                            // заявку: MZ2026-03354 по КП 373927 из MZ2026-01655 (27.11.2026, модель сбилась на
+                            // первой категоризации).
+                            if (! $linked) {
+                                $cited = $citedRouter->detect($m);
+                                if ($cited !== null) {
+                                    $linked = $citedRouter->applyInvoiceRequest($m, $cited);
+                                }
+                            }
                             if ($linked) {
                                 $stats['linked_to_existing']++;
                             } else {
