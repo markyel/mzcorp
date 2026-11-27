@@ -165,7 +165,7 @@ class ClarificationPanel extends Component
 
                 continue;
             }
-            $hint = $hints->forName($item->parsed_name);
+            $hint = $hints->forItem($item);
             if ($hint === null) {
                 continue;
             }

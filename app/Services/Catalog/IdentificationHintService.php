@@ -4,6 +4,7 @@ namespace App\Services\Catalog;
 
 use App\Models\Identification\IdentificationHint;
 use App\Models\Identification\IdentificationPartType;
+use App\Models\RequestItem;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
@@ -26,6 +27,32 @@ class IdentificationHintService
     public function forName(?string $name): ?array
     {
         return self::typeOf((string) $name, $this->types());
+    }
+
+    /**
+     * Подсказка для позиции заявки: фото у позиции уже есть — вопросы «пришлите фото…» не предлагаем
+     * (MZ2026-03413: «Фото маркировки» при фото датчика с маркировкой). Других вопросов нет — подсказки нет.
+     *
+     * @return array{key: string, name: string, hints: list<array{label: string, question: string}>}|null
+     */
+    public function forItem(RequestItem $item): ?array
+    {
+        $type = $this->forName($item->parsed_name);
+
+        return $type === null ? null : self::withoutPhotoHints($type, $item->image_attachment_id !== null);
+    }
+
+    /**
+     * @param  array{key: string, name: string, hints: list<array{label: string, question: string}>}  $type
+     * @return array{key: string, name: string, hints: list<array{label: string, question: string}>}|null
+     */
+    public static function withoutPhotoHints(array $type, bool $hasPhoto): ?array
+    {
+        if ($hasPhoto) {
+            $type['hints'] = array_values(array_filter($type['hints'], fn ($h) => mb_stripos($h['label'], 'фото') === false));
+        }
+
+        return $type['hints'] === [] ? null : $type;
     }
 
     /**

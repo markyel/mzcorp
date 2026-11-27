@@ -242,8 +242,8 @@
             @endforeach
 
             {{-- Не привязана и вариантов нет — что обычно нужно для опознания детали этого типа (свод уточнений
-                 менеджеров, config/identification_hints.php). Готовые вопросы — в развёрнутой карточке. --}}
-            @php $idHint = ! $ci && $catalogMissing === [] ? app(\App\Services\Catalog\IdentificationHintService::class)->forName($item->parsed_name) : null; @endphp
+                 менеджеров, справочник «Опознание»; фото уже есть — без вопросов про фото). Готовые вопросы — в развёрнутой карточке. --}}
+            @php $idHint = ! $ci && $catalogMissing === [] ? app(\App\Services\Catalog\IdentificationHintService::class)->forItem($item) : null; @endphp
             @if($idHint)
                 <div class="text-[11.5px] text-fg-3 mt-0.5"
                      title="{{ implode("\n", array_column($idHint['hints'], 'question')) }}">
@@ -661,7 +661,7 @@
                  'tpl' => 'Уточните, пожалуйста, требуемое количество.'],
             ];
             $itemNameJs = trim((string) ($item->parsed_name ?: 'позиция #' . $item->position));
-            $typeHint = app(\App\Services\Catalog\IdentificationHintService::class)->forName($item->parsed_name);
+            $typeHint = app(\App\Services\Catalog\IdentificationHintService::class)->forItem($item);
         @endphp
         {{-- Готовые вопросы по типу детали — что менеджеры спрашивают чаще всего (свод писем-уточнений). --}}
         @if($typeHint)

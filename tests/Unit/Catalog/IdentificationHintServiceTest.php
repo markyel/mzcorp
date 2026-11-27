@@ -45,6 +45,17 @@ class IdentificationHintServiceTest extends TestCase
         $this->assertSame('Какая цепь и где стоит', $hint['hints'][0]['label']);
     }
 
+    public function test_photo_questions_are_dropped_when_the_item_has_a_photo(): void
+    {
+        $type = ['key' => 'sensor', 'name' => 'датчик', 'hints' => [
+            ['label' => 'Фото маркировки', 'question' => 'Пришлите фото маркировки.'],
+            ['label' => 'Где применяется', 'question' => 'Где стоит датчик?'],
+        ]];
+        $this->assertSame(['Где применяется'], array_column(IdentificationHintService::withoutPhotoHints($type, true)['hints'], 'label'));
+        $this->assertCount(2, IdentificationHintService::withoutPhotoHints($type, false)['hints']);
+        $this->assertNull(IdentificationHintService::withoutPhotoHints(['key' => 'x', 'name' => 'x', 'hints' => [['label' => 'Фото таблички', 'question' => '…']]], true));
+    }
+
     public function test_a_broken_pattern_is_skipped_not_fatal(): void
     {
         $types = [['key' => 'bad', 'name' => 'x', 'pattern' => '/(/', 'hints' => []], ['key' => 'ok', 'name' => 'y', 'pattern' => '/кнопк/iu', 'hints' => []]];
