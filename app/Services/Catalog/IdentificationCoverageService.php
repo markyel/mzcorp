@@ -46,7 +46,8 @@ class IdentificationCoverageService
         $statuses = array_map(fn (RequestStatus $s) => $s->value, self::STATUSES);
         // Кандидаты: не проверялись или что-то могло поменяться после последней сверки (позиция, справочник,
         // новое письмо клиента). Сама сверка отпечатка — ниже, в PHP.
-        $handbookAt = DB::table('identification_hints')->max('updated_at');
+        // Только действующие подсказки и типы: кандидаты и счётчики «спрашивали» проверку не касаются.
+        $handbookAt = max((string) DB::table('identification_hints')->where('status', 'active')->max('updated_at'), (string) DB::table('identification_part_types')->max('updated_at')) ?: null;
         $items = RequestItem::query()->from('request_items as ri')->select('ri.*')
             ->join('requests as r', 'r.id', '=', 'ri.request_id')
             ->where('ri.is_active', true)->whereNull('ri.catalog_item_id')->whereIn('r.status', $statuses)
@@ -58,7 +59,7 @@ class IdentificationCoverageService
                         ->whereColumn('m.related_request_id', 'ri.request_id')->where('m.direction', 'inbound')
                         ->whereRaw("m.created_at > (ri.identification_coverage->>'checked_at')::timestamptz"));
             })
-            ->orderByDesc('ri.id')->limit($limit)->get();
+            ->orderByRaw('ri.identification_coverage is null desc')->orderByDesc('ri.id')->limit($limit)->get();
 
         foreach ($items as $item) {
             $stats['checked']++;

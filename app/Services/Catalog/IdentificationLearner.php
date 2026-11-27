@@ -156,6 +156,9 @@ class IdentificationLearner
                             $hint->status = IdentificationHint::ACTIVE;
                             $promoted++;
                         }
+                        // Счётчик — не правка справочника: updated_at двигает только смена статуса (по нему
+                        // IdentificationCoverageService перепроверяет позиции).
+                        $hint->timestamps = $hint->isDirty('status');
                         $hint->save();
                     }
                 }
