@@ -169,6 +169,20 @@ Schedule::command('identification:learn')
     ->onOneServer()
     ->runInBackground();
 
+// Цели новых вопросов справочника (какие данные вопрос должен дать) — после обучения.
+Schedule::command('identification:goals')
+    ->dailyAt('05:40')
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
+// Что для опознания у непривязанных позиций открытых заявок уже есть — «✓ получено / ❔ нужно» в карточке.
+Schedule::command('identification:assess')
+    ->everyTwoMinutes()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Баланс RouterAI: на нуле все задачи ИИ уходили в OpenAI (18.11 и 23.11.2026) — предупреждаем заранее.
 Schedule::command('llm:routerai-balance')
     ->hourly()

@@ -42,6 +42,9 @@ class IdentificationHints extends Component
 
     public string $hintQuestion = '';
 
+    /** Какие данные вопрос должен дать — по ней проверяется, есть ли ответ у позиции. */
+    public string $hintGoal = '';
+
     /** Тип, в который добавляем вопрос. */
     public ?int $addHintTypeId = null;
 
@@ -175,6 +178,7 @@ class IdentificationHints extends Component
         $this->editHintId = $hint->id;
         $this->hintLabel = $hint->label;
         $this->hintQuestion = $hint->question;
+        $this->hintGoal = (string) $hint->goal;
     }
 
     public function startAddHint(int $typeId): void
@@ -189,12 +193,14 @@ class IdentificationHints extends Component
         $this->validate([
             'hintLabel' => 'required|string|max:120',
             'hintQuestion' => 'required|string|max:1000',
-        ], [], ['hintLabel' => 'название', 'hintQuestion' => 'вопрос клиенту']);
+            'hintGoal' => 'nullable|string|max:300',
+        ], [], ['hintLabel' => 'название', 'hintQuestion' => 'вопрос клиенту', 'hintGoal' => 'цель']);
+        $goal = trim($this->hintGoal) ?: null;
         if ($this->editHintId !== null) {
-            IdentificationHint::query()->whereKey($this->editHintId)->update(['label' => trim($this->hintLabel), 'question' => trim($this->hintQuestion)]);
+            IdentificationHint::query()->whereKey($this->editHintId)->update(['label' => trim($this->hintLabel), 'question' => trim($this->hintQuestion), 'goal' => $goal]);
         } elseif ($this->addHintTypeId !== null && IdentificationPartType::query()->whereKey($this->addHintTypeId)->exists()) {
             IdentificationHint::create([
-                'part_type_id' => $this->addHintTypeId, 'label' => trim($this->hintLabel), 'question' => trim($this->hintQuestion),
+                'part_type_id' => $this->addHintTypeId, 'label' => trim($this->hintLabel), 'question' => trim($this->hintQuestion), 'goal' => $goal,
                 'status' => IdentificationHint::ACTIVE, 'source' => 'manual', 'sort' => 50,
             ]);
         }
@@ -230,7 +236,7 @@ class IdentificationHints extends Component
         $this->resetErrorBag();
         $this->editTypeId = $this->editHintId = null;
         $this->addingType = false;
-        $this->typeName = $this->typePattern = $this->hintLabel = $this->hintQuestion = '';
+        $this->typeName = $this->typePattern = $this->hintLabel = $this->hintQuestion = $this->hintGoal = '';
         if (! $keepAddHint) {
             $this->addHintTypeId = null;
         }

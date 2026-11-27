@@ -241,10 +241,33 @@
                 </div>
             @endforeach
 
-            {{-- Не привязана и вариантов нет — что обычно нужно для опознания детали этого типа (свод уточнений
-                 менеджеров, справочник «Опознание»; фото уже есть — без вопросов про фото). Готовые вопросы — в развёрнутой карточке. --}}
+            {{-- Не привязана и вариантов нет — что нужно для опознания детали этого типа (справочник «Опознание»).
+                 Позиция проверена (IdentificationCoverageService): ✓ что уже есть (из названия, письма, с фото),
+                 ◐ неполно, ❔ нет данных. Не проверена ещё — что обычно нужно. Готовые вопросы — в развёрнутой карточке. --}}
             @php $idHint = ! $ci && $catalogMissing === [] ? app(\App\Services\Catalog\IdentificationHintService::class)->forItem($item) : null; @endphp
-            @if($idHint)
+            @if($idHint && $idHint['checked'])
+                @php
+                    $idSources = ['name' => 'в названии', 'article' => 'артикул', 'photo' => 'с фото', 'letter' => 'из письма'];
+                    $idKnown = array_values(array_filter($idHint['hints'], fn ($h) => $h['status'] === 'known'));
+                    $idPartial = array_values(array_filter($idHint['hints'], fn ($h) => $h['status'] === 'partial'));
+                    $idMissing = array_values(array_filter($idHint['hints'], fn ($h) => $h['status'] === 'missing'));
+                @endphp
+                @if($idKnown !== [])
+                    <div class="text-[11.5px] mt-0.5" style="color:#047857">
+                        @foreach($idKnown as $h)<span title="{{ $h['question'] }}">✓ {{ $h['label'] }}: {{ $h['value'] }}@if(isset($idSources[$h['source']]))<span class="text-fg-3"> ({{ $idSources[$h['source']] }})</span>@endif</span>@if(! $loop->last)<span class="text-fg-4"> · </span>@endif @endforeach
+                    </div>
+                @endif
+                @if($idPartial !== [])
+                    <div class="text-[11.5px] mt-0.5" style="color:#b45309">
+                        @foreach($idPartial as $h)<span title="{{ $h['ask'] ?: $h['question'] }}">◐ Уточнить: {{ $h['label'] }}@if($h['value'])<span class="text-fg-3"> ({{ $h['value'] }})</span>@endif</span>@if(! $loop->last)<span class="text-fg-4"> · </span>@endif @endforeach
+                    </div>
+                @endif
+                @if($idMissing !== [])
+                    <div class="text-[11.5px] text-fg-3 mt-0.5" title="{{ implode("\n", array_column($idMissing, 'question')) }}">
+                        ❔ Нужно для подбора: {{ implode(' · ', array_slice(array_column($idMissing, 'label'), 0, 3)) }}
+                    </div>
+                @endif
+            @elseif($idHint)
                 <div class="text-[11.5px] text-fg-3 mt-0.5"
                      title="{{ implode("\n", array_column($idHint['hints'], 'question')) }}">
                     💡 Для подбора обычно нужно: {{ implode(' · ', array_slice(array_column($idHint['hints'], 'label'), 0, 3)) }}
@@ -662,12 +685,15 @@
             ];
             $itemNameJs = trim((string) ($item->parsed_name ?: 'позиция #' . $item->position));
             $typeHint = app(\App\Services\Catalog\IdentificationHintService::class)->forItem($item);
+            if ($typeHint !== null && \App\Services\Catalog\IdentificationHintService::toAsk($typeHint) === []) {
+                $typeHint = null; // всё нужное для опознания уже есть
+            }
         @endphp
         {{-- Готовые вопросы по типу детали — что менеджеры спрашивают чаще всего (свод писем-уточнений). --}}
         @if($typeHint)
             <div class="px-[18px] py-2 bg-surface border-t border-border-subtle flex items-center gap-1.5 flex-wrap">
                 <span class="text-[10.5px] uppercase tracking-wider text-fg-3 font-semibold mr-1">Для «{{ $typeHint['name'] }}»:</span>
-                @foreach($typeHint['hints'] as $h)
+                @foreach(\App\Services\Catalog\IdentificationHintService::toAsk($typeHint) as $h)
                     <button type="button"
                             wire:click="$dispatch('clarification-add-slot-question', { itemId: {{ $item->id }}, slotKey: 'type:{{ $typeHint['key'] }}:{{ $loop->index }}', slotLabel: @js($h['label']), template: @js($h['question']), itemName: @js($itemNameJs) })"
                             class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-[11px] transition-colors"

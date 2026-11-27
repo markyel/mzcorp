@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\Schema;
  */
 class IdentificationHintService
 {
-    private const CACHE_KEY = 'identification:types:v1';
+    private const CACHE_KEY = 'identification:types:v2';
 
     /**
      * @return array{key: string, name: string, hints: list<array{label: string, question: string}>}|null
@@ -30,31 +30,52 @@ class IdentificationHintService
     }
 
     /**
-     * Подсказка для позиции заявки: фото у позиции уже есть — вопросы «пришлите фото…» не предлагаем
-     * (MZ2026-03413: «Фото маркировки» при фото датчика с маркировкой). Других вопросов нет — подсказки нет.
+     * Подсказка для позиции заявки. Позиция проверена (IdentificationCoverageService) — по каждому вопросу
+     * отметка: known (данные уже есть: в названии, тексте клиента, прочитаны с фото), partial (неполно —
+     * спросить ask), missing. Не проверена ещё — вопросы типа без отметок (status null).
      *
-     * @return array{key: string, name: string, hints: list<array{label: string, question: string}>}|null
+     * @return array{key: string, name: string, checked: bool, hints: list<array{label: string, question: string, status: ?string, value: ?string, source: ?string, ask: ?string}>}|null
      */
     public function forItem(RequestItem $item): ?array
     {
-        $type = $this->forName($item->parsed_name);
+        $cov = $item->identification_coverage;
+        if (is_array($cov) && array_key_exists('type', $cov)) {
+            if (empty($cov['type']['key'])) {
+                return null;
+            }
 
-        return $type === null ? null : self::withoutPhotoHints($type, $item->image_attachment_id !== null);
+            return ['key' => (string) $cov['type']['key'], 'name' => (string) $cov['type']['name'], 'checked' => true, 'hints' => array_values((array) ($cov['hints'] ?? []))];
+        }
+        $type = $this->forName($item->parsed_name);
+        if ($type === null) {
+            return null;
+        }
+
+        return ['key' => $type['key'], 'name' => $type['name'], 'checked' => false, 'hints' => array_map(
+            fn ($h) => ['label' => $h['label'], 'question' => $h['question'], 'status' => null, 'value' => null, 'source' => null, 'ask' => null],
+            $type['hints'],
+        )];
     }
 
     /**
-     * @param  array{key: string, name: string, hints: list<array{label: string, question: string}>}  $type
-     * @return array{key: string, name: string, hints: list<array{label: string, question: string}>}|null
+     * Что спросить у клиента: всё, кроме полученного; неполное — уточняющим вопросом.
+     *
+     * @param  array{hints: list<array<string, mixed>>}  $forItem
+     * @return list<array{label: string, question: string}>
      */
-    public static function withoutPhotoHints(array $type, bool $hasPhoto): ?array
+    public static function toAsk(array $forItem): array
     {
-        if ($hasPhoto) {
-            $type['hints'] = array_values(array_filter($type['hints'], fn ($h) => mb_stripos($h['label'], 'фото') === false));
+        $out = [];
+        foreach ($forItem['hints'] as $h) {
+            if (($h['status'] ?? null) === 'known') {
+                continue;
+            }
+            $ask = ($h['status'] ?? null) === 'partial' && trim((string) ($h['ask'] ?? '')) !== '' ? (string) $h['ask'] : (string) $h['question'];
+            $out[] = ['label' => (string) $h['label'], 'question' => $ask];
         }
 
-        return $type['hints'] === [] ? null : $type;
+        return $out;
     }
-
     /**
      * Тип по названию среди переданных типов (без базы — для тестов и разбора писем).
      *
@@ -102,7 +123,7 @@ class IdentificationHintService
                     ->get()
                     ->map(fn (IdentificationPartType $t) => [
                         'id' => $t->id, 'key' => $t->key, 'name' => $t->name, 'pattern' => $t->pattern,
-                        'hints' => $t->hints->map(fn (IdentificationHint $h) => ['label' => $h->label, 'question' => $h->question])->values()->all(),
+                        'hints' => $t->hints->map(fn (IdentificationHint $h) => ['id' => $h->id, 'label' => $h->label, 'question' => $h->question, 'goal' => $h->goal])->values()->all(),
                     ])
                     ->filter(fn ($t) => $t['hints'] !== [])
                     ->values()->all();

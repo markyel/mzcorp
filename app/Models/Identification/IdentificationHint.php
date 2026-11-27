@@ -17,7 +17,7 @@ class IdentificationHint extends Model
 
     public const DISABLED = 'disabled';
 
-    protected $fillable = ['part_type_id', 'label', 'question', 'status', 'source', 'asked_count', 'last_asked_at', 'sort'];
+    protected $fillable = ['part_type_id', 'label', 'question', 'goal', 'status', 'source', 'asked_count', 'last_asked_at', 'sort'];
 
     protected $casts = ['asked_count' => 'integer', 'sort' => 'integer', 'last_asked_at' => 'datetime'];
 

@@ -103,6 +103,8 @@ class RequestItem extends Model
             'quote_price_ready_at' => 'datetime',
             'quote_deferred_at' => 'datetime',
             'quality_assessment_payload' => 'array',
+            // Что для опознания детали уже есть (IdentificationCoverageService).
+            'identification_coverage' => 'array',
             'suggestion_confidence' => 'float',
             'suggestion_source_email_id' => 'integer',
             'source_email_message_id' => 'integer',

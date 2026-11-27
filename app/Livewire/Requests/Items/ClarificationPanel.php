@@ -169,7 +169,11 @@ class ClarificationPanel extends Component
             if ($hint === null) {
                 continue;
             }
-            foreach (array_slice($hint['hints'], 0, 2) as $i => $h) {
+            $toAsk = \App\Services\Catalog\IdentificationHintService::toAsk($hint);
+            if ($toAsk === []) {
+                continue; // всё нужное для опознания уже есть
+            }
+            foreach (array_slice($toAsk, 0, 2) as $i => $h) {
                 $this->addSlotQuestion($item->id, 'type:'.$hint['key'].':'.$i, $h['label'], $h['question']);
             }
             $added++;

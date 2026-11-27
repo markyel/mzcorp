@@ -85,10 +85,12 @@ class IdentificationLearner
 
         // Тип детали у каждой позиции — и известные вопросы по этим типам для модели.
         $itemType = [];
+        $itemNames = [];
         $lines = [];
         foreach ($items->values() as $k => $it) {
             $t = IdentificationHintService::typeOf((string) $it->parsed_name, $typeRows);
             $itemType[$k + 1] = $t ? $types->firstWhere('key', $t['key']) : null;
+            $itemNames[$k + 1] = (string) $it->parsed_name;
             $lines[] = ($k + 1).') '.trim($it->parsed_name.($it->parsed_brand ? ' · '.$it->parsed_brand : '').($it->parsed_article ? ' · арт. '.$it->parsed_article : ''));
         }
         // Весь справочник, не только типы позиций: деталь, не узнанная по позиции, иначе плодит дубли
@@ -96,7 +98,7 @@ class IdentificationLearner
         $known = [];
         foreach ($types->where('is_active', true) as $t) {
             foreach ($t->hints as $h) {
-                $known[] = $h->id.': ['.$t->name.'] '.$h->label;
+                $known[] = $h->id.': ['.$t->name.'] '.$h->label.($h->goal ? ' — цель: '.$h->goal : '');
             }
         }
 
@@ -109,14 +111,14 @@ class IdentificationLearner
         $r = $this->chat->chat([
             ['role' => 'system', 'content' => self::prompt()],
             ['role' => 'user', 'content' => "ПОЗИЦИИ ЗАЯВКИ:\n".($lines ? implode("\n", $lines) : '(нет)')
-                ."\n\nИЗВЕСТНЫЕ ВОПРОСЫ (id: [тип] название):\n".($known ? implode("\n", $known) : '(нет)')
+                ."\n\nИЗВЕСТНЫЕ ВОПРОСЫ (id: [тип] название — цель):\n".($known ? implode("\n", $known) : '(нет)')
                 ."\n\nПИСЬМО МЕНЕДЖЕРА:\n".mb_substr($text, 0, 2500)],
         ], 'gpt-4o-mini', ['response_format' => ['type' => 'json_object'], 'temperature' => 0, 'max_tokens' => 2500]);
         $questions = (array) (json_decode((string) ($r['content'] ?? ''), true)['questions'] ?? []);
 
         $promoted = 0;
         $counted = [];
-        DB::transaction(function () use ($questions, $m, $requestId, $itemType, $types, &$promoted, &$counted) {
+        DB::transaction(function () use ($questions, $m, $requestId, $itemType, $itemNames, $types, &$promoted, &$counted) {
             if ($questions === []) {
                 IdentificationObservation::create(['email_message_id' => $m->id, 'request_id' => $requestId, 'purpose' => 'none']);
 
@@ -132,21 +134,19 @@ class IdentificationLearner
                 $hint = null;
                 if ($purpose === 'identify') {
                     $pos = is_numeric($q['position'] ?? null) ? (int) $q['position'] : null;
-                    $type = $pos !== null ? ($itemType[$pos] ?? null) : null;
+                    $type = self::questionType($rawType, $pos !== null ? ($itemType[$pos] ?? null) : null, $pos !== null ? ($itemNames[$pos] ?? null) : null, $types);
                     $knownId = is_numeric($q['known_id'] ?? null) ? (int) $q['known_id'] : null;
                     if ($knownId !== null) {
                         $hint = IdentificationHint::query()->find($knownId);
-                        $type ??= $hint?->partType;
-                        if ($hint !== null && $type !== null && $hint->part_type_id !== $type->id) {
+                        if ($type === null && $rawType === '') {
+                            $type = $hint?->partType;
+                        }
+                        if ($hint !== null && ($type === null || $hint->part_type_id !== $type->id)) {
                             $hint = null; // узнанный вопрос — от другого типа: не смешиваем
                         }
                     }
-                    if ($type === null && $rawType !== '') {
-                        $t = IdentificationHintService::typeOf($rawType, $types->map(fn ($t) => ['key' => $t->key, 'name' => $t->name, 'pattern' => $t->pattern, 'hints' => []])->all());
-                        $type = $t ? $types->firstWhere('key', $t['key']) : null;
-                    }
                     if ($type !== null && $hint === null) {
-                        $hint = $this->candidateHint($type, (string) ($q['label'] ?? $q['attribute'] ?? ''), (string) ($q['client_question'] ?? $q['question'] ?? ''));
+                        $hint = $this->candidateHint($type, (string) ($q['label'] ?? $q['attribute'] ?? ''), (string) ($q['client_question'] ?? $q['question'] ?? ''), (string) ($q['goal'] ?? ''));
                     }
                     if ($hint !== null && ! isset($counted[$hint->id])) {
                         $counted[$hint->id] = true;
@@ -173,8 +173,33 @@ class IdentificationLearner
         return ['questions' => count($questions), 'promoted' => $promoted];
     }
 
+    /**
+     * О какой детали вопрос: тип по словам модели («замок двери» — замок, даже если вопрос к позиции «ролик»);
+     * не узнан — тип позиции, только если это та же деталь (слово модели есть в названии позиции или модель
+     * назвала деталь общим словом). Иначе — неизвестная деталь (кандидат в новые типы).
+     */
+    public static function questionType(string $rawType, ?IdentificationPartType $posType, ?string $posName, \Illuminate\Support\Collection $types): ?IdentificationPartType
+    {
+        $raw = mb_strtolower(trim($rawType));
+        if ($raw !== '') {
+            $t = IdentificationHintService::typeOf($raw, $types->map(fn ($t) => ['key' => $t->key, 'name' => $t->name, 'pattern' => $t->pattern, 'hints' => []])->all());
+            if ($t !== null) {
+                return $types->firstWhere('key', $t['key']);
+            }
+        }
+        if ($posType === null) {
+            return null;
+        }
+        if ($raw === '' || in_array($raw, self::GENERIC_TYPES, true)) {
+            return $posType;
+        }
+        $head = (string) (preg_split('/[\s\/,]+/u', $raw)[0] ?? '');
+        $stem = mb_substr($head, 0, max(4, min(6, mb_strlen($head) - 1)));
+
+        return $stem !== '' && mb_strlen($head) >= 3 && str_contains(mb_strtolower((string) $posName), $stem) ? $posType : null;
+    }
     /** Новый вопрос типа — кандидат; повтор того же названия — тот же кандидат. */
-    private function candidateHint(IdentificationPartType $type, string $label, string $question): ?IdentificationHint
+    private function candidateHint(IdentificationPartType $type, string $label, string $question, string $goal = ''): ?IdentificationHint
     {
         $label = mb_substr(trim($label), 0, 120);
         $question = trim($question);
@@ -185,7 +210,7 @@ class IdentificationLearner
 
         return $same ?? IdentificationHint::create([
             'part_type_id' => $type->id, 'label' => mb_strtoupper(mb_substr($label, 0, 1)).mb_substr($label, 1),
-            'question' => $question, 'status' => IdentificationHint::CANDIDATE, 'source' => 'auto', 'asked_count' => 0, 'sort' => 500,
+            'question' => $question, 'goal' => trim($goal) ?: null, 'status' => IdentificationHint::CANDIDATE, 'source' => 'auto', 'asked_count' => 0, 'sort' => 500,
         ]);
     }
 
@@ -236,20 +261,24 @@ class IdentificationLearner
 
 Выдели ВСЕ вопросы и просьбы менеджера. Для каждого:
 - position: номер позиции из списка, к которой вопрос (или null — ко всей заявке / непонятно);
-- part_type: что за деталь, обобщённо, в именительном падеже (кнопка, плата управления, ролик, цепь привода…);
+- part_type: о какой детали ВОПРОС, обобщённо, в именительном падеже (кнопка, плата управления, ролик, замок
+  двери…) — не обязательно позиция заявки: в заявке ролик, а спросили про замок — «замок двери»;
 - purpose: identify — чтобы ОПОЗНАТЬ, какая именно деталь нужна (модель, размер, исполнение, фото, шильдик,
   маркировка, модель лифта, сторона, символ…); commercial — сроки, количество, цена, оплата, доставка, реквизиты,
-  выбор аналога/оригинала; other — прочее;
+  выбор аналога/оригинала; other — прочее, в том числе подтверждение конкретной догадки менеджера («этот шкив
+  видимо?», «вам нужен вот этот артикул?», «подтвердите, что нужна X») — это не вопрос для опознания;
 - attribute: что спрашивают — коротко (символ на кнопке, длина, напряжение катушки, фото шильдика, марка лифта…);
 - question: формулировка менеджера коротко;
-- known_id: id ИЗВЕСТНОГО ВОПРОСА того же типа детали про тот же признак, даже если спрошено другими словами
+- known_id: id ИЗВЕСТНОГО ВОПРОСА того же типа детали про те же данные (сверяй по цели), даже если спрошено другими словами
   или уже («диаметр каната» → «Диаметр и конструкция», «точная длина троса» → «Длина / нарезка», «фото
   шильдика» → «Фото таблички»); новый признак, которого в списке нет, — null;
 - label: если known_id = null — короткое название вопроса, 2–4 слова (как «Фото таблички», «Напряжение катушки»);
 - client_question: если known_id = null — вежливая формулировка для клиента в общем виде, без имён, номеров
-  позиций и деталей этой заявки («Пришлите, пожалуйста, фото таблички с двигателя.»).
+  позиций и деталей этой заявки («Пришлите, пожалуйста, фото таблички с двигателя.»);
+- goal: если known_id = null — какие ДАННЫЕ вопрос должен дать, коротко («модель и маркировка с таблички двигателя»;
+  у вопроса про фото — что с фото нужно прочитать или увидеть).
 Ответ строго JSON: {"questions": [{"position": 1, "part_type": "...", "purpose": "identify", "attribute": "...",
-"question": "...", "known_id": 12, "label": null, "client_question": null}]}. Вопросов нет — {"questions": []}.
+"question": "...", "known_id": 12, "label": null, "client_question": null, "goal": null}]}. Вопросов нет — {"questions": []}.
 P;
     }
 }

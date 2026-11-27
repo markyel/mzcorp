@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Catalog;
 
+use App\Services\Catalog\IdentificationCoverageService;
 use App\Services\Catalog\IdentificationHintService;
 use Tests\TestCase;
 
@@ -45,15 +46,32 @@ class IdentificationHintServiceTest extends TestCase
         $this->assertSame('Какая цепь и где стоит', $hint['hints'][0]['label']);
     }
 
-    public function test_photo_questions_are_dropped_when_the_item_has_a_photo(): void
+    public function test_only_what_is_not_known_is_asked_and_partial_as_a_confirmation(): void
     {
-        $type = ['key' => 'sensor', 'name' => 'датчик', 'hints' => [
-            ['label' => 'Фото маркировки', 'question' => 'Пришлите фото маркировки.'],
-            ['label' => 'Где применяется', 'question' => 'Где стоит датчик?'],
-        ]];
-        $this->assertSame(['Где применяется'], array_column(IdentificationHintService::withoutPhotoHints($type, true)['hints'], 'label'));
-        $this->assertCount(2, IdentificationHintService::withoutPhotoHints($type, false)['hints']);
-        $this->assertNull(IdentificationHintService::withoutPhotoHints(['key' => 'x', 'name' => 'x', 'hints' => [['label' => 'Фото таблички', 'question' => '…']]], true));
+        $hints = [
+            ['id' => 1, 'label' => 'Фото маркировки', 'question' => 'Пришлите фото маркировки.'],
+            ['id' => 2, 'label' => 'Где применяется', 'question' => 'Где стоит датчик?'],
+            ['id' => 3, 'label' => 'Напряжение', 'question' => 'Какое напряжение?'],
+        ];
+        $merged = IdentificationCoverageService::merge($hints, [
+            1 => ['status' => 'known', 'value' => 'YG-30s', 'source' => 'photo'],
+            2 => ['status' => 'missing'],
+            3 => ['status' => 'partial', 'value' => '250V?', 'source' => 'photo', 'ask' => 'Подтвердите напряжение 250 В.'],
+        ]);
+        $this->assertSame(['known', 'missing', 'partial'], array_column($merged, 'status'));
+        $this->assertSame('YG-30s', $merged[0]['value']);
+
+        $ask = IdentificationHintService::toAsk(['hints' => $merged]);
+        $this->assertSame(['Где применяется', 'Напряжение'], array_column($ask, 'label'));
+        $this->assertSame('Подтвердите напряжение 250 В.', $ask[1]['question']);
+    }
+
+    public function test_unclear_answers_do_not_hide_a_question(): void
+    {
+        $hints = [['label' => 'Фото маркировки', 'question' => 'Пришлите фото маркировки.'], ['label' => 'Сторона', 'question' => 'Левая или правая?']];
+        $merged = IdentificationCoverageService::merge($hints, [1 => ['status' => 'known', 'value' => ''], 2 => ['status' => 'maybe']]);
+        $this->assertSame(['partial', 'missing'], array_column($merged, 'status'));
+        $this->assertCount(2, IdentificationHintService::toAsk(['hints' => $merged]));
     }
 
     public function test_a_broken_pattern_is_skipped_not_fatal(): void

@@ -12,7 +12,7 @@
         и в «Типовых вопросах» уточнения. Справочник пополняется сам по письмам-уточнениям менеджеров
         (разобрано писем: {{ $this->counts['letters'] }}): вопрос, заданный в {{ \App\Services\Catalog\IdentificationLearner::PROMOTE_AFTER }} разных письмах,
         становится подсказкой; новый тип детали ждёт подтверждения здесь — правило распознавания для него составлено автоматически.
-        Чаще задаваемые вопросы — первыми.
+        Чаще задаваемые вопросы — первыми. 🎯 Цель — какие данные вопрос должен дать: по ней видно, есть ли ответ у позиции уже (фото с читаемой маркировкой — есть, фото без неё — неполно).
     </p>
 
     <div class="flex items-center gap-3 mb-3 flex-wrap">
@@ -91,6 +91,8 @@
                                     @error('hintLabel')<div class="text-[11px]" style="color:#b91c1c;">{{ $message }}</div>@enderror
                                     <textarea wire:model="hintQuestion" rows="2" class="w-full px-2 py-1 border border-border rounded-md bg-surface text-[12.5px]" placeholder="Вопрос клиенту"></textarea>
                                     @error('hintQuestion')<div class="text-[11px]" style="color:#b91c1c;">{{ $message }}</div>@enderror
+                                    <input type="text" wire:model="hintGoal" class="w-full h-[30px] px-2 border border-border rounded-md bg-surface text-[12.5px] mt-1" placeholder="Цель — какие данные нужны: «модель и маркировка с корпуса»">
+                                    @error('hintGoal')<div class="text-[11px]" style="color:#b91c1c;">{{ $message }}</div>@enderror
                                     <div class="flex gap-2 mt-1">
                                         <button type="button" wire:click="saveHint" class="btn btn-sm btn-primary">Сохранить</button>
                                         <button type="button" wire:click="cancel" class="btn btn-sm">Отмена</button>
@@ -107,6 +109,7 @@
                                 </td>
                                 <td class="px-3 py-2 text-fg-2">
                                     {{ $hint->question }}
+                                    <div class="text-[11px] mt-0.5" style="color:#0369a1">🎯 {{ $hint->goal ?: 'цель не задана' }}</div>
                                     @foreach($this->examples[$hint->id] ?? [] as $ex)
                                         <div class="text-[11px] text-fg-3 mt-0.5">
                                             «{{ \Illuminate\Support\Str::limit($ex->question, 110) }}»
@@ -138,6 +141,8 @@
                                 @error('hintLabel')<div class="text-[11px]" style="color:#b91c1c;">{{ $message }}</div>@enderror
                                 <textarea wire:model="hintQuestion" rows="2" class="w-full px-2 py-1 border border-border rounded-md bg-surface text-[12.5px]" placeholder="Вопрос клиенту: «Пришлите, пожалуйста, фото таблички…»"></textarea>
                                 @error('hintQuestion')<div class="text-[11px]" style="color:#b91c1c;">{{ $message }}</div>@enderror
+                                <input type="text" wire:model="hintGoal" class="w-full h-[30px] px-2 border border-border rounded-md bg-surface text-[12.5px] mt-1" placeholder="Цель — какие данные нужны: «модель и маркировка с корпуса»">
+                                @error('hintGoal')<div class="text-[11px]" style="color:#b91c1c;">{{ $message }}</div>@enderror
                                 <div class="flex gap-2 mt-1">
                                     <button type="button" wire:click="saveHint" class="btn btn-sm btn-primary">Добавить</button>
                                     <button type="button" wire:click="cancel" class="btn btn-sm">Отмена</button>
