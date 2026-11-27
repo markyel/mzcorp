@@ -1271,7 +1271,9 @@ class CatalogEmbeddingService
         $topN = (int) app_setting('catalog.name_match.rerank_top_n', 10);
         $topN = max(1, min(15, $topN));
 
-        $allCandidates = $this->topNByQueryText($queryText, $topN, $item->id, $item->parsed_name);
+        $allCandidates = $this->withClientPhraseCandidates(
+            $item, $queryText, $this->topNByQueryText($queryText, $topN, $item->id, $item->parsed_name),
+        );
         if ($allCandidates === []) {
             return null;
         }
@@ -1431,6 +1433,63 @@ class CatalogEmbeddingService
         return $this->buildMatchResult(
             $chosen, llmValidation: 'approved_rerank', llmReason: $rerank['reason'],
         );
+    }
+
+    /**
+     * Добавить кандидатов из прошлых формулировок клиентов (catalog_client_phrases): клиент пишет деталь своими
+     * словами, и карточка, которую по такой же формулировке уже выдавали, находится, даже если название в 1С
+     * другое. Похожесть формулировки — similarity кандидата (уже найденному — берём большую). Порядок — по
+     * убыванию similarity; у добавленных нет vector_score, поэтому «уверенный лидер без модели» на них не
+     * срабатывает — их всегда проверяет модель.
+     *
+     * @param  list<array<string, mixed>>  $candidates
+     * @return list<array<string, mixed>>
+     */
+    private function withClientPhraseCandidates(RequestItem $item, string $queryText, array $candidates): array
+    {
+        if (! (bool) app_setting('catalog.name_match.client_phrases_enabled', config('services.catalog_name_match.client_phrases_enabled', true))) {
+            return $candidates;
+        }
+        try {
+            $vector = $this->embedQueryToVectorLiteral($queryText, $item->id);
+            if ($vector === null) {
+                return $candidates;
+            }
+            $near = app(CatalogClientPhraseService::class)->nearestCatalogs(
+                $vector,
+                $item->request_id,
+                (float) config('services.catalog_name_match.client_phrases_min_similarity', 0.80),
+                (int) config('services.catalog_name_match.client_phrases_limit', 5),
+            );
+        } catch (\Throwable $e) {
+            Log::warning('CatalogEmbeddingService: client phrases lookup failed (non-fatal)', ['request_item_id' => $item->id, 'error' => $e->getMessage()]);
+
+            return $candidates;
+        }
+        if ($near === []) {
+            return $candidates;
+        }
+
+        $byId = [];
+        foreach ($candidates as $c) {
+            $byId[(int) $c['catalog']->id] = $c;
+        }
+        foreach ($near as $catalogId => $hit) {
+            if (isset($byId[$catalogId])) {
+                $byId[$catalogId]['client_phrase_score'] = $hit['sim'];
+                $byId[$catalogId]['similarity'] = max((float) $byId[$catalogId]['similarity'], $hit['sim']);
+
+                continue;
+            }
+            $catalog = CatalogItem::query()->where('is_active', true)->find($catalogId);
+            if ($catalog !== null) {
+                $byId[$catalogId] = ['catalog' => $catalog, 'similarity' => $hit['sim'], 'method' => 'client_phrase', 'client_phrase_score' => $hit['sim']];
+            }
+        }
+        $merged = array_values($byId);
+        usort($merged, fn ($a, $b) => (float) $b['similarity'] <=> (float) $a['similarity']);
+
+        return $merged;
     }
 
     /**
@@ -1638,6 +1697,19 @@ class CatalogEmbeddingService
                 // от таксономии). Для LLM-сверки класса детали.
                 'category' => $cat->part_type,
             ];
+        }
+        // Как клиенты называли кандидатов — подсказка модели, не доказательство (catalog_client_phrases).
+        if ((bool) app_setting('catalog.name_match.rerank_client_examples', config('services.catalog_name_match.rerank_client_examples', true))) {
+            try {
+                $examples = app(CatalogClientPhraseService::class)->examples(
+                    array_map(fn ($c) => (int) $c['catalog']->id, $candidates), $item->request_id,
+                );
+                foreach ($candidates as $i => $c) {
+                    $payload[$i]['client_examples'] = $examples[(int) $c['catalog']->id] ?? [];
+                }
+            } catch (\Throwable $e) {
+                Log::warning('CatalogEmbeddingService: client examples failed (non-fatal)', ['request_item_id' => $item->id, 'error' => $e->getMessage()]);
+            }
         }
 
         // Модель rerank-stage можно переключать через AppSetting — для

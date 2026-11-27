@@ -155,6 +155,13 @@ Schedule::command('llm:probe-routes')
     ->onOneServer()
     ->runInBackground();
 
+// Формулировки клиентов к карточкам каталога (подбор по названию): новые подтверждённые позиции — в словарь.
+Schedule::command('catalog:client-phrases-sync')
+    ->hourly()
+    ->withoutOverlapping()
+    ->onOneServer()
+    ->runInBackground();
+
 // Баланс RouterAI: на нуле все задачи ИИ уходили в OpenAI (18.11 и 23.11.2026) — предупреждаем заранее.
 Schedule::command('llm:routerai-balance')
     ->hourly()

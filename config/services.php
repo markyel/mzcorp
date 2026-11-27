@@ -451,6 +451,15 @@ return [
         // встречается в названии — бренд лифта/дистрибьютора, не производитель
         // детали). Деталь матчится по имени+спеке.
         'brand_relevance_gate' => (bool) env('CATALOG_NAME_MATCH_BRAND_RELEVANCE_GATE', false),
+        // Кандидаты из прошлых формулировок клиентов (catalog_client_phrases): до N карточек, чья
+        // подтверждённая формулировка похожа на запрос не меньше порога. Проверка 27.11.2026: верных 9 → 21.
+        'client_phrases_enabled' => (bool) env('CATALOG_NAME_MATCH_CLIENT_PHRASES', true),
+        'client_phrases_min_similarity' => (float) env('CATALOG_NAME_MATCH_CLIENT_PHRASES_MIN_SIM', 0.80),
+        'client_phrases_limit' => (int) env('CATALOG_NAME_MATCH_CLIENT_PHRASES_LIMIT', 5),
+        // Модели-реранку у каждого кандидата — до 3 формулировок клиентов, по которым его уже выдавали.
+        'rerank_client_examples' => (bool) env('CATALOG_NAME_MATCH_RERANK_CLIENT_EXAMPLES', true),
+        // Только для проверки на истории (catalog:name-match-eval): формулировки с request_item_id < N.
+        'phrases_before_item_id' => null,
     ],
 
     /*
