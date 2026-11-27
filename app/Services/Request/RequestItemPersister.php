@@ -237,11 +237,24 @@ class RequestItemPersister
             if ($mergedFrom !== null) {
                 $this->appendParsingMetaDedup($existing, $createdItem->position, $mergedFrom);
             }
-            $createdItems[] = $createdItem;
+            $createdItems[] = [$createdItem, (array) ($item['email_attachment_ids'] ?? [])];
         }
 
-        if (! $isReplyContext && count($createdItems) === 1) {
-            $this->bindLetterPhotos($createdItems[0], $message);
+        // Фото позиции: все, что разбор отнёс к ней (ракурсы, замеры, шильдик); не отнёс, а позиция в письме
+        // одна — все фото письма.
+        // Позиции, которые различаются только стороной/положением (гребёнка левая / правая / центральная):
+        // по фото их не различить (MZ2026-03383: все 6 фото ушли к центральной) — только главное фото.
+        $variantCounts = array_count_values(array_map(fn ($c) => self::withoutSide((string) $c[0]->parsed_name), $createdItems));
+        foreach ($createdItems as [$createdItem, $photoIds]) {
+            if (($variantCounts[self::withoutSide((string) $createdItem->parsed_name)] ?? 0) > 1) {
+                continue;
+            }
+            if (count($photoIds) >= 2) {
+                $this->bindPhotos($createdItem, $photoIds);
+            } elseif (! $isReplyContext && count($createdItems) === 1) {
+                $this->bindPhotos($createdItem, \App\Models\EmailAttachment::query()->where('email_message_id', $message->id)
+                    ->bindablePhotos()->orderBy('id')->pluck('id')->map(fn ($v) => (int) $v)->all());
+            }
         }
 
         // Audit для reply-парсинга: state_change с подсчётами, чтобы менеджер
@@ -570,15 +583,19 @@ class RequestItemPersister
      * входе парсера. Общий фильтр в {@see \App\Support\HouseBrand}.
      */
     /**
-     * Одна позиция в заявке, фото в письме несколько — все они про неё (MZ2026-03414: ролик снят с торца
-     * и четырежды со штангенциркулем, а привязалось одно фото — замеры в подсказках не видны). Главное —
-     * выбранное разбором, иначе первое.
+     * Привязать к позиции несколько фото (MZ2026-03414: ролик снят с торца и четырежды со штангенциркулем, а
+     * привязалось одно фото — замеры в подсказках не видны). Только фото писем этой заявки; главное — выбранное
+     * разбором, иначе первое. Уже привязанные вручную не трогаем.
+     *
+     * @param  list<int>  $ids
      */
-    private function bindLetterPhotos(RequestItem $item, EmailMessage $message): void
+    private function bindPhotos(RequestItem $item, array $ids): void
     {
         try {
-            $ids = \App\Models\EmailAttachment::query()->where('email_message_id', $message->id)->bindablePhotos()
-                ->orderBy('id')->pluck('id')->map(fn ($v) => (int) $v)->all();
+            $messageIds = $item->request?->photoSourceMessageIds() ?? [];
+            $valid = $messageIds === [] ? [] : \App\Models\EmailAttachment::query()->whereIn('email_message_id', $messageIds)
+                ->bindablePhotos()->whereIn('id', $ids)->pluck('id')->map(fn ($v) => (int) $v)->all();
+            $ids = array_values(array_filter(array_unique(array_map('intval', $ids)), fn ($id) => in_array($id, $valid, true)));
             if (count($ids) < 2 || $item->photos()->exists()) {
                 return;
             }
@@ -592,10 +609,17 @@ class RequestItemPersister
                 $item->update(['image_attachment_id' => $main]);
             }
         } catch (\Throwable $e) {
-            Log::warning('RequestItemPersister: binding letter photos failed', ['request_item_id' => $item->id, 'error' => $e->getMessage()]);
+            Log::warning('RequestItemPersister: binding item photos failed', ['request_item_id' => $item->id, 'error' => $e->getMessage()]);
         }
     }
+    /** Название без слов стороны и положения: «Гребенка левая» и «Гребенка правая» — одна деталь в вариантах. */
+    public static function withoutSide(string $name): string
+    {
+        $name = mb_strtolower($name);
+        $name = (string) preg_replace('/(?<!\p{L})(?:лев|прав|центральн|средн|верхн|нижн|передн|задн|внутренн|наружн)\p{L}*/u', '', $name);
 
+        return trim((string) preg_replace('/\s+/u', ' ', $name));
+    }
     private function sanitizeParsedBrand(?string $brand): ?string
     {
         return \App\Support\HouseBrand::filter($brand);

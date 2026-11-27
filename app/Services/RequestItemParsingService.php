@@ -690,7 +690,50 @@ class RequestItemParsingService
             'email_attachment_id' => isset($item['email_attachment_id']) && is_int($item['email_attachment_id'])
                 ? $item['email_attachment_id']
                 : null,
+            // Все фото позиции (ракурсы, замеры, шильдик), главное первым — RequestItemPersister привяжет их.
+            'email_attachment_ids' => self::photoIds($item),
         ];
+    }
+
+    /**
+     * Фото позиции: главное первым, затем остальные (из image_indexes) — без повторов. Несколько позиций-
+     * источников (дедуп, сведение) — фото всех.
+     *
+     * @param  array<string, mixed>  ...$items
+     * @return list<int>
+     */
+    public static function photoIds(array ...$items): array
+    {
+        $ids = [];
+        foreach ($items as $item) {
+            foreach (array_merge([$item['email_attachment_id'] ?? null], (array) ($item['email_attachment_ids'] ?? [])) as $id) {
+                if (is_int($id) && $id > 0 && ! in_array($id, $ids, true)) {
+                    $ids[] = $id;
+                }
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
+     * image_index (главное) + image_indexes (все фото позиции) → id вложений, главное первым.
+     *
+     * @param  array<string, mixed>  $item
+     * @param  list<int|null>  $attachmentIds
+     * @return array{0: ?int, 1: list<int>}
+     */
+    public static function photoAttachments(array $item, array $attachmentIds): array
+    {
+        $at = fn ($idx) => is_int($idx) && $idx >= 0 && $idx < count($attachmentIds) ? ($attachmentIds[$idx] ?? null) : null;
+        $main = $at($item['image_index'] ?? null);
+        $all = array_map($at, array_merge([$item['image_index'] ?? null], array_values((array) ($item['image_indexes'] ?? []))));
+        $all = array_values(array_unique(array_filter($all, fn ($id) => is_int($id))));
+        if ($main === null && $all !== []) {
+            $main = $all[0]; // главное не названо, а фото позиции есть — первое из них
+        }
+
+        return [$main, $all];
     }
 
     /**
@@ -1846,6 +1889,8 @@ PROMPT;
                         }
                     }
                 }
+                // Все фото сведённых кандидатов — к позиции.
+                $row['email_attachment_ids'] = self::photoIds(...array_values(array_map(fn ($si) => $candidates[$si], array_filter(is_array($srcIdx) ? $srcIdx : [], fn ($si) => is_int($si) && isset($candidates[$si])))));
                 $normalized = $this->normalizeParsedItem($row);
                 if ($normalized !== null) {
                     $consolidated[] = $normalized;
@@ -1967,12 +2012,7 @@ PROMPT;
                 }
                 // image_index → email_attachments.id (та же логика, что в
                 // parseItemsFromPhotoMarkings).
-                $idx = $item['image_index'] ?? null;
-                $attId = null;
-                if (is_int($idx) && $idx >= 0 && $idx < count($attachmentIds)) {
-                    $attId = $attachmentIds[$idx] ?? null;
-                }
-                $normalized['email_attachment_id'] = $attId;
+                [$normalized['email_attachment_id'], $normalized['email_attachment_ids']] = self::photoAttachments($item, $attachmentIds);
 
                 return $normalized;
             }, self::splitMultiArticleItems($items)),
@@ -2250,7 +2290,14 @@ PROMPT;
             . "   а не повторяй общий план.\n"
             . "4) **Лучше null, чем угадывать.** Если для позиции НЕТ фото, где этот\n"
             . "   товар главный объект, или вообще нет подходящего фото — `image_index: null`.\n"
-            . "   Неверная привязка хуже отсутствия привязки.\n\n";
+            . "   Неверная привязка хуже отсутствия привязки.\n"
+            . "5) **`image_indexes`** — ВСЕ фото, где эта деталь — главный объект: другие\n"
+            . "   ракурсы, замеры, шильдик, деталь в узле (включая image_index). Те же\n"
+            . "   правила: общий план, где деталь лишь видна, и фото другой позиции — не её.\n"
+            . "   Похожие позиции (левая / правая / центральная, верхняя / нижняя): фото,\n"
+            . "   по которому не понять, какая это из них, — ни к одной в image_indexes.\n"
+            . "   Разные детали одного типа (два разных энкодера) — разные позиции.\n"
+            . "   Нет таких фото — [].\n\n";
 
         $intro .= "═══ ФОРМАТ ОТВЕТА ═══\n"
             . "Строго JSON без markdown:\n"
@@ -2259,7 +2306,7 @@ PROMPT;
                 . '{"index":0,"main_subject":"...","secondary_items":["...","..."],"has_readable_marking":true}'
             . '],'
             . '"items":['
-                . '{"name":"...","brand":"...","article":"...","qty":1,"unit":"шт.","invoice_index":1,"note":null,"image_index":0}'
+                . '{"name":"...","brand":"...","article":"...","qty":1,"unit":"шт.","invoice_index":1,"note":null,"image_index":0,"image_indexes":[0]}'
             . ']}'
             . "\n\nПоле invoice_index ОБЯЗАТЕЛЬНОЕ для каждого item. Дефолт = 1\n"
             . "(один счёт). Для multi-invoice выставляй 1/2/3... по блокам.";
@@ -2315,12 +2362,7 @@ PROMPT;
                 // Phase 2: резолв image_index → конкретный email_attachments.id.
                 // Если Vision не вернул index, вернул не-int, или out-of-range —
                 // FK остаётся null (заглушка в UI).
-                $idx = $item['image_index'] ?? null;
-                $attId = null;
-                if (is_int($idx) && $idx >= 0 && $idx < count($attachmentIds)) {
-                    $attId = $attachmentIds[$idx] ?? null;
-                }
-                $normalized['email_attachment_id'] = $attId;
+                [$normalized['email_attachment_id'], $normalized['email_attachment_ids']] = self::photoAttachments($item, $attachmentIds);
 
                 return $normalized;
             }, self::splitMultiArticleItems($items)),
@@ -2455,6 +2497,7 @@ PROMPT;
                 $merged = $result[$winnerIdx]['__merged_from'] ?? [];
                 $merged[] = $droppedEntry;
                 $result[$winnerIdx]['__merged_from'] = $merged;
+                $result[$winnerIdx]['email_attachment_ids'] = self::photoIds($result[$winnerIdx], $item);
                 continue;
             }
             $seenIndex[$key] = count($result);
