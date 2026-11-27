@@ -458,6 +458,9 @@ return [
         'client_phrases_limit' => (int) env('CATALOG_NAME_MATCH_CLIENT_PHRASES_LIMIT', 5),
         // Модели-реранку у каждого кандидата — до 3 формулировок клиентов, по которым его уже выдавали.
         'rerank_client_examples' => (bool) env('CATALOG_NAME_MATCH_RERANK_CLIENT_EXAMPLES', true),
+        // Варианты одной модели (CatalogSiblingService): соседнюю карточку выбирают признаки из текста клиента
+        // (символ кнопки, сторона, цвет, «с/без»); не названный признак — «не хватает: …» вместо догадки.
+        'variants_enabled' => (bool) env('CATALOG_NAME_MATCH_VARIANTS', true),
         // Только для проверки на истории (catalog:name-match-eval): формулировки с request_item_id < N.
         'phrases_before_item_id' => null,
     ],

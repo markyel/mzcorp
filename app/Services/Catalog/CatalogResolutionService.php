@@ -388,6 +388,14 @@ class CatalogResolutionService
         $svc = app(\App\Services\Catalog\CatalogEmbeddingService::class);
         $match = $svc->matchByRequestItem($item);
         if ($match === null) {
+            // Карточка из группы вариантов не определилась текстом клиента — записываем, чего не хватает
+            // (карточка позиции покажет вопрос клиенту), вместо молчаливого «не привязано».
+            if ($svc->lastMissing !== []) {
+                $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+                $payload['catalog_missing'] = ['at' => now()->toIso8601String(), 'items' => $svc->lastMissing];
+                $item->forceFill(['quality_assessment_payload' => $payload])->saveQuietly();
+            }
+
             return false;
         }
 
@@ -657,6 +665,7 @@ class CatalogResolutionService
         }
 
         $payload = is_array($item->quality_assessment_payload) ? $item->quality_assessment_payload : [];
+        unset($payload['catalog_missing']); // позиция привязана — «не хватает» больше не актуально
 
         // Маркер метода для DB-аналитики и точечного rollback'а.
         $payload['catalog_match'] = array_merge([

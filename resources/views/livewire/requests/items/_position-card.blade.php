@@ -230,6 +230,17 @@
                 </div>
             @endif
 
+            {{-- Подбор остановился на группе вариантов одной модели: клиент не назвал признак, которым карточки
+                 различаются (символ кнопки, подсветка…). Вопрос клиенту и варианты из каталога. --}}
+            @php $catalogMissing = ! $ci ? (($item->quality_assessment_payload ?? [])['catalog_missing']['items'] ?? []) : []; @endphp
+            @foreach($catalogMissing as $miss)
+                <div class="text-[11.5px] mt-0.5" style="color: var(--warning-700, #b45309)"
+                     title="{{ $miss['question'] ?? '' }}">
+                    ❔ Не хватает для подбора: <b>{{ $miss['name'] ?? '' }}</b>
+                    @if(! empty($miss['options']))<span class="text-fg-3"> — в каталоге: {{ implode(', ', array_slice($miss['options'], 0, 10)) }}@if(count($miss['options']) > 10) …@endif</span>@endif
+                </div>
+            @endforeach
+
             {{-- Phase 2.1 — Строка 4: маппинг наследования.
                  child:  «↻ было в M-NNNN · поз. N · qty X шт» (с qty delta если отличается).
                  parent: «↻ продолжена в M-NNNN[, M-NNNN]» (children, ссылающиеся на эту позицию).

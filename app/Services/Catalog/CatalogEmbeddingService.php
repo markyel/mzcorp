@@ -1248,7 +1248,99 @@ class CatalogEmbeddingService
         return $out;
     }
 
+    /**
+     * Чего не хватило для однозначного выбора — заполняется, когда подбор вернул null, потому что соседние
+     * карточки (варианты одной модели: символ кнопки, сторона, цвет…) текстом клиента не различаются.
+     *
+     * @var list<array{name: string, question: string, options: list<string>}>
+     */
+    public array $lastMissing = [];
+
+    /** @var list<array<string, mixed>> кандидаты, прошедшие фильтры, — для поиска соседей, когда модель отклонила всех */
+    private array $lastSafe = [];
+
     public function matchByRequestItem(RequestItem $item, ?float $thresholdOverride = null): ?array
+    {
+        $this->lastMissing = [];
+        $this->lastSafe = [];
+        $match = $this->matchByRequestItemRaw($item, $thresholdOverride);
+        if (! (bool) app_setting('catalog.name_match.variants_enabled', config('services.catalog_name_match.variants_enabled', true))) {
+            return $match;
+        }
+        if ($match === null) {
+            return $this->rescueBySibling($item);
+        }
+
+        // Варианты одной модели: сверяем существенные признаки соседних карточек с текстом клиента.
+        try {
+            $variant = app(CatalogSiblingService::class)->resolve($item, $match['catalog']);
+        } catch (\Throwable $e) {
+            Log::warning('CatalogEmbeddingService: sibling resolve failed (non-fatal)', ['request_item_id' => $item->id, 'error' => $e->getMessage()]);
+
+            return $match;
+        }
+        if ($variant['catalog'] === null) {
+            $this->lastMissing = $variant['missing'];
+
+            return null;
+        }
+        if ($variant['changed']) {
+            Log::info('CatalogEmbeddingService: variant chosen by client text', [
+                'request_item_id' => $item->id, 'model_pick' => $match['catalog']->sku, 'variant' => $variant['catalog']->sku,
+            ]);
+            $match['catalog'] = $variant['catalog'];
+            $match['variant_resolved'] = true;
+        }
+
+        return $match;
+    }
+
+    /**
+     * Модель отклонила всех кандидатов: нужная карточка часто — сосед лучшего кандидата, не попавший в выдачу
+     * (кнопки DMG BFBX «2», «-2», «12» нашлись, а «ЗАКРЫТИЕ» — нет). Клиент назвал признак (надпись, этаж,
+     * сторону), и у соседа он совпадает — такого соседа проверяет модель, как единственного кандидата. Клиент
+     * признака не назвал, а лучший кандидат очень похож — «не хватает: …» для менеджера, без привязки.
+     */
+    private function rescueBySibling(RequestItem $item): ?array
+    {
+        $top = $this->lastSafe[0] ?? null;
+        if ($top === null) {
+            return null;
+        }
+        try {
+            $variant = app(CatalogSiblingService::class)->resolve($item, $top['catalog']);
+        } catch (\Throwable $e) {
+            Log::warning('CatalogEmbeddingService: sibling rescue failed (non-fatal)', ['request_item_id' => $item->id, 'error' => $e->getMessage()]);
+
+            return null;
+        }
+        if ($variant['catalog'] === null) {
+            if ((float) $top['similarity'] >= 0.85) {
+                $this->lastMissing = $variant['missing'];
+            }
+
+            return null;
+        }
+        if (! $variant['changed']) {
+            return null; // сам лучший кандидат модель уже отклонила
+        }
+        /** @var CatalogItem $sibling */
+        $sibling = $variant['catalog'];
+        $decision = $this->validateMatchWithLlm($item, $sibling, (float) $top['similarity']);
+        if ($decision === null || $decision['same'] !== true) {
+            return null;
+        }
+        Log::info('CatalogEmbeddingService: sibling by client feature approved', [
+            'request_item_id' => $item->id, 'top' => $top['catalog']->sku, 'sibling' => $sibling->sku,
+        ]);
+
+        return $this->buildMatchResult(
+            ['catalog' => $sibling, 'similarity' => (float) $top['similarity'], 'method' => 'sibling'],
+            llmValidation: 'approved_sibling', llmReason: $decision['reason'] ?? null,
+        ) + ['variant_resolved' => true];
+    }
+
+    private function matchByRequestItemRaw(RequestItem $item, ?float $thresholdOverride = null): ?array
     {
         $threshold = $thresholdOverride ?? (float) app_setting(
             'catalog.name_match.threshold',
@@ -1311,6 +1403,7 @@ class CatalogEmbeddingService
             }
             $safe[] = $c;
         }
+        $this->lastSafe = $safe;
         if ($safe === []) {
             Log::info('CatalogEmbeddingService: all candidates filtered out by safety', [
                 'request_item_id' => $item->id,
