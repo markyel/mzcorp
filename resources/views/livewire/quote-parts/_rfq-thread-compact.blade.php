@@ -8,6 +8,24 @@
     $supName = (string) (($supplierNames[$s['external_id'] ?? ''] ?? null) ?: ($s['external_id'] ?? 'Поставщик'));
 @endphp
 <div style="padding: 2px 4px 6px">
+    {{-- Файлы, ушедшие поставщику с самим запросом: фото из каталога и загруженные снабженцем. --}}
+    @php $rfqFiles = array_values(array_filter((array) ($rfq->snapshot['attachments'] ?? []), 'is_array')); @endphp
+    @if($rfqFiles !== [])
+        <div class="flex flex-wrap items-center gap-1.5 text-[11.5px] text-fg-3" style="margin: 2px 0 8px">
+            <span>📎 С запросом ушло:</span>
+            @foreach($rfqFiles as $f)
+                @php
+                    $attUrl = route('quoteparts.rfq-attachment', [$rfq->remote_id, (int) ($f['index'] ?? $loop->index)]);
+                    $attImage = $isImage($f);
+                @endphp
+                @include('partials.file-link', [
+                    'url' => $attUrl, 'name' => (string) ($f['name'] ?? 'файл'), 'mime' => $f['mime'] ?? null,
+                    'fileClass' => $attImage ? '' : 'chip chip-neutral max-w-[220px] truncate',
+                    'fileLabel' => $attImage ? '<img src="'.e($attUrl).'" alt="'.e($f['name'] ?? '').'" loading="lazy" style="height:44px;width:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">' : null,
+                ])
+            @endforeach
+        </div>
+    @endif
     @foreach($thread as $m)
         @php
             $dir = $m['direction'] ?? 'event';

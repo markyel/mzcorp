@@ -350,6 +350,25 @@ trait ComposesSupplierPriceRequest
         return Supplier::query()->whereIn('id', $ids)->where('language', 'en')->exists();
     }
 
+    /**
+     * Выбранные позиции без фото в каталоге: «приложить фото» по ним ничего не приложит — предупреждаем до
+     * отправки, а не молчим.
+     *
+     * @return list<string> M-артикулы
+     */
+    #[Computed]
+    public function positionsWithoutPhoto(): array
+    {
+        $cids = $this->selectedCids();
+        if ($cids === []) {
+            return [];
+        }
+
+        return CatalogItem::query()->whereIn('id', $cids)
+            ->where(fn ($q) => $q->whereNull('photo_url')->orWhere('photo_url', ''))
+            ->orderBy('sku')->pluck('sku')->all();
+    }
+
     /** @return array<int, int> выбранные catalog_item_id */
     private function selectedCids(): array
     {

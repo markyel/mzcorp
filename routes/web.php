@@ -505,6 +505,11 @@ Route::middleware('auth')->group(function () {
         ->whereNumber(['rfq', 'message', 'index'])
         ->name('quoteparts.rfq-file');
 
+    // Файл, ушедший с самим запросом (фото из каталога, загруженное снабженцем).
+    Route::get('/dashboard/quoteparts/rfqs/{rfq}/attachments/{index}', \App\Http\Controllers\QuoteParts\RfqAttachmentController::class)
+        ->whereNumber(['rfq', 'index'])
+        ->name('quoteparts.rfq-attachment');
+
     // Раздел «IQOT» — анализ цен конкурентов: пул позиций (из проигранных КП
     // + ручные из каталога), статусы submission и отчёты по позициям. Снабжению открыт 26.11.2026.
     Route::get('/dashboard/iqot', function () {

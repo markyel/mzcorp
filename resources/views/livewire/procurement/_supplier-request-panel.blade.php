@@ -246,9 +246,15 @@
                         <div class="text-[11px] text-emerald-700 mt-1">Прикреплено файлов: {{ count($rfqFiles) }}</div>
                     @endif
                     <label class="flex items-center gap-1.5 mt-2 text-[11.5px] text-fg-2 cursor-pointer">
-                        <input type="checkbox" wire:model="attachCatalogPhotos">
+                        <input type="checkbox" wire:model.live="attachCatalogPhotos">
                         Приложить фото выбранных позиций из каталога
                     </label>
+                    @if($attachCatalogPhotos && count($this->positionsWithoutPhoto))
+                        <div class="text-[11.5px] mt-1" style="color: #b45309">
+                            ⚠ Нет фото в каталоге: {{ implode(', ', array_slice($this->positionsWithoutPhoto, 0, 12)) }}@if(count($this->positionsWithoutPhoto) > 12) и ещё {{ count($this->positionsWithoutPhoto) - 12 }}@endif
+                            — по этим позициям фото не уйдёт; приложите своё в «Фото / файлы».
+                        </div>
+                    @endif
                 </div>
 
                 {{-- Мониторинг цен: позиции встанут на регулярный перезапрос тем же

@@ -613,6 +613,25 @@ class QuotePartsClient
         return [$response->body(), $name, (string) ($response->header('Content-Type') ?: 'application/octet-stream')];
     }
 
+    /**
+     * Файл, ушедший поставщикам с самим запросом (фото из каталога, загруженное снабженцем).
+     *
+     * @return array{0:string, 1:string, 2:string} [содержимое, имя, тип]
+     */
+    public function rfqAttachment(int $rfqId, int $index): array
+    {
+        $response = $this->http()->get('/api/v1/rfqs/'.$rfqId.'/attachments/'.$index);
+        if (! $response->successful()) {
+            throw new RuntimeException('QuoteParts request attachment: HTTP '.$response->status());
+        }
+        $name = 'file';
+        if (preg_match('/filename\*?=(?:UTF-8\'\')?"?([^";]+)"?/i', (string) $response->header('Content-Disposition'), $m)) {
+            $name = rawurldecode($m[1]);
+        }
+
+        return [$response->body(), $name, (string) ($response->header('Content-Type') ?: 'application/octet-stream')];
+    }
+
     /** Фото предложения поставщика: [содержимое, тип]. @return array{0:string, 1:string} */
     public function offerPhoto(int $offerId, int $index): array
     {
