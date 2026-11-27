@@ -1575,8 +1575,12 @@ class Client extends Component
         // доступные. Поиск поверх работает. Бейджи папок в сайдбаре считаются
         // без этого фильтра и по выбранному ящику (ignoreRequestFilter).
         if ($requestMode) {
+            // Плюс письмо-основание: у наследника, созданного из письма в закрытой заявке, оно остаётся за
+            // родителем (MZ2026-03308 ← M-2026-19591) и в «письма заявки» не попадало.
+            $sourceId = \App\Models\Request::query()->whereKey($this->requestId)->value('email_message_id');
             $q->where('email_messages.is_draft', false)
-                ->where('email_messages.related_request_id', $this->requestId);
+                ->where(fn ($w) => $w->where('email_messages.related_request_id', $this->requestId)
+                    ->when($sourceId, fn ($w2) => $w2->orWhere('email_messages.id', $sourceId)));
             $this->applySearch($q);
 
             return $q;
