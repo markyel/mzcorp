@@ -383,14 +383,18 @@ class RequestSupplierOverview
                     continue;
                 }
                 $comment = null;
+                $price = (float) $r['price'];
                 if ($r['source'] === 'email' && ($so = $mail[$r['ref']] ?? null)) {
                     $comment = PriceExportService::mailComment($so->valid_until_text, $so->raw_quote);
                 } elseif ($r['source'] === 'quoteparts' && ($o = $qp[$r['ref']] ?? null)) {
                     $comment = $o->export_comment ?? PriceExportService::offerComment($o);
+                    // В 1С — цена для 1С (ручная / пересчитанная на единицу), как в «Актуализации цен»; в сравнении
+                    // остаётся цена поставщика (MZ2026-02840: ручные 96 USD ушли как 110).
+                    $price = (float) ($o->exportPrice() ?? $price);
                 }
                 $out->push([
                     'cid' => (int) $p['cid'], 'sku' => (string) $p['sku'], 'key' => $r['key'] ?? null,
-                    'fallback' => (string) $r['supplier'], 'price' => (float) $r['price'], 'currency' => $r['currency'] ?: 'RUB',
+                    'fallback' => (string) $r['supplier'], 'price' => $price, 'currency' => $r['currency'] ?: 'RUB',
                     'date' => $r['at'] instanceof Carbon ? $r['at'] : now(), 'comment' => $comment,
                 ]);
             }
