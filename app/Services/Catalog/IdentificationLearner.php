@@ -91,10 +91,12 @@ class IdentificationLearner
             $itemType[$k + 1] = $t ? $types->firstWhere('key', $t['key']) : null;
             $lines[] = ($k + 1).') '.trim($it->parsed_name.($it->parsed_brand ? ' · '.$it->parsed_brand : '').($it->parsed_article ? ' · арт. '.$it->parsed_article : ''));
         }
+        // Весь справочник, не только типы позиций: деталь, не узнанная по позиции, иначе плодит дубли
+        // известных вопросов («Диаметр каната» при «Диаметр и конструкция», пробный прогон 29.11.2026).
         $known = [];
-        foreach (collect($itemType)->filter()->unique('id') as $t) {
+        foreach ($types->where('is_active', true) as $t) {
             foreach ($t->hints as $h) {
-                $known[] = $h->id.': ['.$t->name.'] '.$h->label.' — '.$h->question;
+                $known[] = $h->id.': ['.$t->name.'] '.$h->label;
             }
         }
 
@@ -107,7 +109,7 @@ class IdentificationLearner
         $r = $this->chat->chat([
             ['role' => 'system', 'content' => self::prompt()],
             ['role' => 'user', 'content' => "ПОЗИЦИИ ЗАЯВКИ:\n".($lines ? implode("\n", $lines) : '(нет)')
-                ."\n\nИЗВЕСТНЫЕ ВОПРОСЫ (id: [тип] название — формулировка):\n".($known ? implode("\n", $known) : '(нет)')
+                ."\n\nИЗВЕСТНЫЕ ВОПРОСЫ (id: [тип] название):\n".($known ? implode("\n", $known) : '(нет)')
                 ."\n\nПИСЬМО МЕНЕДЖЕРА:\n".mb_substr($text, 0, 2500)],
         ], 'gpt-4o-mini', ['response_format' => ['type' => 'json_object'], 'temperature' => 0, 'max_tokens' => 2500]);
         $questions = (array) (json_decode((string) ($r['content'] ?? ''), true)['questions'] ?? []);
@@ -240,7 +242,9 @@ class IdentificationLearner
   выбор аналога/оригинала; other — прочее;
 - attribute: что спрашивают — коротко (символ на кнопке, длина, напряжение катушки, фото шильдика, марка лифта…);
 - question: формулировка менеджера коротко;
-- known_id: если по смыслу это один из ИЗВЕСТНЫХ ВОПРОСОВ того же типа детали — его id, иначе null;
+- known_id: id ИЗВЕСТНОГО ВОПРОСА того же типа детали про тот же признак, даже если спрошено другими словами
+  или уже («диаметр каната» → «Диаметр и конструкция», «точная длина троса» → «Длина / нарезка», «фото
+  шильдика» → «Фото таблички»); новый признак, которого в списке нет, — null;
 - label: если known_id = null — короткое название вопроса, 2–4 слова (как «Фото таблички», «Напряжение катушки»);
 - client_question: если known_id = null — вежливая формулировка для клиента в общем виде, без имён, номеров
   позиций и деталей этой заявки («Пришлите, пожалуйста, фото таблички с двигателя.»).
