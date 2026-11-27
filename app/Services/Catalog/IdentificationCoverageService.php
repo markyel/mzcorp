@@ -29,6 +29,9 @@ class IdentificationCoverageService
 
     private const LETTERS = 3;
 
+    /** Версия правил проверки: поменяли промпт — поднять, позиции открытых заявок перепроверятся. */
+    private const VERSION = 2;
+
     public function __construct(
         private readonly IdentificationHintService $hints,
         private readonly OpenAIChatService $chat,
@@ -53,6 +56,7 @@ class IdentificationCoverageService
             ->where('ri.is_active', true)->whereNull('ri.catalog_item_id')->whereIn('r.status', $statuses)
             ->where(function ($q) use ($handbookAt) {
                 $q->whereNull('ri.identification_coverage')
+                    ->orWhereRaw("coalesce((ri.identification_coverage->>'version')::int, 0) < ?", [self::VERSION])
                     ->orWhereRaw("(ri.identification_coverage->>'checked_at')::timestamptz < ri.updated_at")
                     ->orWhereRaw("(ri.identification_coverage->>'checked_at')::timestamptz < ?", [$handbookAt ?? '1970-01-01'])
                     ->orWhereExists(fn ($e) => $e->selectRaw('1')->from('email_messages as m')
@@ -163,6 +167,7 @@ class IdentificationCoverageService
     public static function basis(RequestItem $item, ?array $type, Collection $letters): string
     {
         return sha1(json_encode([
+            self::VERSION,
             $item->parsed_name, $item->parsed_article, $item->parsed_brand, $item->supplier_note, $item->image_attachment_id,
             $type === null ? null : [$type['key'], array_map(fn ($h) => [$h['id'] ?? null, $h['label'], $h['question'], $h['goal'] ?? null], $type['hints'])],
             $letters->pluck('id')->all(),
@@ -185,6 +190,7 @@ class IdentificationCoverageService
 
     private function save(RequestItem $item, array $coverage): void
     {
+        $coverage['version'] = self::VERSION;
         // Мимо Eloquent: проверка — не правка позиции, updated_at не трогаем (иначе проверка будит сама себя).
         DB::table('request_items')->where('id', $item->id)->update(['identification_coverage' => json_encode($coverage, JSON_UNESCAPED_UNICODE)]);
         $item->setRawAttributes(array_merge($item->getAttributes(), ['identification_coverage' => json_encode($coverage, JSON_UNESCAPED_UNICODE)]), true);
