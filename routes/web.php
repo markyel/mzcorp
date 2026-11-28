@@ -534,6 +534,19 @@ Route::middleware('auth')->group(function () {
             return view('catalog.identification-hints');
         })->name('catalog.identification');
 
+        // Макет «Мой план» на срезе данных (tools/plan-mockup): файл с письмами клиентов кладётся на сервер
+        // в storage/app/private/plan-mockup/ вручную — в репозиторий (публичный) он не попадает.
+        Route::get('/dashboard/plan-mockup', function () {
+            $path = \Illuminate\Support\Facades\Storage::disk('local')->path('plan-mockup/plan-mockup.html');
+            abort_unless(is_file($path), 404);
+
+            return response()->file($path, [
+                'Content-Type' => 'text/html; charset=utf-8',
+                'Cache-Control' => 'no-store',
+                'X-Robots-Tag' => 'noindex, nofollow',
+            ]);
+        })->name('plan-mockup');
+
         Route::get('/dashboard/mail-rules', function () {
             return view('admin.mail-rules.index');
         })->name('mail-rules.index');
