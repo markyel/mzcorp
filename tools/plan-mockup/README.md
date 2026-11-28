@@ -23,6 +23,14 @@
 2. Страница: `php tools/plan-mockup/build.php` → `tools/plan-mockup/plan-mockup-v2.html`
    (оформление — `design/colors_and_type.css` и компоненты `design/ui_kits/crm`).
 
+3. На сайт (РОП, директорат, админ — `https://mzcorp.ru/dashboard/plan-mockup`, маршрут `plan-mockup`): файл кладётся
+   на сервер напрямую, в git не попадает:
+
+   ```bash
+   scp tools/plan-mockup/plan-mockup-v2.html mzcorp:/tmp/plan-mockup.html
+   ssh mzcorp 'cd /var/www/mzcorp && install -o www-data -g www-data -m 640 /tmp/plan-mockup.html storage/app/private/plan-mockup/plan-mockup.html && rm /tmp/plan-mockup.html'
+   ```
+
 ## Устройство
 
 - `export.php` — заявки менеджера: статус, отметка внимания (AttentionService), КП/счёт, последние письма
